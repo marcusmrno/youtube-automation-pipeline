@@ -1,4 +1,6 @@
 anthropic>=0.40.0
+claude-agent-sdk>=0.0.10
+google-genai>=1.0.0
 flask>=3.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
