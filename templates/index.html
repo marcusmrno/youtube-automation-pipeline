@@ -1,0 +1,2223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #09090e;
+  --surface:     #111119;
+  --surface-2:   #161622;
+  --border:      #1e1e2e;
+  --border-2:    #252538;
+  --text:        #e8e8f2;
+  --muted:       #5a5a78;
+  --dim:         #2e2e44;
+  --blue:        #3b82f6;
+  --blue-soft:   #1d3a6e;
+  --blue-glow:   rgba(59,130,246,0.14);
+  --green:       #22c55e;
+  --green-soft:  #0d2a1a;
+  --red:         #ef4444;
+  --red-soft:    #2a0d0d;
+  --amber:       #f59e0b;
+  --sans:        'Inter', system-ui, sans-serif;
+  --display:     'Space Grotesk', sans-serif;
+  --mono:        'JetBrains Mono', monospace;
+  --radius:      10px;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+/* ── Layout ── */
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Header ── */
+.header {
+  padding: 18px 28px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.header-top {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.header-eyebrow {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+.header-title {
+  font-family: var(--display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.header-badge {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--muted);
+  letter-spacing: 1px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+}
+.status-dot.idle  { background: var(--dim); }
+.status-dot.running { background: var(--blue); box-shadow: 0 0 6px var(--blue); animation: pulse-blue 1.5s infinite; }
+.status-dot.done  { background: var(--green); }
+.status-dot.error { background: var(--red); }
+
+/* ── Stage Tracker ── */
+.stage-tracker {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0;
+  overflow-x: auto;
+  gap: 0;
+  scrollbar-width: none;
+}
+.stage-tracker::-webkit-scrollbar { display: none; }
+
+.stage-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 64px;
+  padding-bottom: 10px;
+  position: relative;
+}
+.stage-node {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  border: 1.5px solid var(--border-2);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+.stage-label {
+  font-family: var(--display);
+  font-size: 0.55rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition: color 0.3s;
+  white-space: nowrap;
+}
+
+.stage-item.active .stage-node {
+  background: var(--blue);
+  border-color: var(--blue);
+  box-shadow: 0 0 10px var(--blue-glow), 0 0 4px var(--blue);
+  animation: pulse-blue 1.5s infinite;
+}
+.stage-item.active .stage-label { color: var(--blue); }
+.stage-item.done .stage-node {
+  background: var(--green);
+  border-color: var(--green);
+  animation: none;
+  box-shadow: none;
+}
+.stage-item.done .stage-label { color: var(--muted); }
+
+.stage-connector {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  position: relative;
+  margin-bottom: 13px;
+  min-width: 32px;
+  overflow: hidden;
+}
+.stage-connector-fill {
+  position: absolute;
+  top: 0; left: 0; height: 100%;
+  width: 0%;
+  background: var(--green);
+  transition: width 0.6s ease;
+}
+
+/* ── Main content ── */
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  padding: 20px 24px;
+  gap: 16px;
+}
+
+/* ── Left panel ── */
+.left-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Input card ── */
+.input-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  flex-shrink: 0;
+}
+.input-label {
+  font-family: var(--display);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+  display: block;
+}
+.topic-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  padding: 10px 14px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  line-height: 1.5;
+}
+.topic-input::placeholder { color: var(--dim); }
+.topic-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-glow);
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn {
+  border: none;
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  padding: 9px 16px;
+  transition: all 0.15s;
+  outline: none;
+}
+.btn-primary {
+  background: var(--blue);
+  color: #fff;
+  flex: 1;
+}
+.btn-primary:hover { background: #2563eb; box-shadow: 0 0 20px var(--blue-glow); }
+.btn-primary:disabled { background: var(--dim); color: var(--muted); cursor: not-allowed; box-shadow: none; }
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { border-color: var(--border-2); color: var(--text); }
+.btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Log area ── */
+.log-area {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+/* ── Log section (one per stage) ── */
+.log-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.log-section.active { border-color: rgba(59,130,246,0.3); }
+.log-section.done   { border-color: var(--border); }
+.log-section.error  { border-color: rgba(239,68,68,0.3); }
+
+.log-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.log-section-header:hover { background: rgba(255,255,255,0.02); }
+
+.log-section-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex-shrink: 0;
+  transition: all 0.3s;
+}
+.log-section.active .log-section-dot {
+  background: var(--blue);
+  box-shadow: 0 0 6px var(--blue);
+  animation: pulse-blue 1.5s infinite;
+}
+.log-section.done .log-section-dot { background: var(--green); animation: none; }
+.log-section.error .log-section-dot { background: var(--red); animation: none; }
+
+.log-section-name {
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: 1;
+}
+.log-section.active .log-section-name { color: var(--blue); }
+.log-section.done .log-section-name   { color: var(--muted); }
+
+.log-section-count {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--dim);
+  margin-right: 4px;
+}
+.log-section-chevron {
+  font-size: 0.6rem;
+  color: var(--dim);
+  transition: transform 0.2s;
+}
+.log-section.open .log-section-chevron { transform: rotate(180deg); }
+
+.log-section-body {
+  display: none;
+  border-top: 1px solid var(--border);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.log-section.open .log-section-body { display: block; }
+
+.log-lines {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.log-line {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.7;
+  color: var(--muted);
+  word-break: break-word;
+}
+.log-line.success { color: var(--green); }
+.log-line.error   { color: var(--red); }
+.log-line.warn    { color: var(--amber); }
+.log-line.info    { color: #93c5fd; }
+.log-line.dim     { color: var(--dim); }
+
+/* ── Empty log placeholder ── */
+.log-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+/* ── Right sidebar ── */
+.right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  min-width: 0;
+}
+.sidebar-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+/* ── Tabs ── */
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 10px;
+  font-family: var(--display);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  margin-bottom: -1px;
+}
+.tab-btn:hover { color: var(--muted); }
+.tab-btn.active {
+  color: var(--text);
+  border-bottom-color: var(--blue);
+}
+.tab-pane { display: none; flex-direction: column; flex: 1; overflow: hidden; padding: 14px; gap: 8px; }
+.tab-pane.active { display: flex; }
+
+/* ── Sidebar inputs ── */
+.sidebar-label {
+  font-family: var(--display);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: block;
+}
+.sidebar-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  padding: 7px 10px;
+  outline: none;
+  cursor: pointer;
+}
+.sidebar-select:focus { border-color: var(--blue); }
+.sidebar-textarea {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.6;
+  padding: 10px;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+.sidebar-textarea:focus { border-color: var(--blue); color: var(--text); }
+.sidebar-status {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  min-height: 16px;
+}
+.sidebar-btn-row { display: flex; gap: 6px; flex-shrink: 0; }
+.btn-sm {
+  flex: 1;
+  border: none;
+  border-radius: 7px;
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  padding: 7px 10px;
+  transition: all 0.15s;
+  outline: none;
+}
+.btn-sm-ghost {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--border);
+}
+.btn-sm-ghost:hover { color: var(--muted); border-color: var(--border-2); }
+.btn-sm-load {
+  background: var(--blue-soft);
+  color: #93c5fd;
+  border: 1px solid #1a3a6e;
+}
+.btn-sm-load:hover { background: #1e3d7a; }
+.btn-sm-save {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid #153a24;
+}
+.btn-sm-save:hover { background: #11321e; }
+
+/* ── File list ── */
+.file-list {
+  flex: 1;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.9;
+  padding: 4px 0;
+}
+.file-entry { padding: 1px 0; word-break: break-all; }
+.file-entry:hover { color: var(--text); }
+.no-files { color: var(--dim); font-style: italic; }
+
+/* ── Review overlay ── */
+.review-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9,9,14,0.7);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: none;
+  align-items: stretch;
+  justify-content: center;
+}
+.review-overlay.visible { display: flex; }
+
+.review-panel {
+  width: 100%;
+  max-width: 1100px;
+  background: var(--surface);
+  border-left: 1px solid rgba(59,130,246,0.3);
+  border-right: 1px solid rgba(59,130,246,0.3);
+  box-shadow: 0 0 60px rgba(0,0,0,0.6);
+  padding: 22px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: slide-up 0.3s ease;
+  overflow: hidden;
+}
+
+@keyframes slide-up {
+  from { transform: translateY(40px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.review-indicator {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px var(--blue);
+  animation: pulse-blue 1.5s infinite;
+}
+.review-title {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+.review-subtitle {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+.review-script {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #c8c8dc;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.7;
+  padding: 14px;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+.review-script:focus { border-color: var(--blue); }
+.review-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.btn-approve {
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-approve:hover { background: #2563eb; box-shadow: 0 0 20px var(--blue-glow); }
+.btn-reject {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.82rem;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-reject:hover { border-color: var(--red); color: var(--red); }
+.btn-revise {
+  background: var(--surface-2);
+  color: var(--amber);
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.82rem;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-revise:hover { border-color: var(--amber); background: rgba(245,158,11,0.08); }
+.btn-revise:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Mode toggle ── */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 12px;
+}
+.mode-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mode-btn:hover { color: var(--text); }
+.mode-btn.active {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+}
+
+/* ── Image gallery overlay ── */
+.gallery-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9,9,14,0.85);
+  backdrop-filter: blur(6px);
+  z-index: 200;
+  display: none;
+  flex-direction: column;
+}
+.gallery-overlay.visible { display: flex; }
+
+.gallery-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface);
+}
+.gallery-title {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.gallery-run-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+  flex: 1;
+}
+.gallery-model-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  outline: none;
+  cursor: pointer;
+}
+.gallery-model-select:focus { border-color: var(--blue); }
+.gallery-sel-count {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.btn-regen-selected {
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-regen-selected:hover { background: #2563eb; box-shadow: 0 0 16px var(--blue-glow); }
+.btn-regen-selected:disabled { background: var(--dim); cursor: not-allowed; }
+.btn-gallery-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-gallery-close:hover { border-color: var(--red); color: var(--red); }
+
+.gallery-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.img-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+  user-select: none;
+}
+.img-card:hover { border-color: var(--border-2); }
+.img-card.selected {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-glow);
+}
+.img-card.regenerating {
+  border-color: var(--amber);
+  opacity: 0.7;
+}
+.img-card.regen-done {
+  border-color: var(--green);
+}
+
+.img-card-thumb {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+  background: var(--bg);
+}
+.img-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+}
+.img-card-num {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+.img-card-checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border-2);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  color: #fff;
+  background: transparent;
+  flex-shrink: 0;
+  transition: all 0.1s;
+}
+.img-card.selected .img-card-checkbox {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+.img-card.selected .img-card-checkbox::after { content: '✓'; }
+
+.img-card-regen {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(9,9,14,0.75);
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 0.6rem;
+  padding: 3px 7px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.img-card:hover .img-card-regen { opacity: 1; }
+.img-card-regen:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+.gallery-status-bar {
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+.gallery-empty {
+  grid-column: 1/-1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 60px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+
+/* ── Lightbox ── */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5,5,10,0.92);
+  backdrop-filter: blur(8px);
+  z-index: 300;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-overlay.visible { display: flex; }
+
+.lightbox-inner {
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 1100px);
+  max-height: 95vh;
+  gap: 0;
+}
+
+.lightbox-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  flex-shrink: 0;
+}
+.lightbox-num {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  font-weight: 600;
+}
+.lightbox-ts {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+.lightbox-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.lightbox-nav-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.lightbox-nav-btn:hover { background: var(--blue); border-color: var(--blue); }
+.lightbox-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.lightbox-counter {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+  min-width: 52px;
+  text-align: center;
+}
+.btn-lightbox-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-lightbox-close:hover { border-color: var(--red); color: var(--red); }
+
+.lightbox-img-wrap {
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  max-height: 55vh;
+  overflow: hidden;
+}
+.lightbox-img {
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+  display: block;
+}
+
+.lightbox-prompt-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+.lightbox-prompt-label {
+  font-family: var(--display);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+  display: block;
+}
+.lightbox-prompt-text {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.65;
+  max-height: 130px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.lightbox-prompt-text::-webkit-scrollbar { width: 4px; }
+.lightbox-prompt-text::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+
+/* ── Animations ── */
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 4px var(--blue), 0 0 0 0 rgba(59,130,246,0.4); }
+  50%       { box-shadow: 0 0 8px var(--blue), 0 0 0 5px rgba(59,130,246,0); }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Header ── -->
+  <header class="header">
+    <div class="header-top">
+      <span class="header-eyebrow">&#9654;&nbsp;&nbsp;</span>
+      <h1 class="header-title">YouTube Pipeline</h1>
+      <div class="header-badge">
+        <div class="status-dot idle" id="globalDot"></div>
+        <span id="globalStatus">Idle</span>
+      </div>
+    </div>
+
+    <!-- Stage tracker -->
+    <div class="stage-tracker" id="stageTracker">
+      <div class="stage-item" data-stage="research" id="stage-research">
+        <div class="stage-node"></div>
+        <span class="stage-label">Research</span>
+      </div>
+      <div class="stage-connector" id="conn-research-script"><div class="stage-connector-fill"></div></div>
+      <div class="stage-item" data-stage="script" id="stage-script">
+        <div class="stage-node"></div>
+        <span class="stage-label">Script</span>
+      </div>
+      <div class="stage-connector" id="conn-script-images"><div class="stage-connector-fill"></div></div>
+      <div class="stage-item" data-stage="images" id="stage-images">
+        <div class="stage-node"></div>
+        <span class="stage-label">Images</span>
+      </div>
+      <div class="stage-connector" id="conn-images-voice"><div class="stage-connector-fill"></div></div>
+      <div class="stage-item" data-stage="voice" id="stage-voice">
+        <div class="stage-node"></div>
+        <span class="stage-label">Voice</span>
+      </div>
+      <div class="stage-connector" id="conn-voice-timeline"><div class="stage-connector-fill"></div></div>
+      <div class="stage-item" data-stage="timeline" id="stage-timeline">
+        <div class="stage-node"></div>
+        <span class="stage-label">Timeline</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <div class="main">
+
+    <!-- Left panel -->
+    <div class="left-panel">
+
+      <!-- Input card -->
+      <div class="input-card">
+        <!-- Mode toggle -->
+        <div class="mode-toggle" id="modeToggle">
+          <button class="mode-btn active" id="modeTopicBtn" onclick="setMode('topic')">Topic</button>
+          <button class="mode-btn" id="modeResumeBtn" onclick="setMode('resume')">Resume</button>
+          <button class="mode-btn" id="modePalmierBtn" onclick="setMode('palmier')">⬡ Palmier</button>
+        </div>
+
+        <!-- Topic mode -->
+        <div id="modeTopicPanel">
+          <label class="input-label" for="topicInput">Topic</label>
+          <textarea
+            id="topicInput"
+            class="topic-input"
+            rows="2"
+            placeholder='e.g. "Why do humans dream"'
+          ></textarea>
+        </div>
+
+        <!-- Resume mode -->
+        <div id="modeResumePanel" style="display:none">
+          <label class="input-label">Resume Run</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <select class="topic-input" id="resumePicker" style="height:auto;padding:9px 14px" onchange="loadResumeStatus(this.value)">
+              <option value="">— select a stopped run —</option>
+            </select>
+            <button class="btn btn-ghost" style="flex-shrink:0;padding:9px 12px" onclick="refreshResumePicker()" title="Refresh">↻</button>
+          </div>
+          <div id="resumeStatusWrap" style="display:none;margin-bottom:4px;">
+            <div id="resumeStatusChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;"></div>
+            <p id="resumeStatusNote" style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);line-height:1.6;margin:0"></p>
+          </div>
+        </div>
+
+        <!-- Palmier mode -->
+        <div id="modePalmierPanel" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <div id="palmierDot" style="width:8px;height:8px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:all 0.3s;"></div>
+            <span id="palmierStatusLabel" style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);">Checking Palmier…</span>
+          </div>
+          <label class="input-label" style="margin-bottom:4px;">MCP Server URL</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <input
+              id="palmierMcpUrl"
+              type="text"
+              class="topic-input"
+              style="height:auto;padding:7px 12px;font-family:var(--mono);font-size:0.72rem;"
+              placeholder="http://127.0.0.1:19789/mcp"
+            >
+            <button class="btn btn-ghost" style="flex-shrink:0;padding:7px 12px;font-size:0.72rem;" onclick="savePalmierUrl()" id="palmierUrlSaveBtn">Save</button>
+          </div>
+          <span id="palmierUrlStatus" style="font-family:var(--mono);font-size:0.62rem;color:var(--muted);display:block;margin-bottom:8px;min-height:14px;"></span>
+          <label class="input-label">Select Project</label>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <select class="topic-input" id="palmierPicker" style="height:auto;padding:9px 14px;flex:1">
+              <option value="">— select a completed run —</option>
+            </select>
+            <button class="btn btn-ghost" style="flex-shrink:0;padding:9px 12px" onclick="refreshPalmierPicker()" title="Refresh">↻</button>
+          </div>
+          <div id="palmierProjectInfo" style="display:none;font-family:var(--mono);font-size:0.65rem;color:var(--muted);line-height:1.8;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;margin-bottom:2px;">
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="runBtn" onclick="runPipeline()">Run Pipeline</button>
+          <button class="btn btn-ghost" id="stopBtn" onclick="stopPipeline()" disabled>Stop</button>
+        </div>
+      </div>
+
+      <!-- Log area -->
+      <div class="log-area" id="logArea">
+        <div class="log-empty" id="logEmpty">
+          <span>No run yet</span>
+          <span style="color:var(--dim);font-size:0.6rem;">Enter a topic and press Run Pipeline</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right sidebar -->
+    <div class="right-panel">
+      <div class="sidebar-card">
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab('scripts')">Scripts</button>
+          <button class="tab-btn" onclick="switchTab('images')">Images</button>
+          <button class="tab-btn" onclick="switchTab('voice')">Voice</button>
+          <button class="tab-btn" onclick="switchTab('files')">Files</button>
+        </div>
+
+        <!-- Scripts tab -->
+        <div class="tab-pane active" id="tab-scripts">
+          <label class="sidebar-label">Past Runs</label>
+          <div style="display:flex;gap:6px;">
+            <select class="sidebar-select" id="scriptPicker" style="flex:1" onchange="loadScriptIntoViewer(this.value)">
+              <option value="">— select run —</option>
+            </select>
+            <button class="btn-sm btn-sm-ghost" style="flex-shrink:0;padding:7px 10px" onclick="refreshScripts()" title="Refresh">↻</button>
+          </div>
+          <span class="sidebar-status" id="scriptStatus"></span>
+          <textarea class="sidebar-textarea" id="scriptViewer" placeholder="Select a run to load its script…"></textarea>
+          <div class="sidebar-btn-row">
+            <button class="btn-sm btn-sm-load" onclick="loadIntoReviewPanel()">Load into Review</button>
+            <button class="btn-sm btn-sm-save" onclick="saveScriptEdits()">Save Edits</button>
+          </div>
+        </div>
+
+        <!-- Images tab -->
+        <div class="tab-pane" id="tab-images">
+          <label class="sidebar-label">Run</label>
+          <div style="display:flex;gap:6px;">
+            <select class="sidebar-select" id="imagePicker" style="flex:1">
+              <option value="">— select run —</option>
+            </select>
+            <button class="btn-sm btn-sm-ghost" style="flex-shrink:0;padding:7px 10px" onclick="refreshImagePicker()" title="Refresh">↻</button>
+          </div>
+          <button class="btn-sm btn-sm-load" style="margin-top:4px;flex:none;align-self:flex-start;padding:5px 12px;font-size:0.62rem;" onclick="openGallery()">Open Gallery</button>
+          <p style="font-family:var(--mono);font-size:0.62rem;color:var(--dim);line-height:1.6;margin-top:8px">
+            View generated images, select any to regenerate with your choice of model.
+          </p>
+        </div>
+
+        <!-- Voice tab -->
+        <div class="tab-pane" id="tab-voice">
+          <label class="sidebar-label">Run</label>
+          <div style="display:flex;gap:6px;">
+            <select class="sidebar-select" id="voicePicker" style="flex:1" onchange="loadVoiceover(this.value)">
+              <option value="">— select run —</option>
+            </select>
+            <button class="btn-sm btn-sm-ghost" style="flex-shrink:0;padding:7px 10px" onclick="refreshVoicePicker()" title="Refresh">↻</button>
+          </div>
+          <div id="voicePlayerWrap" style="display:none;margin-top:8px;flex-direction:column;gap:8px;">
+            <audio id="voicePlayer" controls style="width:100%;border-radius:8px;accent-color:var(--blue);background:var(--bg);"></audio>
+            <span class="sidebar-status" id="voiceStatus"></span>
+          </div>
+          <p id="voiceEmpty" style="font-family:var(--mono);font-size:0.62rem;color:var(--dim);line-height:1.6;margin-top:8px">
+            Select a run with a generated voiceover to listen.
+          </p>
+          <div style="margin-top:auto;padding-top:8px;">
+            <label class="sidebar-label" style="margin-bottom:6px;">Regenerate Voiceover</label>
+            <div style="display:flex;gap:6px;">
+              <select class="sidebar-select" id="audioRegenPicker" style="flex:1">
+                <option value="">— select run —</option>
+              </select>
+              <button class="btn-sm btn-sm-ghost" style="flex-shrink:0;padding:7px 10px" onclick="refreshAudioRegenPicker()" title="Refresh">↻</button>
+            </div>
+            <button class="btn-sm btn-sm-load" id="regenAudioBtn" style="margin-top:6px;width:100%" onclick="regenAudio()">↻ Regenerate Audio</button>
+            <span class="sidebar-status" id="audioRegenStatus" style="margin-top:4px;display:block"></span>
+          </div>
+        </div>
+
+        <!-- Files tab -->
+        <div class="tab-pane" id="tab-files">
+          <label class="sidebar-label">Output Runs</label>
+          <div style="display:flex;gap:6px;">
+            <select class="sidebar-select" id="runPicker" style="flex:1" onchange="loadRunFiles(this.value)">
+              <option value="">— select run —</option>
+            </select>
+            <button class="btn-sm btn-sm-ghost" style="flex-shrink:0;padding:7px 10px" onclick="refreshRuns()" title="Refresh">↻</button>
+          </div>
+          <div class="file-list" id="fileList">
+            <span class="no-files">Select a run above</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ── Image Gallery Overlay ── -->
+<div class="gallery-overlay" id="galleryOverlay">
+  <div class="gallery-header">
+    <span class="gallery-title">Images</span>
+    <span class="gallery-run-label" id="galleryRunLabel"></span>
+    <span class="gallery-sel-count" id="gallerySelCount">0 selected</span>
+    <select class="gallery-model-select" id="galleryModelSelect">
+      <option value="2.5-flash">2.5 Flash</option>
+      <option value="nano-banana-2" selected>Nano-banana-2</option>
+      <option value="3-pro">3 Pro</option>
+    </select>
+    <button class="btn-regen-selected" id="regenSelectedBtn" onclick="regenSelected()" disabled>Regenerate Selected</button>
+    <button class="btn-gallery-close" onclick="closeGallery()">✕ Close</button>
+  </div>
+  <div class="gallery-grid" id="galleryGrid"></div>
+  <div class="gallery-status-bar" id="galleryStatusBar"></div>
+</div>
+
+<!-- ── Image Lightbox ── -->
+<div class="lightbox-overlay" id="lightboxOverlay">
+  <div class="lightbox-inner">
+    <div class="lightbox-header">
+      <span class="lightbox-num" id="lightboxNum"></span>
+      <span class="lightbox-ts" id="lightboxTs"></span>
+      <div class="lightbox-nav">
+        <button class="lightbox-nav-btn" id="lightboxPrev" onclick="lightboxStep(-1)">&#8592;</button>
+        <span class="lightbox-counter" id="lightboxCounter"></span>
+        <button class="lightbox-nav-btn" id="lightboxNext" onclick="lightboxStep(1)">&#8594;</button>
+      </div>
+      <button class="btn-lightbox-close" onclick="closeLightbox()">✕</button>
+    </div>
+    <div class="lightbox-img-wrap">
+      <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    </div>
+    <div class="lightbox-prompt-wrap">
+      <span class="lightbox-prompt-label">Prompt</span>
+      <div class="lightbox-prompt-text" id="lightboxPrompt"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Script Review Overlay ── -->
+<div class="review-overlay" id="reviewOverlay">
+  <div class="review-panel">
+    <div class="review-header">
+      <div class="review-indicator"></div>
+      <span class="review-title">Script Review</span>
+      <span class="review-subtitle">Edit freely — then approve or reject before production begins</span>
+    </div>
+    <textarea class="review-script" id="reviewScript" style="flex:1;min-height:0;"></textarea>
+    <div style="display:flex;flex-direction:column;gap:8px;flex-shrink:0;">
+      <textarea
+        id="reviewFeedback"
+        class="review-script"
+        rows="3"
+        placeholder="Feedback for revision… e.g. 'Make the hook more provocative', 'Shorten section 3', 'Add more stats'"
+        style="resize:none;flex:none;"
+      ></textarea>
+      <div class="review-footer">
+        <button class="btn-reject" onclick="rejectScript()">Reject</button>
+        <button class="btn-revise" id="reviseBtn" onclick="reviseScript()">↻ Revise</button>
+        <button class="btn-approve" onclick="approveScript()">✓ Approve &amp; Start Production</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Mode toggle ───────────────────────────────────────────────────────────
+
+let inputMode = 'topic';
+
+function setMode(mode) {
+  inputMode = mode;
+  document.getElementById('modeTopicBtn').classList.toggle('active', mode === 'topic');
+  document.getElementById('modeResumeBtn').classList.toggle('active', mode === 'resume');
+  document.getElementById('modePalmierBtn').classList.toggle('active', mode === 'palmier');
+  document.getElementById('modeTopicPanel').style.display   = mode === 'topic'   ? '' : 'none';
+  document.getElementById('modeResumePanel').style.display  = mode === 'resume'  ? '' : 'none';
+  document.getElementById('modePalmierPanel').style.display = mode === 'palmier' ? '' : 'none';
+  if (mode === 'resume') refreshResumePicker();
+  if (mode === 'palmier') initPalmierMode();
+  const labels = { topic: 'Run Pipeline', resume: 'Resume Pipeline', palmier: 'Send to Palmier' };
+  document.getElementById('runBtn').textContent = labels[mode] || 'Run Pipeline';
+}
+
+// ── Palmier mode ──────────────────────────────────────────────────────────
+
+async function loadPalmierUrl() {
+  const res  = await fetch('/palmier_url');
+  const data = await res.json();
+  document.getElementById('palmierMcpUrl').value = data.url || '';
+}
+
+async function savePalmierUrl() {
+  const url    = document.getElementById('palmierMcpUrl').value.trim();
+  const status = document.getElementById('palmierUrlStatus');
+  const btn    = document.getElementById('palmierUrlSaveBtn');
+  if (!url) { status.textContent = 'URL cannot be empty'; status.style.color = 'var(--red)'; return; }
+  btn.disabled = true;
+  btn.textContent = '…';
+  const res  = await fetch('/palmier_url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  const data = await res.json();
+  btn.disabled = false;
+  btn.textContent = 'Save';
+  if (data.ok) {
+    status.textContent = '✓ Saved — reconnecting…';
+    status.style.color = 'var(--green)';
+    // Re-check connection with new URL
+    await checkPalmierStatus();
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } else {
+    status.textContent = `Error: ${data.error}`;
+    status.style.color = 'var(--red)';
+  }
+}
+
+async function checkPalmierStatus() {
+  const res  = await fetch('/palmier_status');
+  const data = await res.json();
+  const dot   = document.getElementById('palmierDot');
+  const label = document.getElementById('palmierStatusLabel');
+  if (data.available) {
+    dot.style.background  = 'var(--green)';
+    dot.style.boxShadow   = '0 0 6px var(--green)';
+    label.style.color     = 'var(--green)';
+    label.textContent     = 'Palmier Pro connected';
+  } else {
+    dot.style.background = 'var(--red)';
+    dot.style.boxShadow  = '0 0 6px var(--red)';
+    label.style.color    = 'var(--red)';
+    label.textContent    = 'Palmier Pro not detected — open the app first';
+  }
+}
+
+async function initPalmierMode() {
+  refreshPalmierPicker();
+  loadPalmierUrl();
+  checkPalmierStatus();
+}
+
+async function refreshPalmierPicker() {
+  const res  = await fetch('/runs_with_images');
+  const runs = await res.json();
+  const picker = document.getElementById('palmierPicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select a completed run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+  picker.onchange = () => loadPalmierProjectInfo(picker.value);
+}
+
+async function loadPalmierProjectInfo(run) {
+  const info = document.getElementById('palmierProjectInfo');
+  if (!run) { info.style.display = 'none'; return; }
+  const [imagesRes, audioRes] = await Promise.all([
+    fetch(`/images/${encodeURIComponent(run)}`).then(r => r.json()),
+    fetch(`/runs_with_audio`).then(r => r.json()),
+  ]);
+  const imgCount  = imagesRes.filter(n => !n.endsWith('_bob')).length;
+  const hasAudio  = audioRes.includes(run);
+  info.style.display = '';
+  info.innerHTML = `
+    🖼  <strong style="color:var(--text)">${imgCount}</strong> images &nbsp;·&nbsp;
+    🎙  Audio: <strong style="color:${hasAudio ? 'var(--green)' : 'var(--amber)'}">${hasAudio ? 'ready' : 'missing'}</strong><br>
+    <span style="color:var(--dim)">Clips will be imported and placed with boil animation keyframes.</span>
+  `;
+}
+
+async function refreshResumePicker() {
+  const res  = await fetch('/runs_with_prompts');
+  const runs = await res.json();
+  const picker = document.getElementById('resumePicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select a stopped run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+  else loadResumeStatus('');
+}
+
+async function loadResumeStatus(run) {
+  const wrap  = document.getElementById('resumeStatusWrap');
+  const chips = document.getElementById('resumeStatusChips');
+  const note  = document.getElementById('resumeStatusNote');
+  if (!run) { wrap.style.display = 'none'; return; }
+
+  chips.innerHTML = '<span style="font-family:var(--mono);font-size:0.62rem;color:var(--dim);">Checking…</span>';
+  wrap.style.display = '';
+  note.textContent = '';
+
+  const res  = await fetch(`/run_status/${encodeURIComponent(run)}`);
+  const s    = await res.json();
+  chips.innerHTML = '';
+
+  const items = [
+    { label: 'Script',         ok: s.has_script },
+    { label: 'Image Prompts',  ok: s.has_prompts },
+    { label: 'TTS Script',     ok: s.has_tts },
+    { label: `Images (${s.images_on_disk}/${s.total_prompts})`, ok: s.images_on_disk === s.total_prompts && s.total_prompts > 0 },
+    { label: 'Voiceover',      ok: s.has_audio },
+  ];
+
+  items.forEach(({ label, ok }) => {
+    const chip = document.createElement('span');
+    chip.style.cssText = `
+      font-family:var(--mono);font-size:0.6rem;padding:3px 8px;border-radius:4px;
+      background:${ok ? 'var(--green-soft)' : 'var(--red-soft)'};
+      color:${ok ? 'var(--green)' : 'var(--red)'};
+      border:1px solid ${ok ? '#153a24' : '#3a1515'};
+    `;
+    chip.textContent = (ok ? '✓ ' : '✗ ') + label;
+    chips.appendChild(chip);
+  });
+
+  if (s.missing.length === 0) {
+    note.style.color = 'var(--muted)';
+    note.textContent = 'All assets present — pipeline will skip existing files and finalize.';
+  } else if (!s.has_script) {
+    note.style.color = 'var(--red)';
+    note.textContent = 'Cannot resume — script.txt is missing. Run a fresh pipeline instead.';
+  } else {
+    note.style.color = 'var(--amber)';
+    note.textContent = `Will regenerate: ${s.missing.join(', ')}. Existing assets will be reused.`;
+  }
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+
+const STAGES = ['research', 'script', 'images', 'voice', 'qa', 'timeline'];
+const STAGE_ORDER = { research: 0, script: 1, images: 2, voice: 3, qa: 4, timeline: 5 };
+
+// Keywords that map log messages to stages
+const STAGE_KEYWORDS = {
+  research: ['researching', 'research complete', 'starting pipeline', 'output directory', 'style anchor', 'api keys', 'missing api'],
+  script:   ['writing script', 'script written', 'image prompts parsed', 'script ready', '📝'],
+  images:   ['generating image', 'images generated', 'fal.ai', 'sending request'],
+  voice:    ['generating voiceover', 'voiceover generated', 'voiceover failed', '🎙'],
+  qa:       ['qa reviewing', 'starting qa', 'regenerating', 'qa complete', '🔍', '🔄'],
+  timeline: ['fcpxml', 'pipeline complete', 'pipeline finished', '🎬', '╔', '╚',
+             'assembling timeline', 'palmier', 'importing', 'placing clips', 'keyframes', 'voiceover on timeline'],
+};
+
+let currentStage = null;
+let stageStartTimes = {};
+let logSections = {}; // stage -> DOM element
+let running = false;
+let eventSource = null;
+
+// ── Stage tracker ─────────────────────────────────────────────────────────
+
+function detectStage(msg) {
+  const lower = msg.toLowerCase();
+  for (const [stage, keywords] of Object.entries(STAGE_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (lower.includes(kw.toLowerCase())) return stage;
+    }
+  }
+  return null;
+}
+
+function activateStage(stage) {
+  if (!stage || stage === currentStage) return;
+
+  // Complete the previous stage
+  if (currentStage) {
+    const prevEl = document.getElementById(`stage-${currentStage}`);
+    if (prevEl) { prevEl.classList.remove('active'); prevEl.classList.add('done'); }
+    closeLogSection(currentStage);
+
+    // Fill the connector between prev and new
+    const prevIdx = STAGE_ORDER[currentStage];
+    const newIdx  = STAGE_ORDER[stage];
+    for (let i = prevIdx; i < newIdx; i++) {
+      const from = STAGES[i], to = STAGES[i+1];
+      const conn = document.getElementById(`conn-${from}-${to}`);
+      if (conn) conn.querySelector('.stage-connector-fill').style.width = '100%';
+    }
+  }
+
+  currentStage = stage;
+  const el = document.getElementById(`stage-${stage}`);
+  if (el) { el.classList.remove('done'); el.classList.add('active'); }
+
+  // Ensure log section exists and is open
+  ensureLogSection(stage);
+  openLogSection(stage);
+
+  stageStartTimes[stage] = Date.now();
+}
+
+function completeAllStages() {
+  STAGES.forEach(s => {
+    const el = document.getElementById(`stage-${s}`);
+    if (el) { el.classList.remove('active'); el.classList.add('done'); }
+  });
+  // Fill all connectors
+  for (let i = 0; i < STAGES.length - 1; i++) {
+    const conn = document.getElementById(`conn-${STAGES[i]}-${STAGES[i+1]}`);
+    if (conn) conn.querySelector('.stage-connector-fill').style.width = '100%';
+  }
+}
+
+function resetStages() {
+  STAGES.forEach(s => {
+    const el = document.getElementById(`stage-${s}`);
+    if (el) { el.classList.remove('active', 'done'); }
+    const nextIdx = STAGE_ORDER[s];
+    if (nextIdx < STAGES.length - 1) {
+      const conn = document.getElementById(`conn-${s}-${STAGES[nextIdx+1]}`);
+      if (conn) conn.querySelector('.stage-connector-fill').style.width = '0%';
+    }
+  });
+  currentStage = null;
+  stageStartTimes = {};
+}
+
+// ── Log sections ──────────────────────────────────────────────────────────
+
+const STAGE_LABELS = {
+  research: 'Research', script: 'Script',
+  images:   'Images',   voice:  'Voice',
+  qa:       'QA',       timeline: 'Timeline',
+};
+
+function ensureLogSection(stage) {
+  if (logSections[stage]) return logSections[stage];
+
+  const empty = document.getElementById('logEmpty');
+  if (empty) empty.remove();
+
+  const section = document.createElement('div');
+  section.className = 'log-section';
+  section.id = `log-section-${stage}`;
+  section.dataset.stage = stage;
+  section.innerHTML = `
+    <div class="log-section-header" onclick="toggleLogSection('${stage}')">
+      <div class="log-section-dot"></div>
+      <span class="log-section-name">${STAGE_LABELS[stage] || stage}</span>
+      <span class="log-section-count" id="log-count-${stage}"></span>
+      <span class="log-section-chevron">▾</span>
+    </div>
+    <div class="log-section-body">
+      <div class="log-lines" id="log-lines-${stage}"></div>
+    </div>
+  `;
+  document.getElementById('logArea').appendChild(section);
+  logSections[stage] = section;
+  return section;
+}
+
+function openLogSection(stage) {
+  const s = logSections[stage];
+  if (!s) return;
+  s.classList.add('open', 'active');
+  s.classList.remove('done', 'error');
+}
+
+function closeLogSection(stage) {
+  const s = logSections[stage];
+  if (!s) return;
+  s.classList.remove('open', 'active');
+  s.classList.add('done');
+}
+
+function toggleLogSection(stage) {
+  const s = logSections[stage];
+  if (!s) return;
+  s.classList.toggle('open');
+}
+
+function clearLogSections() {
+  const logArea = document.getElementById('logArea');
+  logArea.innerHTML = '<div class="log-empty" id="logEmpty"><span>Starting pipeline…</span></div>';
+  logSections = {};
+}
+
+function classifyLine(msg) {
+  if (msg.includes('✅') || msg.includes('✓')) return 'success';
+  if (msg.includes('❌') || msg.includes('Error') || msg.includes('error')) return 'error';
+  if (msg.includes('⚠️') || msg.includes('Failed') || msg.includes('failed')) return 'warn';
+  if (msg.includes('🔬') || msg.includes('✍️') || msg.includes('🖼') || msg.includes('🎙') || msg.includes('🔍') || msg.includes('🎬') || msg.includes('🚀')) return 'info';
+  if (msg.includes('─') || msg.includes('═') || msg.trim() === '') return 'dim';
+  return '';
+}
+
+function addLogLine(stage, msg) {
+  const targetStage = stage || currentStage || 'research';
+  ensureLogSection(targetStage);
+
+  const lines = document.getElementById(`log-lines-${targetStage}`);
+  if (!lines) return;
+
+  const line = document.createElement('div');
+  line.className = `log-line ${classifyLine(msg)}`;
+  line.textContent = msg;
+  lines.appendChild(line);
+
+  // Auto-scroll the section body
+  const body = lines.closest('.log-section-body');
+  if (body) body.scrollTop = body.scrollHeight;
+
+  // Update count
+  const count = document.getElementById(`log-count-${targetStage}`);
+  if (count) {
+    const n = lines.children.length;
+    count.textContent = n > 1 ? `${n} lines` : '';
+  }
+}
+
+// ── Pipeline controls ─────────────────────────────────────────────────────
+
+async function runPipeline() {
+  let endpoint, payload;
+
+  if (inputMode === 'palmier') {
+    const run_slug = document.getElementById('palmierPicker').value;
+    if (!run_slug) { document.getElementById('palmierPicker').focus(); return; }
+    endpoint = '/send_to_palmier';
+    payload  = { run_slug };
+  } else if (inputMode === 'resume') {
+    const run_slug = document.getElementById('resumePicker').value;
+    if (!run_slug) { document.getElementById('resumePicker').focus(); return; }
+    endpoint = '/resume';
+    payload  = { run_slug };
+  } else {
+    const topic = document.getElementById('topicInput').value.trim();
+    if (!topic) { document.getElementById('topicInput').focus(); return; }
+    endpoint = '/run';
+    payload  = { topic };
+  }
+
+  // UI state
+  running = true;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  setGlobalStatus('running', inputMode === 'resume' ? 'Resuming…' : 'Running…');
+  resetStages();
+  clearLogSections();
+
+  const res  = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    addLogLine(null, `❌ ${data.error || 'Failed to start pipeline'}`);
+    setRunFinished(false);
+    return;
+  }
+
+  // Open SSE stream
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    handleEvent(event);
+  };
+  eventSource.onerror = () => {
+    if (running) {
+      addLogLine(currentStage, '⚠️  Stream disconnected');
+      setRunFinished(false);
+    }
+  };
+}
+
+function handleEvent(event) {
+  if (event.type === 'ping') return;
+
+  if (event.type === 'log') {
+    const stage = event.stage || detectStage(event.msg) || currentStage;
+    if (stage) activateStage(stage);
+    addLogLine(stage, event.msg);
+  }
+
+  else if (event.type === 'review') {
+    showReviewPanel(event.script);
+    addLogLine(currentStage, '📋 Script ready for review');
+  }
+
+  else if (event.type === 'done') {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    completeAllStages();
+    setRunFinished(true);
+    refreshRuns();
+    refreshScripts();
+  }
+
+  else if (event.type === 'error') {
+    addLogLine(currentStage, `❌ ${event.msg}`);
+    setRunFinished(false);
+  }
+}
+
+async function stopPipeline() {
+  await fetch('/stop', { method: 'POST' });
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  addLogLine(currentStage, '⏹  Pipeline stopped by user');
+  setRunFinished(false);
+}
+
+function setRunFinished(ok) {
+  running = false;
+  document.getElementById('runBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  if (ok) {
+    setGlobalStatus('done', 'Done');
+    if (currentStage) closeLogSection(currentStage);
+  } else {
+    setGlobalStatus('error', 'Stopped');
+    if (currentStage) {
+      const s = logSections[currentStage];
+      if (s) { s.classList.remove('active'); s.classList.add('error'); }
+    }
+  }
+}
+
+function setGlobalStatus(state, label) {
+  const dot = document.getElementById('globalDot');
+  const txt = document.getElementById('globalStatus');
+  dot.className = `status-dot ${state}`;
+  txt.textContent = label;
+}
+
+// ── Review panel ──────────────────────────────────────────────────────────
+
+function showReviewPanel(script) {
+  document.getElementById('reviewScript').value = script;
+  document.getElementById('reviewOverlay').classList.add('visible');
+}
+
+function hideReviewPanel() {
+  document.getElementById('reviewOverlay').classList.remove('visible');
+}
+
+async function approveScript() {
+  const script = document.getElementById('reviewScript').value;
+  hideReviewPanel();
+  await fetch('/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script }),
+  });
+  addLogLine('script', '✅ Script approved — starting production…');
+}
+
+async function reviseScript() {
+  const script   = document.getElementById('reviewScript').value;
+  const feedback = document.getElementById('reviewFeedback').value.trim();
+  if (!feedback) { document.getElementById('reviewFeedback').focus(); return; }
+
+  const topic = document.getElementById('topicInput').value.trim()
+             || document.getElementById('slugInput').value.trim();
+
+  const btn = document.getElementById('reviseBtn');
+  btn.disabled = true;
+  btn.textContent = '↻ Revising…';
+
+  const res  = await fetch('/revise', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script, feedback, topic }),
+  });
+  const data = await res.json();
+
+  btn.disabled = false;
+  btn.textContent = '↻ Revise';
+
+  if (data.ok) {
+    document.getElementById('reviewScript').value = data.script;
+    document.getElementById('reviewFeedback').value = '';
+  } else {
+    document.getElementById('reviewFeedback').placeholder = `Error: ${data.error}`;
+  }
+}
+
+async function rejectScript() {
+  hideReviewPanel();
+  await fetch('/reject', { method: 'POST' });
+  addLogLine('script', '🚫 Script rejected — pipeline stopped');
+  setRunFinished(false);
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  const tabNames = ['scripts','images','voice','files'];
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', tabNames[i] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (name === 'images') refreshImagePicker();
+  if (name === 'voice') { refreshVoicePicker(); refreshAudioRegenPicker(); }
+}
+
+async function refreshScripts() {
+  const res = await fetch('/runs_with_scripts');
+  const runs = await res.json();
+  const picker = document.getElementById('scriptPicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+}
+
+async function loadScriptIntoViewer(run) {
+  if (!run) return;
+  const res = await fetch(`/script/${encodeURIComponent(run)}`);
+  const data = await res.json();
+  const viewer = document.getElementById('scriptViewer');
+  const status = document.getElementById('scriptStatus');
+  if (data.ok) {
+    viewer.value = data.text;
+    status.textContent = `Loaded: ${run}`;
+  } else {
+    viewer.value = '';
+    status.textContent = data.error || 'Not found';
+  }
+}
+
+function loadIntoReviewPanel() {
+  const text = document.getElementById('scriptViewer').value;
+  if (!text.trim()) return;
+  showReviewPanel(text);
+}
+
+async function saveScriptEdits() {
+  const run  = document.getElementById('scriptPicker').value;
+  const text = document.getElementById('scriptViewer').value;
+  if (!run || !text.trim()) return;
+  const res = await fetch(`/save_script/${encodeURIComponent(run)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  const data = await res.json();
+  document.getElementById('scriptStatus').textContent = data.ok ? `✓ Saved` : `Error: ${data.error}`;
+}
+
+async function refreshRuns() {
+  const res = await fetch('/runs');
+  const runs = await res.json();
+  const picker = document.getElementById('runPicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+}
+
+async function loadRunFiles(run) {
+  const list = document.getElementById('fileList');
+  if (!run) { list.innerHTML = '<span class="no-files">Select a run above</span>'; return; }
+  const res = await fetch(`/run_files/${encodeURIComponent(run)}`);
+  const files = await res.json();
+  if (!files.length) { list.innerHTML = '<span class="no-files">(empty)</span>'; return; }
+  list.innerHTML = files.map(f => `<div class="file-entry">${f}</div>`).join('');
+}
+
+// ── Image Gallery ─────────────────────────────────────────────────────────
+
+let galleryRun      = null;
+let gallerySelected = new Set();
+let galleryNums     = [];
+let galleryPrompts  = {};
+let lightboxIdx     = 0;
+
+async function refreshImagePicker() {
+  const res  = await fetch('/runs');
+  const runs = await res.json();
+  const picker = document.getElementById('imagePicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+}
+
+async function openGallery() {
+  const run = document.getElementById('imagePicker').value;
+  if (!run) { document.getElementById('imagePicker').focus(); return; }
+  galleryRun = run;
+  gallerySelected.clear();
+  document.getElementById('galleryRunLabel').textContent = run;
+  document.getElementById('galleryOverlay').classList.add('visible');
+  const [, prompts] = await Promise.all([
+    loadGalleryImages(),
+    fetch(`/prompts/${encodeURIComponent(run)}`).then(r => r.json()),
+  ]);
+  galleryPrompts = prompts;
+}
+
+function closeGallery() {
+  document.getElementById('galleryOverlay').classList.remove('visible');
+  galleryRun = null;
+  gallerySelected.clear();
+}
+
+async function loadGalleryImages() {
+  const grid = document.getElementById('galleryGrid');
+  grid.innerHTML = '<div class="gallery-empty"><span>Loading…</span></div>';
+
+  const res  = await fetch(`/images/${encodeURIComponent(galleryRun)}`);
+  const nums = await res.json();
+
+  if (!nums.length) {
+    grid.innerHTML = '<div class="gallery-empty"><span>No images found for this run.</span></div>';
+    return;
+  }
+
+  grid.innerHTML = '';
+  galleryNums = nums;
+  nums.forEach(num => grid.appendChild(makeImgCard(num)));
+  updateSelCount();
+}
+
+function makeImgCard(num) {
+  const card = document.createElement('div');
+  card.className = 'img-card';
+  card.id = `img-card-${num}`;
+  card.dataset.num = num;
+
+  const src = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
+  card.innerHTML = `
+    <img class="img-card-thumb" src="${src}" alt="${num}" loading="lazy">
+    <button class="img-card-regen" onclick="regenOne(event, '${num}')">Regen</button>
+    <div class="img-card-footer">
+      <span class="img-card-num">${num}</span>
+      <div class="img-card-checkbox"></div>
+    </div>
+  `;
+
+  card.addEventListener('click', (e) => {
+    if (e.target.classList.contains('img-card-regen')) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) { toggleSelect(num); return; }
+    openLightbox(galleryNums.indexOf(num));
+  });
+
+  return card;
+}
+
+function toggleSelect(num) {
+  const card = document.getElementById(`img-card-${num}`);
+  if (!card) return;
+  if (gallerySelected.has(num)) {
+    gallerySelected.delete(num);
+    card.classList.remove('selected');
+  } else {
+    gallerySelected.add(num);
+    card.classList.add('selected');
+  }
+  updateSelCount();
+}
+
+function openLightbox(idx) {
+  lightboxIdx = idx;
+  document.getElementById('lightboxOverlay').classList.add('visible');
+  renderLightbox();
+}
+
+function closeLightbox() {
+  document.getElementById('lightboxOverlay').classList.remove('visible');
+}
+
+function lightboxStep(dir) {
+  lightboxIdx = Math.max(0, Math.min(galleryNums.length - 1, lightboxIdx + dir));
+  renderLightbox();
+}
+
+function renderLightbox() {
+  const num     = galleryNums[lightboxIdx];
+  const total   = galleryNums.length;
+  const meta    = galleryPrompts[num] || {};
+  const src     = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
+
+  document.getElementById('lightboxNum').textContent     = `Image ${num}`;
+  document.getElementById('lightboxTs').textContent      = meta.timestamp || '';
+  document.getElementById('lightboxImg').src             = src;
+  document.getElementById('lightboxPrompt').textContent  = meta.prompt || '(no prompt found)';
+  document.getElementById('lightboxCounter').textContent = `${lightboxIdx + 1} / ${total}`;
+  document.getElementById('lightboxPrev').disabled       = lightboxIdx === 0;
+  document.getElementById('lightboxNext').disabled       = lightboxIdx === total - 1;
+}
+
+function updateSelCount() {
+  const n = gallerySelected.size;
+  document.getElementById('gallerySelCount').textContent = n === 0 ? '0 selected' : `${n} selected`;
+  document.getElementById('regenSelectedBtn').disabled = n === 0;
+}
+
+function setGalleryStatus(msg) {
+  document.getElementById('galleryStatusBar').textContent = msg;
+}
+
+async function regenOne(e, num) {
+  e.stopPropagation();
+  const model = document.getElementById('galleryModelSelect').value;
+  await triggerRegen([num], model);
+}
+
+async function regenSelected() {
+  if (!gallerySelected.size) return;
+  const model = document.getElementById('galleryModelSelect').value;
+  await triggerRegen([...gallerySelected], model);
+}
+
+async function triggerRegen(nums, model) {
+  nums.forEach(n => {
+    const card = document.getElementById(`img-card-${n}`);
+    if (card) card.classList.add('regenerating');
+  });
+  document.getElementById('regenSelectedBtn').disabled = true;
+  setGalleryStatus(`⏳ Regenerating ${nums.length} image(s) via ${model}…`);
+
+  const res  = await fetch('/regenerate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_slug: galleryRun, image_nums: nums, model_key: model }),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    setGalleryStatus(`❌ ${data.error}`);
+    nums.forEach(n => {
+      const card = document.getElementById(`img-card-${n}`);
+      if (card) card.classList.remove('regenerating');
+    });
+    return;
+  }
+
+  // Listen on the stream for completion
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    if (event.type === 'log') {
+      setGalleryStatus(event.msg);
+      addLogLine('images', event.msg);
+    } else if (event.type === 'regen_done') {
+      eventSource.close(); eventSource = null;
+      event.nums.forEach(n => {
+        const card = document.getElementById(`img-card-${n}`);
+        if (card) {
+          card.classList.remove('regenerating', 'selected');
+          card.classList.add('regen-done');
+          // Reload thumbnail with cache-bust
+          const img = card.querySelector('.img-card-thumb');
+          if (img) img.src = `/image/${encodeURIComponent(galleryRun)}/${n}?t=${Date.now()}`;
+          setTimeout(() => card.classList.remove('regen-done'), 2000);
+        }
+      });
+      gallerySelected.clear();
+      updateSelCount();
+      setGalleryStatus(`✅ Done — ${event.nums.length} image(s) regenerated`);
+    }
+  };
+}
+
+// ── Voice player ─────────────────────────────────────────────────────────
+
+async function refreshVoicePicker() {
+  const res  = await fetch('/runs_with_audio');
+  const runs = await res.json();
+  const picker = document.getElementById('voicePicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) {
+    picker.value = current;
+  } else {
+    loadVoiceover('');
+  }
+}
+
+function loadVoiceover(run) {
+  const player = document.getElementById('voicePlayer');
+  const wrap   = document.getElementById('voicePlayerWrap');
+  const empty  = document.getElementById('voiceEmpty');
+  const status = document.getElementById('voiceStatus');
+
+  if (!run) {
+    player.pause();
+    player.src = '';
+    wrap.style.display  = 'none';
+    empty.style.display = '';
+    return;
+  }
+
+  player.src = `/audio/${encodeURIComponent(run)}?t=${Date.now()}`;
+  wrap.style.display  = 'flex';
+  empty.style.display = 'none';
+  status.textContent  = run;
+}
+
+async function refreshAudioRegenPicker() {
+  const res  = await fetch('/runs');
+  const runs = await res.json();
+  const picker = document.getElementById('audioRegenPicker');
+  const current = picker.value;
+  picker.innerHTML = '<option value="">— select run —</option>';
+  runs.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    picker.appendChild(opt);
+  });
+  if (current && runs.includes(current)) picker.value = current;
+}
+
+async function regenAudio() {
+  const run = document.getElementById('audioRegenPicker').value;
+  if (!run) { document.getElementById('audioRegenPicker').focus(); return; }
+
+  const btn    = document.getElementById('regenAudioBtn');
+  const status = document.getElementById('audioRegenStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating…';
+  status.textContent = '';
+
+  const res  = await fetch('/regenerate_audio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_slug: run }),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    status.textContent = `❌ ${data.error}`;
+    btn.disabled = false;
+    btn.textContent = '↻ Regenerate Audio';
+    return;
+  }
+
+  // Listen on SSE stream for completion
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    if (event.type === 'log') {
+      status.textContent = event.msg;
+      addLogLine('voice', event.msg);
+    } else if (event.type === 'audio_done') {
+      eventSource.close(); eventSource = null;
+      btn.disabled = false;
+      btn.textContent = '↻ Regenerate Audio';
+      status.textContent = '✅ Done — reload Voice tab to listen';
+      refreshVoicePicker();
+      // If this run is already loaded in the player, hot-swap the src
+      const picker = document.getElementById('voicePicker');
+      if (picker.value === event.run_slug) loadVoiceover(event.run_slug);
+    }
+  };
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+
+refreshScripts();
+refreshRuns();
+refreshImagePicker();
+
+document.getElementById('topicInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runPipeline(); }
+});
+
+document.addEventListener('keydown', (e) => {
+  const lb = document.getElementById('lightboxOverlay');
+  if (!lb.classList.contains('visible')) return;
+  if (e.key === 'ArrowRight') lightboxStep(1);
+  if (e.key === 'ArrowLeft')  lightboxStep(-1);
+  if (e.key === 'Escape')     closeLightbox();
+});
+
+document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeLightbox();
+});
+</script>
+</body>
+</html>
