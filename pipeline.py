@@ -421,15 +421,30 @@ Return only:
 
 def generate_script(topic: str, research: str, client: anthropic.Anthropic, log_fn) -> str:
     """Returns the script text. TTS and image prompts are generated separately after approval."""
-    claude_md   = load_claude_md()
-    style_sheet = load_style_sheet()
-
     prompt = f"""
-{claude_md}
+You are a script writer for a faceless educational YouTube channel.
 
----
-STYLE SHEET:
-{style_sheet}
+## Channel Identity
+- Niche: Curiosity / history / psychology — educational content with surprising angles
+- Target audience: Curious adults, 25-40, enjoy learning counterintuitive facts
+- Tone: Conversational, confident, slightly provocative. Hook hard, deliver real substance.
+- Reference channel: Axen (youtube.com/@axen) — study the hook style and pacing
+- Titles: Curiosity-gap format. "Why X Never Y", "What Ancient Humans Did About X", "The Real Reason You X"
+
+## Script Structure
+- Hook (0:00-0:35): Provocative opening statement or surprising fact. No intro, no "welcome back".
+- 10-14 content sections with clear [MM:SS-MM:SS] timestamps
+- Each section 60-90 seconds
+- CTA close (last 30 seconds): Subscribe prompt only — no teasing or referencing a next video
+
+## Word Count Rules
+The voiceover is delivered at ~160 words per minute.
+- 12-minute target = ~1,920 words of narration
+- 9-minute minimum  = ~1,440 words of narration
+- 15-minute maximum = ~2,400 words of narration
+- Each 60-90 second section needs 160-240 words of narration
+- Hook (35s) = ~95 words. CTA close (30s) = ~80 words.
+After writing, count your narration words. If under 1,700, expand sections before returning.
 
 ---
 TOPIC: {topic}
@@ -444,20 +459,7 @@ IMPORTANT: Base the script only on the verified facts above.
 - Where confidence is noted as lower, use softened language ("some researchers suggest", "evidence points to", etc.).
 - Use the hook angles as inspiration for the opening 35 seconds.
 
-Your task: Write a full video SCRIPT:
-   - Hook (0:00-0:35)
-   - 10-14 sections with [MM:SS-MM:SS] timestamps
-   - Each section 60-90 seconds
-   - CTA close (last 30 seconds)
-   - Target 12:00 total length (never under 9:00, never over 15:00)
-
-CRITICAL — word count controls actual audio length:
-   The voiceover is delivered at ~160 words per minute.
-   - 12-minute target = ~1,920 words of narration (VISUAL lines do not count)
-   - 9-minute minimum  = ~1,440 words of narration
-   - Each 60-90 second section needs 160-240 words of narration
-   - Hook (35s) = ~95 words. CTA close (30s) = ~80 words.
-   After writing, count your narration words. If under 1,700, expand sections before returning.
+Your task: Write a full narration-only script. Do not describe visuals, camera directions, or what should appear on screen — write only what the narrator speaks aloud. Structure with [MM:SS-MM:SS] section timestamps.
 
 Return your response in this exact format — no other text:
 
@@ -781,8 +783,12 @@ def generate_voiceover(tts_script: str, out_dir: Path, log_fn) -> Path | None:
 # ── Audio / Timeline helpers ──────────────────────────────────────────────────
 
 def get_audio_duration(audio_path: Path) -> float:
-    """Return audio duration in seconds by parsing the MP3 Xing/Info VBR header,
-    falling back to CBR frame-count estimation, then file-size estimation."""
+    """Return audio duration in seconds by scanning MP3 frames.
+
+    ElevenLabs chunks are concatenated after generation, which leaves the Xing
+    VBR header (written for only the first chunk) with a stale frame count.
+    We therefore scan the actual frame data rather than trusting the header.
+    """
     if not audio_path or not audio_path.exists():
         return 720.0
     data = audio_path.read_bytes()
@@ -792,35 +798,44 @@ def get_audio_duration(audio_path: Path) -> float:
         size = ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
                 (data[8] & 0x7f) << 7  | (data[9] & 0x7f))
         offset = size + 10
-    # Find first sync frame
-    for i in range(offset, min(offset + 8192, len(data) - 4)):
-        if data[i] == 0xFF and (data[i+1] & 0xE0) == 0xE0:
-            hdr = int.from_bytes(data[i:i+4], 'big')
-            br_idx  = (hdr >> 12) & 0xF
-            sr_idx  = (hdr >> 10) & 0x3
-            ch_mode = (hdr >> 6)  & 0x3
-            layer   = 4 - ((hdr >> 17) & 0x3)
-            if layer != 3 or br_idx in (0, 15) or sr_idx == 3:
-                continue
-            BITRATES = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320]
-            SAMPLERATES = [44100, 48000, 32000]
-            bitrate    = BITRATES[br_idx] * 1000
-            samplerate = SAMPLERATES[sr_idx]
-            # Check for Xing/Info VBR header (36 or 21 bytes after frame start)
-            xing_offset = i + (36 if ch_mode != 3 else 21)
-            if data[xing_offset:xing_offset+4] in (b'Xing', b'Info'):
-                flags = int.from_bytes(data[xing_offset+4:xing_offset+8], 'big')
-                if flags & 0x1:  # frame count present
-                    frames = int.from_bytes(data[xing_offset+8:xing_offset+12], 'big')
-                    return frames * 1152 / samplerate
-            # CBR estimation
-            frame_size = 144 * bitrate // samplerate
-            if frame_size > 0:
-                num_frames = (len(data) - i) / frame_size
-                return num_frames * 1152 / samplerate
-            break
-    # Last resort: file size at 128kbps
-    return audio_path.stat().st_size / 16000.0
+
+    BITRATES    = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320]
+    SAMPLERATES = [44100, 48000, 32000]
+
+    total_samples = 0
+    samplerate    = 44100
+    i = offset
+    n = len(data)
+    while i < n - 3:
+        if not (data[i] == 0xFF and (data[i+1] & 0xE0) == 0xE0):
+            i += 1
+            continue
+        hdr    = int.from_bytes(data[i:i+4], 'big')
+        br_idx = (hdr >> 12) & 0xF
+        sr_idx = (hdr >> 10) & 0x3
+        layer  = 4 - ((hdr >> 17) & 0x3)
+        padding = (hdr >> 9) & 0x1
+        if layer != 3 or br_idx in (0, 15) or sr_idx == 3:
+            i += 1
+            continue
+        bitrate    = BITRATES[br_idx] * 1000
+        samplerate = SAMPLERATES[sr_idx]
+        frame_size = (144 * bitrate // samplerate) + padding
+        if frame_size < 21:
+            i += 1
+            continue
+        # Skip Xing/Info header frame — it contains no audio
+        xing_off = i + (36 if ((hdr >> 6) & 0x3) != 3 else 21)
+        if data[xing_off:xing_off+4] in (b'Xing', b'Info'):
+            i += frame_size
+            continue
+        total_samples += 1152
+        i += frame_size
+
+    if total_samples > 0:
+        return total_samples / samplerate
+    # Last resort: file size at actual ElevenLabs output bitrate (192 kbps)
+    return audio_path.stat().st_size / 24000.0
 
 
 # ── Palmier MCP ───────────────────────────────────────────────────────────────

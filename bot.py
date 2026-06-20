@@ -329,34 +329,47 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"📦 Zipping `{slug}`…", parse_mode="Markdown")
 
-    # Build zip in memory — skip raw images folder to keep size manageable,
-    # but include everything else (script, audio, prompts, timeline, report)
-    buf = io.BytesIO()
-    SKIP_DIRS = {"images"}  # images are already previewed on completion
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(run_dir.rglob("*")):
-            if path.is_dir():
-                continue
-            # Skip the images subfolder — too large for Telegram (50 MB limit)
-            if any(part in SKIP_DIRS for part in path.relative_to(run_dir).parts):
-                continue
-            zf.write(path, path.relative_to(run_dir))
+    LIMIT = 49 * 1_048_576  # 49 MB — Telegram bot limit is 50 MB
 
-    size_mb = buf.tell() / 1_048_576
-    buf.seek(0)
+    def _make_zip(paths: list) -> io.BytesIO:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in paths:
+                zf.write(path, path.relative_to(run_dir))
+        buf.seek(0)
+        return buf
 
-    if size_mb > 49:
-        await update.message.reply_text(
-            f"⚠️ Zip is {size_mb:.1f} MB — too large for Telegram (50 MB limit).\n"
-            "Images were already excluded. The remaining files are unusually large."
+    # Collect all files — text assets first, then images
+    all_files = sorted(run_dir.rglob("*"), key=lambda p: (
+        0 if "images" not in p.parts else 1, p
+    ))
+    all_files = [p for p in all_files if not p.is_dir()]
+
+    # Split into batches under the Telegram limit
+    batches: list[list] = []
+    current_batch: list = []
+    current_size = 0
+    for path in all_files:
+        file_size = path.stat().st_size
+        if current_batch and current_size + file_size > LIMIT:
+            batches.append(current_batch)
+            current_batch, current_size = [], 0
+        current_batch.append(path)
+        current_size += file_size
+    if current_batch:
+        batches.append(current_batch)
+
+    total = len(batches)
+    for i, batch in enumerate(batches, 1):
+        part_label = f"part {i}/{total}" if total > 1 else "complete"
+        filename   = f"{slug}-part{i}.zip" if total > 1 else f"{slug}.zip"
+        buf        = _make_zip(batch)
+        size_mb    = buf.getbuffer().nbytes / 1_048_576
+        await update.message.reply_document(
+            document=buf,
+            filename=filename,
+            caption=f"✅ {slug} ({part_label}) — {size_mb:.1f} MB",
         )
-        return
-
-    await update.message.reply_document(
-        document=buf,
-        filename=f"{slug}.zip",
-        caption=f"✅ {slug}  ({size_mb:.1f} MB, images not included)",
-    )
 
 
 @auth

@@ -70,7 +70,7 @@ start_bot.bat       # Windows
 | `/runs` | List the 15 most recent runs with image count and status |
 | `/status` | Show current run progress, or summary of the last completed run |
 | `/resume [slug]` | Resume an incomplete run (omit slug to resume the most recent incomplete) |
-| `/download [slug]` | Download run assets as a zip — script, audio, prompts (images excluded; omit slug for latest) |
+| `/download [slug]` | Download the full run as zip(s) — splits into multiple parts if over 50 MB; omit slug for latest |
 | `/stop` | Cancel the current run |
 | `/help` | Show command list |
 
