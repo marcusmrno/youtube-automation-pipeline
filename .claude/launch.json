@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "youtube-pipeline-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["ui.py"],
+      "port": 7860
+    }
+  ]
+}

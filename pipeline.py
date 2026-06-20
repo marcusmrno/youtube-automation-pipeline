@@ -155,29 +155,33 @@ SCRIPT:
 - Keep only the words spoken aloud, in order, as naturally flowing prose.
 - Do NOT use SSML tags — eleven_v3 does not support them.
 - Do NOT use tags that describe visuals or actions (e.g. [grinning], [pacing]) — only auditory tags.
+- Do NOT change any words — only add/remove/reposition tags and adjust punctuation/capitalisation for emphasis.
 
 ## Emphasis techniques
 - Use ellipses (...) for dramatic pauses and weight at key moments.
 - Use ALL CAPS for a single word of genuine vocal stress — one per sentence max.
+- Do not use both ALL CAPS and a tag on the same phrase — pick one.
 - Short sentences = faster delivery. Long sentences = slower, more weight. Vary deliberately.
 - Exclamation marks add energy; question marks invite the listener to lean in.
 
 ## Audio tags — place immediately before the segment they modify, or after a natural pause mid-sentence
 Target density: 1–2 tags per 200 words (~10–16 tags for a full 12-minute script). Too few is flat; too many is performed.
+Do not stack two tags back-to-back with no words between them.
 
 Laughter (graduated — pick the right intensity):
   [chuckles]        mild irony, "of course this is how it works"
   [laughs]          a stat or fact is genuinely absurd
+  [laughs harder]   escalating absurdity — rare
   [giggles]         lighter, more playful moments
   [snorts]          dry involuntary reaction to something ridiculous
-  [laughs harder]   escalating absurdity — use sparingly
+  [wheezing]        extreme — use only for the single funniest moment in the whole script
 
 Breathing & texture:
   [sighs]           tired of a myth; "and then obviously…" moments
   [exhales]         releasing tension after a heavy section
   [whispers]        sharing something counterintuitive that feels like a secret
   [swallows]        before delivering a hard truth
-  [gulps]           before something shocking
+  [gulps]           before something shocking or uncomfortable
 
 Emotions:
   [excited]         a genuinely surprising fact or big reveal
@@ -197,8 +201,10 @@ Emotions:
   [sheepishly]      correcting a complication or admitting nuance
   [nervously]       building unease before a reveal
   [alarmed]         urgent warning; something worse than expected
+  [panicking]       high-stakes escalation — use once max, near the climax
   [reassuring]      after a scary section; "here's what you can do"
-  [warmly]          CTA close only — one tag, at the very start of the close
+  [warmly]          CTA close ONLY — one tag at the very start, then no more tags after it
+  [professional]    delivering a crisp fact or instruction
   [questioning]     rhetorical question the audience is asking themselves
   [happy]           a good outcome; something working as intended
 
@@ -215,13 +221,14 @@ Absurd statistic             → [chuckles] or [snorts]
 "Here's what works" pivot    → [reassuring] or [exhales]
 Tension before consequence   → [nervously] or [alarmed]
 Rhetorical question          → [questioning] or [curious]
-CTA close                    → [warmly] once, then no more tags
+CTA close                    → [warmly] once at the very start, then no more tags
 
 ## Channel tone
 Confident, slightly provocative explainer — not a news anchor or teacher.
 [excited] = genuine surprise, not a game show host.
 [sarcastic] = dry, not mean.
 [whispers] = conspiratorial, not creepy.
+[sighs] = tired-of-the-myth, not sad.
 [angry] = controlled outrage, not a rant.
 [warmly] = earned human moment on the close, not performative.
 
@@ -254,7 +261,9 @@ SCRIPT SEGMENT:
 
 ## The Prime Directive
 
-Read the NARRATION text for each VISUAL line. Ask yourself: what is the single most concrete, specific thing being said right now? Build the entire image around showing that one thing as literally and directly as possible.
+For each narration beat, ask: what is the single most concrete, specific thing being said right now? Build the entire image around showing that one thing as literally and directly as possible.
+
+A correct prompt is one that, if you muted the video and watched only the images, would show the exact fact being stated — not the mood, not a related concept, not a vibe.
 
 **Rules:**
 - The image must be SPECIFIC to its narration line — it must be impossible to swap it with any other image in the video
@@ -269,25 +278,24 @@ Read the NARRATION text for each VISUAL line. Ask yourself: what is the single m
 - Generic "cat standing in environment" scenes with no specific prop
 - Any prop or object not directly tied to the narration line
 - Reusing the same scene composition for consecutive prompts
+- Two consecutive prompts with the same sky color
+- Style prefix at the start of a prompt (pipeline prepends it automatically)
 
 ---
 
 ## Translation examples
 
 NARRATION: "Your body cannot make vitamin C on its own"
-→ CAT standing beside a large flat circle labeled BODY with a thick red X through it, beside it a large flat orange circle labeled VIT C with a red NO ENTRY sign — shows the body cannot produce it
+→ Large flat circle labeled BODY with thick red X through it, beside it large flat orange circle labeled VIT C with red NO ENTRY sign — Orange Cat standing left of center pointing at the BODY circle — [character desc] — sky blue sky, pale green ground, horizon visible — grey rounded rectangle label box reading CANNOT MAKE IT — [style block]
 
 NARRATION: "Thirteen vitamins are essential for human survival"
-→ Large bold red handwritten number 13 dominates upper center — below it thirteen small flat colored circle shapes in a loose grid — cat pointing at the grid
+→ Large bold red handwritten number 13 dominates upper center — below it thirteen small flat colored circle shapes in loose grid — Orange Cat pointing at the grid with right arm extended — [character desc] — pale yellow sky, brown ground, horizon visible — grey rounded rectangle label box reading 13 VITAMINS — [style block]
 
 NARRATION: "Fat-soluble vitamins are stored in your liver"
-→ Large flat brown irregular blob shape labeled LIVER in bold black marker — four small flat colored pill shapes sitting inside the liver blob — cat pointing at it with right arm extended
+→ Large flat brown irregular blob shape labeled LIVER in bold black marker — four small flat colored pill shapes sitting inside the liver blob — White Cat pointing at it with right arm extended — [character desc] — soft peach sky, tan ground, horizon visible — grey rounded rectangle label box reading STORED IN LIVER — [style block]
 
 NARRATION: "Brazil has won the World Cup five times"
-→ Cat holding five small flat gold trophy shapes stacked in arms — bold black handwritten text reading 5X beside them
-
-NARRATION: "Ancient humans slept an average of nine hours"
-→ Cat curled up sleeping on flat ground — large flat white circle clock shape beside it showing the time as 9:00 — bold black text reading 9 HRS
+→ Five small flat gold trophy shapes stacked in a pile center frame — Orange Cat holding the stack with both hands extended — [character desc] — sky blue sky, green ground, horizon visible — bold black handwritten text reading 5X beside trophies — [style block]
 
 ---
 
@@ -297,30 +305,34 @@ NARRATION: "Ancient humans slept an average of nine hours"
 
 **White Cat:** small white fluffy cat, round head slightly squished, small triangle ears with grey inner ear fill, two short whisker lines on each side, dot eyes misaligned, grey irregular patch around left eye, solid white body with uneven outline, small pink collar slightly tilted, grey-tipped tail with wobbly outline, small filled circle hands, small flat oval feet
 
-Use the character description matching which cat(s) appear. Never omit it. Alternate between orange cat, white cat, and both — vary every 2-3 prompts.
+Alternate every 2-3 prompts — never the same cat more than 3 prompts in a row. Use both cats when the scene benefits from two figures or scale contrast.
+
+Cats are visual helpers: hold objects, point at diagrams, stand as example figures, demonstrate physical actions.
+Cats do NOT: react emotionally, look at the camera, express surprise or confusion, address the viewer.
 
 ---
 
 ## Art style — end EVERY prompt with this exact block
 
-"flat 2D hand-drawn illustration on slightly off-white warm paper, bold black outlines with heavy uneven stroke weight that varies along every line, outlines overshoot corners and cross each other leaving wobbly doubled edges, color fills bleed outside the outlines like a marker bleeding through paper, uneven patchy fills with visible streaks and gaps, solid flat colors only, no shading no gradients no photorealism, everything slightly asymmetric and lopsided, all text written in thick uneven uppercase marker handwriting with letters at different sizes and slight tilts"
+flat 2D hand-drawn illustration on slightly off-white warm paper, bold black outlines with heavy uneven stroke weight that varies along every line, outlines overshoot corners and cross each other leaving wobbly doubled edges, color fills bleed outside the outlines like a marker bleeding through paper, uneven patchy fills with visible streaks and gaps, solid flat colors only, no shading no gradients no photorealism, everything slightly asymmetric and lopsided, all text written in thick uneven uppercase marker handwriting with letters at different sizes and slight tilts
 
 ---
 
 ## Scene structure (build in this order)
 
-1. **CORE VISUAL FIRST** — the specific object, diagram, number, or prop that encodes the narration fact. Describe it in detail: shape, color, size, label text (always write exact words, never "a label with the name").
+1. **CORE VISUAL FIRST** — the specific object, diagram, number, or prop that encodes the narration fact. Shape, color, size, exact label text (always write the exact words, never "a label with the name").
 
-2. **CAT ACTION** — which cat, where in frame, exactly what they are doing with their body and hands. The action must relate directly to the core visual.
+2. **CAT ACTION** — which cat, where in frame, exactly what they are doing with their body and hands. Must relate directly to the core visual. Embed full character description verbatim.
 
-3. **ENVIRONMENT** — keep simple, never distract from core visual:
-   - SKY: rotate strictly — warm orange, sky blue, pale yellow, soft peach, dusty rose. Never the same sky twice in a row.
-   - GROUND: flat solid color ground plane filling bottom third
-   - HORIZON LINE: always visible
-   - MIDGROUND: one flat silhouette layer (grass blades, mountains, buildings, rocks)
-   - FOREGROUND: small flat pebbles or crack lines
+3. **ENVIRONMENT** — keep simple, never let it compete with the core visual:
+   - SKY: rotate strictly — warm orange → sky blue → pale yellow → soft peach → dusty rose → bright yellow → lime green. NEVER the same sky twice in a row. No more than 1 in 3 prompts may use orange sky.
+   - GROUND: flat solid color plane filling bottom third. Always visible.
+   - HORIZON LINE: always present.
+   - MIDGROUND (optional): one flat silhouette layer — grass blades, mountains, buildings, rocks. Solid fill only, no interior detail.
+   - FOREGROUND: small flat pebbles or crack lines.
+   - Characters always stand on the ground plane — never floating.
 
-4. **TEXT IN IMAGE** — whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text in a grey rounded rectangle label box. Always write the exact words.
+4. **TEXT IN IMAGE** — whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
 
 ---
 
@@ -328,7 +340,7 @@ Use the character description matching which cat(s) appear. Never omit it. Alter
 
 Write one prompt per NARRATION BEAT — not one per section. Each section (60-90 seconds) should produce 25-40 prompts. A 12-minute video needs ~300 prompts total.
 
-For each prompt, derive a tight timestamp from the narration pacing (~3-4 seconds per image).
+For each prompt, derive a tight timestamp from narration pacing (~3-4 seconds per image).
 Format each line as:
 NNN | MM:SS-MM:SS | [full prompt]
 
@@ -974,26 +986,72 @@ def _timestamp_scale(prompts: list[dict], actual_duration: float) -> float:
 VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
 
 AGENT_SCRIPT_PROMPT = """
-You are writing a YouTube video script. Use the vidIQ tools to research the topic
-before writing, then produce a complete script.
+You are writing a YouTube video script for a flat 2D educational channel with two cat mascots.
+Follow this two-phase process exactly — never skip research to jump straight to writing.
 
-STEP 1 — Research (run these in parallel where possible):
-- vidiq_keyword_research: get search volume and competition for the topic
-- vidiq_outliers: find videos over-performing on this topic
-- vidiq_youtube_search: see what's already ranking
-- vidiq_generate_titles: produce 5 title candidates from your research
-- vidiq_score_title: score each candidate and pick the highest scorer
+## PHASE 1 — Research (run ALL of these in parallel)
 
-STEP 2 — Write the script:
-Follow the CLAUDE.md rules in your system prompt exactly.
-Use the winning title. Weave the top 3-5 keywords naturally into the first 60 seconds.
-Lead with the strongest outlier angle for the hook.
+- vidiq_keyword_research: search volume + competition for the topic
+- vidiq_outliers: videos over-performing right now (reveals best angle/format)
+- vidiq_youtube_search: what's already ranking (avoid duplicating it)
+- vidiq_channel_analytics: channel avg views and best-performing topics
+- vidiq_generate_titles: 5 title candidates using keyword data
+- vidiq_score_title: score all 5 candidates — pick the highest scorer
 
-STEP 3 — Output:
+Look for:
+- High volume + low competition keywords → weave top 3-5 naturally into first 60s of narration
+- Outlier videos → use their angle and hook structure, not their content
+- Curiosity-gap title format: "Why X Never Y", "What Ancient Humans Did About X", "The Real Reason You X"
+
+## PHASE 2 — Write the script
+
+Use the winning title + vidIQ keyword insights to write a complete script matching this exact format:
+
+```
+TITLE: [winning title]
+KEYWORDS: [3-5 top keywords from vidIQ]
+
+[00:00-00:35] HOOK
+[provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
+
+[00:35-02:00] SECTION 1 — [section title]
+[narration prose]
+VISUAL: [which cat, what action, what prop — one line per scene beat]
+
+... 10-14 sections total ...
+
+[11:30-12:00] CTA CLOSE
+[subscribe prompt only — no teasing a next video]
+```
+
+### Script rules
+
+- Target 12:00 total (never under 9:00, never over 15:00)
+- The voiceover voice runs at ~160 wpm:
+  - 12-min target = ~1,920 words of narration (VISUAL lines don't count)
+  - 9-min minimum = ~1,440 words
+  - Each 60-90s section = 160-240 words of narration
+  - Hook (35s) = ~95 words. CTA (30s) = ~80 words.
+  - After writing, count narration words — if under 1,700, expand sections before finishing
+- Hook hard in the first 10 seconds — lead with the most surprising fact, not context
+- Every narration beat gets a VISUAL line showing the cat doing an action, not reacting
+- VISUAL lines must be literal: "cat holds five flat gold trophies" not "cat looks amazed"
+- Cats are visual helpers — they hold objects, point at diagrams, demonstrate actions
+- Cats do NOT react emotionally, look at the camera, or address the viewer
+- Vary which cat appears (orange, white, both) — never the same cat 3 beats in a row
+
+### Forbidden
+- Starting the hook with "In this video…", "Welcome back…", or "Today we're going to…"
+- VISUAL lines describing cat emotions: "cat looks surprised", "cat seems confused"
+- Generic visuals that could fit any moment in any video
+- CTA that teases a next video
+
+## OUTPUT
+
 Return the finished script in this exact format — nothing after it:
 
 ===SCRIPT===
-[full script here with timestamps, section headers, and VISUAL lines]
+[full script here with TITLE, KEYWORDS, timestamps, section headers, narration, and VISUAL lines]
 """
 
 
