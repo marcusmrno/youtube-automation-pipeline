@@ -514,7 +514,8 @@ def generate_image_google(prompt: str, output_path: Path, log_fn,
     # anchor-01 (character sheet) always first — establishes both cat designs
     anchor_files = sorted(STYLE_ANCHORS.glob("anchor-*.png"))
     character_priority = [
-        "anchor-01",  # both cats character reference sheet — ALWAYS first
+        "anchor-01",  # new multi-angle character reference sheet — ALWAYS first
+        "anchor-28", # original character reference sheet — second
         "anchor-02",
         "anchor-03",
         "anchor-06",
@@ -525,7 +526,6 @@ def generate_image_google(prompt: str, output_path: Path, log_fn,
         "anchor-21",
         "anchor-22",
         "anchor-27",
-        "anchor-28",
         "anchor-29",
         "anchor-04",
     ]
@@ -537,8 +537,11 @@ def generate_image_google(prompt: str, output_path: Path, log_fn,
     reference_files = reference_files[:14]
 
     contents = [
-        f"The FIRST reference image is the character reference sheet — match these two cat characters exactly in every scene. "
+        f"The FIRST reference image is the new multi-angle character reference sheet — match these two cat characters exactly in every scene. "
+        f"The SECOND reference image is the original character reference sheet — use both together to lock in the character designs. "
         f"The remaining reference images define the art style to follow precisely.\n\n"
+        f"STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines with visible marker streaks. "
+        f"Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
         f"{prompt}",
     ]
     for ref_path in reference_files:
