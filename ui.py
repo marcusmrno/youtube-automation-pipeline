@@ -446,9 +446,12 @@ def regenerate_audio():
     def progress_cb(msg: str):
         lq.put({"type": "log", "stage": "voice", "msg": msg})
 
+    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
+    profile = load_profile(profile_name)
+
     def worker():
         try:
-            generate_voiceover(tts_path.read_text(), run_dir, progress_cb)
+            generate_voiceover(tts_path.read_text(), run_dir, profile, progress_cb)
         except Exception as e:
             lq.put({"type": "log", "stage": "voice", "msg": f"❌  Error: {e}"})
         finally:
