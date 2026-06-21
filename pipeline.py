@@ -4,6 +4,7 @@ Generates all video assets from a single topic string.
 Usage: python pipeline.py "your topic here"
        or import run_pipeline() and call it from ui.py
 """
+from __future__ import annotations
 
 import os
 import re
@@ -510,33 +511,24 @@ def check_keys(log_fn) -> bool:
     return True
 
 
-def generate_image_google(prompt: str, output_path: Path, log_fn,
-                          model: str = GOOGLE_FAST_MODEL) -> bool:
+def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
+                          model: str = None) -> bool:
     """Generate image via Google AI. Passes style sheet + anchor images as references."""
-    # anchor-01 (character sheet) always first — establishes both cat designs
-    anchor_files = sorted(STYLE_ANCHORS.glob("anchor-*.png"))
-    character_priority = [
-        "anchor-01",  # new multi-angle character reference sheet — ALWAYS first
-        "anchor-28", # original character reference sheet — second
-        "anchor-02",
-        "anchor-03",
-        "anchor-06",
-        "anchor-13",
-        "anchor-18",
-        "anchor-19",
-        "anchor-20",
-        "anchor-21",
-        "anchor-22",
-        "anchor-27",
-        "anchor-29",
-        "anchor-04",
-    ]
+    from profile import Profile  # local import avoids circular deps at module level
+
+    if model is None:
+        model = profile.image_gen["default_model"]
+
+    # Load anchors from profile directory in priority order
+    anchors_dir = profile.anchors_dir
+    anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
+    anchor_map = {f.stem: f for f in anchor_files}
+
     reference_files = []
-    for name in character_priority:
-        match = next((f for f in anchor_files if f.stem == name), None)
-        if match:
-            reference_files.append(match)
-    reference_files = reference_files[:14]
+    for name in profile.image_style.get("anchor_priority", []):
+        if name in anchor_map:
+            reference_files.append(anchor_map[name])
+    reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
 
     contents = [
         f"The FIRST reference image is the new multi-angle character reference sheet — match these two cat characters exactly in every scene. "
@@ -615,7 +607,7 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
 
 
 def generate_all_images(prompts: list[dict], out_dir: Path,
-                        log_fn, stop_event=None, skip_existing=False) -> dict:
+                        profile: "Profile", log_fn, stop_event=None, skip_existing=False) -> dict:
     """Generate images sequentially. Returns {num: path} for successful images."""
     results = {}
     total = len(prompts)
@@ -632,7 +624,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
             continue
 
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
-        ok = generate_image_google(prompt, img_path, log_fn)
+        ok = generate_image_google(prompt, img_path, profile, log_fn)
         if ok:
             results[num] = _find_image(out_dir / "images", num) or img_path
         else:
@@ -640,7 +632,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
     return results
 
 def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
-                      progress_callback=None) -> dict:
+                      profile: "Profile" = None, progress_callback=None) -> dict:
     """
     Manually regenerate specific images for a completed run.
 
@@ -651,7 +643,14 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     def log_fn(msg):
         log(msg, progress_callback)
 
-    model = GOOGLE_MODEL_OPTIONS.get(model_key)
+    model = None
+    if profile is not None:
+        key_map = {"2.5-flash": "default_model", "nano-banana-2": "regen_model", "3-pro": "pro_model"}
+        profile_key = key_map.get(model_key)
+        if profile_key:
+            model = profile.image_gen.get(profile_key)
+    if model is None:
+        model = GOOGLE_MODEL_OPTIONS.get(model_key)
     if not model:
         log_fn(f"❌  Unknown model key '{model_key}'. Choose from: {list(GOOGLE_MODEL_OPTIONS)}")
         return {"status": "error", "reason": "unknown model key"}
@@ -677,7 +676,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         prompt   = all_prompts[num]["prompt"]
         img_path = out_dir / "images" / f"{num}.png"  # default; may be renamed to .jpg by generator
         log_fn(f"🔄  Regenerating {num} using {model_key}...")
-        ok = generate_image_google(prompt, img_path, log_fn, model=model)
+        ok = generate_image_google(prompt, img_path, profile, log_fn, model=model)
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
