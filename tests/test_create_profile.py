@@ -42,6 +42,29 @@ def test_extract_markdown_block():
     assert extract_fenced_block(text, "markdown") == "# Title"
 
 
+from create_profile_anchors import run_full_anchors
+
+
+def test_run_full_anchors_skips_existing(tmp_path):
+    anchors_dir = tmp_path / "anchors"
+    anchors_dir.mkdir()
+    # Pre-create anchor-03.png so it should be skipped
+    (anchors_dir / "anchor-03.png").write_bytes(b"fake")
+
+    profile_yaml = {
+        "image_gen": {"default_model": "gemini-3.1-flash-image"},
+        "image_style": {"anchor_priority": ["anchor-01", "anchor-02", "anchor-03"], "max_anchors": 14},
+    }
+    prompts = ["prompt1", "prompt2", "prompt3"]
+
+    with patch("create_profile_anchors.generate_anchor", return_value=True) as mock_gen:
+        result = run_full_anchors(profile_yaml, anchors_dir, prompts, start_from=3)
+
+    # anchor-03 already exists, should not be generated
+    called_names = [call.args[1].name for call in mock_gen.call_args_list]
+    assert not any("anchor-03" in n for n in called_names)
+
+
 def test_generate_anchor_returns_false_on_exception(tmp_path):
     profile_yaml = {
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
