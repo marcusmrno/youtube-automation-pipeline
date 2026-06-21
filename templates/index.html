@@ -1059,6 +1059,10 @@ html, body {
 
         <!-- Topic mode -->
         <div id="modeTopicPanel">
+          <label class="input-label" for="profileSelect">Channel Profile</label>
+          <select id="profileSelect" class="topic-input" style="height:auto;padding:9px 14px;margin-bottom:8px">
+            <option value="">Loading profiles…</option>
+          </select>
           <label class="input-label" for="topicInput">Topic</label>
           <textarea
             id="topicInput"
@@ -1658,7 +1662,7 @@ async function runPipeline() {
     const topic = document.getElementById('topicInput').value.trim();
     if (!topic) { document.getElementById('topicInput').focus(); return; }
     endpoint = '/run';
-    payload  = { topic };
+    payload  = { topic, profile: document.getElementById('profileSelect').value };
   }
 
   // UI state
@@ -2197,8 +2201,24 @@ async function regenAudio() {
   };
 }
 
+// ── Profiles ──────────────────────────────────────────────────────────────
+
+async function loadProfiles() {
+  try {
+    const res = await fetch('/profiles');
+    const profiles = await res.json();
+    const sel = document.getElementById('profileSelect');
+    sel.innerHTML = profiles.map(p =>
+      `<option value="${p.name}">${p.display}</option>`
+    ).join('');
+  } catch (e) {
+    console.error('Failed to load profiles:', e);
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────
 
+loadProfiles();
 refreshScripts();
 refreshRuns();
 refreshImagePicker();

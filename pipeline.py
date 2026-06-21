@@ -4,6 +4,7 @@ Generates all video assets from a single topic string.
 Usage: python pipeline.py "your topic here"
        or import run_pipeline() and call it from ui.py
 """
+from __future__ import annotations
 
 import os
 import re
@@ -27,10 +28,7 @@ load_dotenv()
 # ── Config ────────────────────────────────────────────────────────────────────
 
 PROJECT_ROOT    = Path(__file__).parent
-STYLE_ANCHORS   = PROJECT_ROOT / "style-anchors"
 OUTPUT_ROOT     = PROJECT_ROOT / "output"
-CLAUDE_MD       = PROJECT_ROOT / "CLAUDE.md"
-STYLE_SHEET     = STYLE_ANCHORS / "style-sheet.md"
 
 ANTHROPIC_KEY   = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
@@ -65,18 +63,6 @@ def slugify(text: str) -> str:
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
     return text[:60]
-
-
-def load_claude_md() -> str:
-    if CLAUDE_MD.exists():
-        return CLAUDE_MD.read_text()
-    return ""
-
-
-def load_style_sheet() -> str:
-    if STYLE_SHEET.exists():
-        return STYLE_SHEET.read_text()
-    return ""
 
 
 def make_output_dir(slug: str) -> Path:
@@ -138,14 +124,74 @@ def _extract(tag: str, text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _generate_tts_and_prompts(script: str, client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
-    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
+# ── Prompt builders (pure functions — no API calls) ───────────────────────────
 
-    # ── Call 1: TTS extraction ────────────────────────────────────────────────
-    log_fn("✍️  Extracting TTS narration from script...")
+def _build_script_prompt(topic: str, research: str, profile: "Profile") -> str:
+    s = profile.script
+    c = profile.channel
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+    max_words    = s["max_mins"] * s["wpm"]
+    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
+    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
+    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
+    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
 
-    tts_prompt = f"""
-You are preparing a TTS narration for ElevenLabs eleven_v3 from a finished YouTube video script.
+    template = f"""
+You are a script writer for a faceless educational YouTube channel.
+
+## Channel Identity
+- Niche: {c["niche"]}
+- Target audience: {c["audience"]}
+- Tone: {c["tone"]}
+- Reference channel: {c["reference_channel"]} — study the hook style and pacing
+- Titles: {c["title_format"]}
+
+## Script Structure
+- Hook (0:00-0:{s["hook_duration_s"]:02d}): Provocative opening statement or surprising fact. No intro, no "welcome back".
+- {s["section_count"]} content sections with clear [MM:SS-MM:SS] timestamps
+- Each section {s["section_duration_s"]} seconds
+- CTA close (last {s["cta_duration_s"]} seconds): Subscribe prompt only — no teasing or referencing a next video
+
+## Word Count Rules
+The voiceover is delivered at ~{s["wpm"]} words per minute.
+- {s["target_mins"]}-minute target = ~{target_words} words of narration
+- {s["min_mins"]}-minute minimum  = ~{min_words} words of narration
+- {s["max_mins"]}-minute maximum = ~{max_words} words of narration
+- Each {s["section_duration_s"]} second section needs {section_min}-{section_max} words of narration
+- Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA close ({s["cta_duration_s"]}s) = ~{cta_words} words.
+After writing, count your narration words. If under {round(min_words * 1.1)}, expand sections before returning.
+
+---
+TOPIC: {topic}
+
+---
+RESEARCH & VERIFIED FACTS:
+{research}
+
+IMPORTANT: Base the script only on the verified facts above.
+- Do not invent statistics or claims not supported by the research.
+- Avoid any misconceptions listed above.
+- Where confidence is noted as lower, use softened language ("some researchers suggest", "evidence points to", etc.).
+- Use the hook angles as inspiration for the opening {s["hook_duration_s"]} seconds.
+
+Your task: Write a full narration-only script. Do not describe visuals, camera directions, or what should appear on screen — write only what the narrator speaks aloud. Structure with [MM:SS-MM:SS] section timestamps.
+
+Return your response in this exact format — no other text:
+
+===SCRIPT===
+[full script here]
+"""
+
+    override = profile.dir / "overrides" / "script_prompt.txt"
+    if override.exists():
+        return override.read_text()
+    return template
+
+
+def _build_tts_prompt(script: str, profile: "Profile") -> str:
+    template = f"""
+You are preparing a TTS narration for ElevenLabs {profile.voice.get("model", "eleven_v3")} from a finished YouTube video script.
 
 SCRIPT:
 {script}
@@ -153,7 +199,7 @@ SCRIPT:
 ## Extraction rules
 - Strip all timestamps, VISUAL lines, section headers, and stage directions.
 - Keep only the words spoken aloud, in order, as naturally flowing prose.
-- Do NOT use SSML tags — eleven_v3 does not support them.
+- Do NOT use SSML tags — {profile.voice.get("model", "eleven_v3")} does not support them.
 - Do NOT use tags that describe visuals or actions (e.g. [grinning], [pacing]) — only auditory tags.
 - Do NOT change any words — only add/remove/reposition tags and adjust punctuation/capitalisation for emphasis.
 
@@ -224,13 +270,7 @@ Rhetorical question          → [questioning] or [curious]
 CTA close                    → [warmly] once at the very start, then no more tags
 
 ## Channel tone
-Confident, slightly provocative explainer — not a news anchor or teacher.
-[excited] = genuine surprise, not a game show host.
-[sarcastic] = dry, not mean.
-[whispers] = conspiratorial, not creepy.
-[sighs] = tired-of-the-myth, not sad.
-[angry] = controlled outrage, not a rant.
-[warmly] = earned human moment on the close, not performative.
+{profile.voice["tone_description"]}
 
 Return only this, no other text:
 
@@ -238,24 +278,25 @@ Return only this, no other text:
 [clean narration here]
 """
 
-    r1 = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=8000,
-        messages=[{"role": "user", "content": tts_prompt}]
-    )
-    tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
-    log_fn("✅  TTS narration extracted")
+    override = profile.dir / "overrides" / "tts_prompt.txt"
+    if override.exists():
+        return override.read_text()
+    return template
 
-    # ── Call 2: Image prompts ─────────────────────────────────────────────────
-    log_fn("🖼️  Generating image prompts...")
 
-    prompts_prompt = f"""
+def _build_image_prompt_instructions(profile: "Profile") -> str:
+    s = profile.script
+    target_images = s["target_mins"] * 25  # ~25 cuts/minute
+
+    char_block = profile.characters_block()
+    behavior   = profile.character_behavior.strip()
+    style      = profile.image_style["art_style_block"].strip()
+    sky        = profile.image_style.get("sky_rotation", "")
+
+    template = f"""
 You are an image prompt writer for a flat 2D educational YouTube video pipeline targeting Google Gemini image generation.
 
 Below is a segment of the script. Each VISUAL line shows the timestamp and narration that will be playing at that moment. Your job is to write one image prompt per VISUAL line — a scene that is a direct, literal translation of EXACTLY what the narrator says in that line.
-
-SCRIPT SEGMENT:
-{script}
 
 ---
 
@@ -263,19 +304,17 @@ SCRIPT SEGMENT:
 
 For each narration beat, ask: what is the single most concrete, specific thing being said right now? Build the entire image around showing that one thing as literally and directly as possible.
 
-A correct prompt is one that, if you muted the video and watched only the images, would show the exact fact being stated — not the mood, not a related concept, not a vibe.
-
 **Rules:**
 - The image must be SPECIFIC to its narration line — it must be impossible to swap it with any other image in the video
 - If the narration mentions a number, that number must appear large and prominent in the image
 - If the narration names a specific thing (organ, vitamin, country, person, object), that thing must be the main visual element
-- If the narration describes an action or process, the cat must be physically performing or demonstrating it
+- If the narration describes an action or process, a character must be physically performing or demonstrating it
 - Never show a "mood" or "vibe" — show the exact fact being stated
-- Never write a scene that could fit 3 different moments in the script — if it could, it is too generic
+- Never write a scene that could fit 3 different moments in the script
 
 **Forbidden:**
-- Cats looking surprised, confused, or reacting emotionally to narration
-- Generic "cat standing in environment" scenes with no specific prop
+- Characters looking surprised, confused, or reacting emotionally to narration
+- Generic "character standing in environment" scenes with no specific prop
 - Any prop or object not directly tied to the narration line
 - Reusing the same scene composition for consecutive prompts
 - Two consecutive prompts with the same sky color
@@ -283,62 +322,36 @@ A correct prompt is one that, if you muted the video and watched only the images
 
 ---
 
-## Translation examples
+## Character descriptions — embed verbatim in EVERY prompt
 
-NARRATION: "Your body cannot make vitamin C on its own"
-→ Large flat circle labeled BODY with thick red X through it, beside it large flat orange circle labeled VIT C with red NO ENTRY sign — Orange Cat standing left of center pointing at the BODY circle — [character desc] — sky blue sky, pale green ground, horizon visible — grey rounded rectangle label box reading CANNOT MAKE IT — [style block]
+{char_block}
 
-NARRATION: "Thirteen vitamins are essential for human survival"
-→ Large bold red handwritten number 13 dominates upper center — below it thirteen small flat colored circle shapes in loose grid — Orange Cat pointing at the grid with right arm extended — [character desc] — pale yellow sky, brown ground, horizon visible — grey rounded rectangle label box reading 13 VITAMINS — [style block]
-
-NARRATION: "Fat-soluble vitamins are stored in your liver"
-→ Large flat brown irregular blob shape labeled LIVER in bold black marker — four small flat colored pill shapes sitting inside the liver blob — White Cat pointing at it with right arm extended — [character desc] — soft peach sky, tan ground, horizon visible — grey rounded rectangle label box reading STORED IN LIVER — [style block]
-
-NARRATION: "Brazil has won the World Cup five times"
-→ Five small flat gold trophy shapes stacked in a pile center frame — Orange Cat holding the stack with both hands extended — [character desc] — sky blue sky, green ground, horizon visible — bold black handwritten text reading 5X beside trophies — [style block]
+{behavior}
 
 ---
 
-## Character descriptions — embed verbatim in EVERY prompt
+## Environment
+- Always include a visible horizon line separating sky (top) from ground plane (bottom)
+- Sky color rotation: {sky}
+- Never the same sky twice in a row. No more than 1 in 3 prompts may use the first sky color.
+- Ground: flat solid color plane filling bottom third. Always visible.
+- Midground (optional): one flat silhouette layer. Solid fill only, no interior detail.
+- Characters always stand on the ground plane — never floating.
 
-**Orange Cat:** large orange tabby cat, round head slightly lopsided, small uneven triangle ears, three short whisker lines on each side of face, dot eyes at slightly different heights, simple curved mouth, solid orange body asymmetric and lumpy, small black bowtie at neck slightly crooked, small filled circle hands at end of arms, small flat oval feet
-
-**White Cat:** small white fluffy cat, round head slightly squished, small triangle ears with grey inner ear fill, two short whisker lines on each side, dot eyes misaligned, grey irregular patch around left eye, solid white body with uneven outline, small pink collar slightly tilted, grey-tipped tail with wobbly outline, small filled circle hands, small flat oval feet
-
-Alternate every 2-3 prompts — never the same cat more than 3 prompts in a row. Use both cats when the scene benefits from two figures or scale contrast.
-
-Cats are visual helpers: hold objects, point at diagrams, stand as example figures, demonstrate physical actions.
-Cats do NOT: react emotionally, look at the camera, express surprise or confusion, address the viewer.
+## Text in image
+Whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
 
 ---
 
 ## Art style — end EVERY prompt with this exact block
 
-flat 2D hand-drawn illustration on slightly off-white warm paper, bold black outlines with heavy uneven stroke weight that varies along every line, outlines overshoot corners and cross each other leaving wobbly doubled edges, color fills bleed outside the outlines like a marker bleeding through paper, uneven patchy fills with visible streaks and gaps, solid flat colors only, no shading no gradients no photorealism, everything slightly asymmetric and lopsided, all text written in thick uneven uppercase marker handwriting with letters at different sizes and slight tilts
-
----
-
-## Scene structure (build in this order)
-
-1. **CORE VISUAL FIRST** — the specific object, diagram, number, or prop that encodes the narration fact. Shape, color, size, exact label text (always write the exact words, never "a label with the name").
-
-2. **CAT ACTION** — which cat, where in frame, exactly what they are doing with their body and hands. Must relate directly to the core visual. Embed full character description verbatim.
-
-3. **ENVIRONMENT** — keep simple, never let it compete with the core visual:
-   - SKY: rotate strictly — warm orange → sky blue → pale yellow → soft peach → dusty rose → bright yellow → lime green. NEVER the same sky twice in a row. No more than 1 in 3 prompts may use orange sky.
-   - GROUND: flat solid color plane filling bottom third. Always visible.
-   - HORIZON LINE: always present.
-   - MIDGROUND (optional): one flat silhouette layer — grass blades, mountains, buildings, rocks. Solid fill only, no interior detail.
-   - FOREGROUND: small flat pebbles or crack lines.
-   - Characters always stand on the ground plane — never floating.
-
-4. **TEXT IN IMAGE** — whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
+{style}
 
 ---
 
 ## Format
 
-Write one prompt per NARRATION BEAT — not one per section. Each section (60-90 seconds) should produce 25-40 prompts. A 12-minute video needs ~300 prompts total.
+Write one prompt per NARRATION BEAT. A {s["target_mins"]}-minute video needs ~{target_images} prompts total.
 
 For each prompt, derive a tight timestamp from narration pacing (~3-4 seconds per image).
 Format each line as:
@@ -352,6 +365,179 @@ Return only:
 ===IMAGE_PROMPTS===
 [prompts here]
 """
+
+    override = profile.dir / "overrides" / "image_prompt_instructions.txt"
+    if override.exists():
+        return override.read_text()
+    return template
+
+
+def _build_agent_script_prompt(profile: "Profile") -> str:
+    s = profile.script
+    c = profile.channel
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
+    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
+    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
+    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+
+    char_names = " / ".join(ch["name"] for ch in profile.characters)
+    char_block = profile.characters_block()
+
+    return f"""
+You are writing a YouTube video script for a channel: {c["name"]}.
+Follow this two-phase process exactly — never skip research to jump straight to writing.
+
+## PHASE 1 — Research (run ALL of these in parallel)
+
+- vidiq_keyword_research: search volume + competition for the topic
+- vidiq_outliers: videos over-performing right now (reveals best angle/format)
+- vidiq_youtube_search: what's already ranking (avoid duplicating it)
+- vidiq_channel_analytics: channel avg views and best-performing topics
+- vidiq_generate_titles: 5 title candidates using keyword data
+- vidiq_score_title: score all 5 candidates — pick the highest scorer
+
+Look for:
+- High volume + low competition keywords → weave top 3-5 naturally into first 60s of narration
+- Outlier videos → use their angle and hook structure, not their content
+- Channel niche: {c["niche"]}
+- Channel tone: {c["tone"]}
+- Title format: {c["title_format"]}
+
+## PHASE 2 — Write the script
+
+Use the winning title + vidIQ keyword insights to write a complete script matching this exact format:
+
+```
+TITLE: [winning title]
+KEYWORDS: [3-5 top keywords from vidIQ]
+
+[00:00-00:{s["hook_duration_s"]:02d}] HOOK
+[provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
+
+[00:{s["hook_duration_s"]:02d}-02:00] SECTION 1 — [section title]
+[narration prose]
+VISUAL: [which character, what action, what prop — one line per scene beat]
+
+... {s["section_count"]} sections total ...
+
+[CTA CLOSE — last {s["cta_duration_s"]} seconds]
+[subscribe prompt only — no teasing a next video]
+```
+
+### Script rules
+
+- Target {s["target_mins"]}:00 total (never under {s["min_mins"]}:00, never over {s["max_mins"]}:00)
+- The voiceover voice runs at ~{s["wpm"]} wpm:
+  - {s["target_mins"]}-min target = ~{target_words} words of narration
+  - {s["min_mins"]}-min minimum = ~{min_words} words
+  - Each {s["section_duration_s"]}s section = {section_min}-{section_max} words of narration
+  - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA ({s["cta_duration_s"]}s) = ~{cta_words} words.
+  - After writing, count narration words — if under {round(min_words * 1.1)}, expand sections before finishing
+- Hook hard in the first 10 seconds — lead with the most surprising fact, not context
+- Every narration beat gets a VISUAL line showing a character doing an action, not reacting
+- VISUAL lines must be literal: "cat holds five flat gold trophies" not "cat looks amazed"
+- Vary which character appears ({char_names}) — never the same character 3 beats in a row
+
+## Characters
+
+{char_block}
+
+{profile.character_behavior.strip()}
+
+### Forbidden
+- Starting the hook with "In this video…", "Welcome back…", or "Today we're going to…"
+- VISUAL lines describing character emotions
+- Generic visuals that could fit any moment in any video
+- CTA that teases a next video
+
+## OUTPUT
+
+Return the finished script in this exact format — nothing after it:
+
+===SCRIPT===
+[full script here with TITLE, KEYWORDS, timestamps, section headers, narration, and VISUAL lines]
+"""
+
+
+def _build_vet_prompt(profile: "Profile") -> str:
+    s = profile.script
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+
+    return f"""
+You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
+
+STEP 1 — Pull live vidIQ data on the topic (run in parallel):
+- vidiq_keyword_research: confirm the top keywords and their search volume
+- vidiq_outliers: find the highest over-performing videos on this topic right now
+- vidiq_youtube_search: see what is currently ranking and how it is framed
+- vidiq_score_title: score the current script title and note the result
+
+STEP 2 — Review the script against the data:
+- FACTUAL ACCURACY: flag any claims that are outdated, exaggerated, or unsupported
+- MISSING ANGLES: if the script misses the strongest outlier hook angle, note it
+- KEYWORD GAPS: if the top keywords are absent from the first 60 seconds, flag them
+- TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative
+- WORD COUNT: narration must be {round(min_words * 1.1)}-{target_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
+
+STEP 3 — Rewrite the script with all fixes applied:
+Make only the changes the review identified. Do not restructure the whole script or change the channel tone.
+Preserve all VISUAL lines, timestamps, and section headers exactly unless a section was expanded.
+
+STEP 4 — Output:
+Return the vetted script in this exact format — nothing after it:
+
+===SCRIPT===
+[full revised script here]
+"""
+
+
+def _build_agent_system_prompt(topic: str, profile: "Profile") -> str:
+    c = profile.channel
+    char_block = profile.characters_block()
+    style      = profile.image_style["art_style_block"].strip()
+
+    return f"""## Channel: {c["name"]}
+Niche: {c["niche"]}
+Audience: {c["audience"]}
+Tone: {c["tone"]}
+
+## Characters
+{char_block}
+
+{profile.character_behavior.strip()}
+
+## Visual Style
+{style}
+
+---
+TOPIC: {topic}
+"""
+
+
+def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
+    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
+
+    # ── Call 1: TTS extraction ────────────────────────────────────────────────
+    log_fn("✍️  Extracting TTS narration from script...")
+
+    tts_prompt = _build_tts_prompt(script, profile)
+
+    r1 = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=8000,
+        messages=[{"role": "user", "content": tts_prompt}]
+    )
+    tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
+    log_fn("✅  TTS narration extracted")
+
+    # ── Call 2: Image prompts ─────────────────────────────────────────────────
+    log_fn("🖼️  Generating image prompts...")
+
+    base_instructions = _build_image_prompt_instructions(profile)
+    prompts_prompt = base_instructions
 
     # Split script in half by section boundaries so each batch has full section context
     # but the model isn't overwhelmed with the entire script at once.
@@ -376,9 +562,9 @@ Return only:
             if batch_idx == 0
             else f"Continue numbering from {start_num:03d}. Do NOT restart from 001 — the previous batch ended at {last_prompt_num:03d}."
         )
-        batch_instruction = prompts_prompt.replace(
-            "SCRIPT SEGMENT:\n{script}",
-            f"SCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
+        batch_instruction = (
+            prompts_prompt
+            + f"\nSCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
             f"NUMBERING: {numbering}\n"
             f"TARGET: ~25 prompts per minute of content. Write one prompt per scene beat, not one per section."
         )
@@ -419,54 +605,10 @@ Return only:
     return tts_script, image_prompts
 
 
-def generate_script(topic: str, research: str, client: anthropic.Anthropic, log_fn) -> str:
-    """Returns the script text. TTS and image prompts are generated separately after approval."""
-    prompt = f"""
-You are a script writer for a faceless educational YouTube channel.
-
-## Channel Identity
-- Niche: Curiosity / history / psychology — educational content with surprising angles
-- Target audience: Curious adults, 25-40, enjoy learning counterintuitive facts
-- Tone: Conversational, confident, slightly provocative. Hook hard, deliver real substance.
-- Reference channel: Axen (youtube.com/@axen) — study the hook style and pacing
-- Titles: Curiosity-gap format. "Why X Never Y", "What Ancient Humans Did About X", "The Real Reason You X"
-
-## Script Structure
-- Hook (0:00-0:35): Provocative opening statement or surprising fact. No intro, no "welcome back".
-- 10-14 content sections with clear [MM:SS-MM:SS] timestamps
-- Each section 60-90 seconds
-- CTA close (last 30 seconds): Subscribe prompt only — no teasing or referencing a next video
-
-## Word Count Rules
-The voiceover is delivered at ~160 words per minute.
-- 12-minute target = ~1,920 words of narration
-- 9-minute minimum  = ~1,440 words of narration
-- 15-minute maximum = ~2,400 words of narration
-- Each 60-90 second section needs 160-240 words of narration
-- Hook (35s) = ~95 words. CTA close (30s) = ~80 words.
-After writing, count your narration words. If under 1,700, expand sections before returning.
-
----
-TOPIC: {topic}
-
----
-RESEARCH & VERIFIED FACTS:
-{research}
-
-IMPORTANT: Base the script only on the verified facts above.
-- Do not invent statistics or claims not supported by the research.
-- Avoid any misconceptions listed above.
-- Where confidence is noted as lower, use softened language ("some researchers suggest", "evidence points to", etc.).
-- Use the hook angles as inspiration for the opening 35 seconds.
-
-Your task: Write a full narration-only script. Do not describe visuals, camera directions, or what should appear on screen — write only what the narrator speaks aloud. Structure with [MM:SS-MM:SS] section timestamps.
-
-Return your response in this exact format — no other text:
-
-===SCRIPT===
-[full script here]
-"""
-
+def generate_script(topic: str, research: str, profile: "Profile",
+                    client: anthropic.Anthropic, log_fn) -> str:
+    """Returns the script text."""
+    prompt = _build_script_prompt(topic, research, profile)
     log_fn("✍️  Writing script...")
     r = client.messages.create(
         model=CLAUDE_MODEL,
@@ -495,14 +637,14 @@ def parse_image_prompts(raw: str) -> list[dict]:
 
 # ── Phase 2: Image Generation ─────────────────────────────────────────────────
 
-def check_keys(log_fn) -> bool:
+def check_keys(profile: "Profile", log_fn) -> bool:
     """Verify all API keys are present. Returns False and logs if any are missing."""
     missing = []
-    if not ANTHROPIC_KEY: missing.append("ANTHROPIC_API_KEY")
-    if not GOOGLE_KEY:    missing.append("GOOGLE_API_KEY")
-    if not EL_KEY:        missing.append("ELEVENLABS_API_KEY")
-    if not EL_VOICE_ID:   missing.append("ELEVENLABS_VOICE_ID")
-    if not VIDIQ_KEY:     missing.append("VIDIQ_API_KEY")
+    if not ANTHROPIC_KEY:              missing.append("ANTHROPIC_API_KEY")
+    if not GOOGLE_KEY:                 missing.append("GOOGLE_API_KEY")
+    if not EL_KEY:                     missing.append("ELEVENLABS_API_KEY")
+    if not profile.voice["voice_id"]:  missing.append("voice_id (in profile or ELEVENLABS_VOICE_ID env var)")
+    if not VIDIQ_KEY:                  missing.append("VIDIQ_API_KEY")
     if missing:
         log_fn(f"❌  Missing API keys in .env: {', '.join(missing)}")
         return False
@@ -510,33 +652,24 @@ def check_keys(log_fn) -> bool:
     return True
 
 
-def generate_image_google(prompt: str, output_path: Path, log_fn,
-                          model: str = GOOGLE_FAST_MODEL) -> bool:
+def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
+                          model: str = None) -> bool:
     """Generate image via Google AI. Passes style sheet + anchor images as references."""
-    # anchor-01 (character sheet) always first — establishes both cat designs
-    anchor_files = sorted(STYLE_ANCHORS.glob("anchor-*.png"))
-    character_priority = [
-        "anchor-01",  # new multi-angle character reference sheet — ALWAYS first
-        "anchor-28", # original character reference sheet — second
-        "anchor-02",
-        "anchor-03",
-        "anchor-06",
-        "anchor-13",
-        "anchor-18",
-        "anchor-19",
-        "anchor-20",
-        "anchor-21",
-        "anchor-22",
-        "anchor-27",
-        "anchor-29",
-        "anchor-04",
-    ]
+    from profile import Profile  # local import avoids circular deps at module level
+
+    if model is None:
+        model = profile.image_gen["default_model"]
+
+    # Load anchors from profile directory in priority order
+    anchors_dir = profile.anchors_dir
+    anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
+    anchor_map = {f.stem: f for f in anchor_files}
+
     reference_files = []
-    for name in character_priority:
-        match = next((f for f in anchor_files if f.stem == name), None)
-        if match:
-            reference_files.append(match)
-    reference_files = reference_files[:14]
+    for name in profile.image_style.get("anchor_priority", []):
+        if name in anchor_map:
+            reference_files.append(anchor_map[name])
+    reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
 
     contents = [
         f"The FIRST reference image is the new multi-angle character reference sheet — match these two cat characters exactly in every scene. "
@@ -615,7 +748,7 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
 
 
 def generate_all_images(prompts: list[dict], out_dir: Path,
-                        log_fn, stop_event=None, skip_existing=False) -> dict:
+                        profile: "Profile", log_fn, stop_event=None, skip_existing=False) -> dict:
     """Generate images sequentially. Returns {num: path} for successful images."""
     results = {}
     total = len(prompts)
@@ -632,7 +765,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
             continue
 
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
-        ok = generate_image_google(prompt, img_path, log_fn)
+        ok = generate_image_google(prompt, img_path, profile, log_fn)
         if ok:
             results[num] = _find_image(out_dir / "images", num) or img_path
         else:
@@ -640,7 +773,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
     return results
 
 def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
-                      progress_callback=None) -> dict:
+                      profile: "Profile" = None, progress_callback=None) -> dict:
     """
     Manually regenerate specific images for a completed run.
 
@@ -651,7 +784,14 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     def log_fn(msg):
         log(msg, progress_callback)
 
-    model = GOOGLE_MODEL_OPTIONS.get(model_key)
+    model = None
+    if profile is not None:
+        key_map = {"2.5-flash": "default_model", "nano-banana-2": "regen_model", "3-pro": "pro_model"}
+        profile_key = key_map.get(model_key)
+        if profile_key:
+            model = profile.image_gen.get(profile_key)
+    if model is None:
+        model = GOOGLE_MODEL_OPTIONS.get(model_key)
     if not model:
         log_fn(f"❌  Unknown model key '{model_key}'. Choose from: {list(GOOGLE_MODEL_OPTIONS)}")
         return {"status": "error", "reason": "unknown model key"}
@@ -677,7 +817,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         prompt   = all_prompts[num]["prompt"]
         img_path = out_dir / "images" / f"{num}.png"  # default; may be renamed to .jpg by generator
         log_fn(f"🔄  Regenerating {num} using {model_key}...")
-        ok = generate_image_google(prompt, img_path, log_fn, model=model)
+        ok = generate_image_google(prompt, img_path, profile, log_fn, model=model)
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
@@ -707,16 +847,19 @@ def _split_into_chunks(text: str, max_chars: int = 4500) -> list[str]:
 
 
 def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
+               voice_id: str = "", model: str = "",
                prev_text: str = "", next_text: str = "") -> bytes | None:
     """Send one chunk to ElevenLabs. Returns raw mp3 bytes or None on failure."""
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{EL_VOICE_ID}"
+    vid = voice_id or EL_VOICE_ID
+    mdl = model or EL_MODEL
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
     params = {"output_format": "mp3_44100_192"}
     payload = {
         "text": text,
-        "model_id": EL_MODEL,
+        "model_id": mdl,
         "voice_settings": voice_settings,
     }
-    if EL_MODEL != "eleven_v3":
+    if mdl != "eleven_v3":
         if prev_text:
             payload["previous_text"] = prev_text
         if next_text:
@@ -736,15 +879,18 @@ def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
     return None
 
 
-def generate_voiceover(tts_script: str, out_dir: Path, log_fn) -> Path | None:
+def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn) -> Path | None:
     """Call ElevenLabs TTS API in chunks. Returns path to mp3 or None on failure."""
     log_fn("🎙  Generating voiceover...")
+
+    voice_id = profile.voice["voice_id"]
+    el_model = profile.voice.get("model", EL_MODEL)
     headers = {"xi-api-key": EL_KEY, "Content-Type": "application/json"}
     voice_settings = {
-        "stability": 0.68,
-        "similarity_boost": 0.85,
-        "style": 0.0,
-        "use_speaker_boost": True,
+        "stability":        profile.voice.get("stability", 0.68),
+        "similarity_boost": profile.voice.get("similarity_boost", 0.85),
+        "style":            profile.voice.get("style", 0.0),
+        "use_speaker_boost": profile.voice.get("use_speaker_boost", True),
     }
 
     chunks = _split_into_chunks(tts_script)
@@ -756,6 +902,7 @@ def generate_voiceover(tts_script: str, out_dir: Path, log_fn) -> Path | None:
         prev_text = chunks[i - 1] if i > 0 else ""
         next_text = chunks[i + 1] if i < len(chunks) - 1 else ""
         data = _tts_chunk(chunk, headers, voice_settings, log_fn,
+                          voice_id=voice_id, model=el_model,
                           prev_text=prev_text, next_text=next_text)
         if data is None:
             log_fn(f"❌  Voiceover failed on chunk {i+1}")
@@ -1003,90 +1150,10 @@ def _timestamp_scale(prompts: list[dict], actual_duration: float) -> float:
 
 VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
 
-AGENT_SCRIPT_PROMPT = """
-You are writing a YouTube video script for a flat 2D educational channel with two cat mascots.
-Follow this two-phase process exactly — never skip research to jump straight to writing.
-
-## PHASE 1 — Research (run ALL of these in parallel)
-
-- vidiq_keyword_research: search volume + competition for the topic
-- vidiq_outliers: videos over-performing right now (reveals best angle/format)
-- vidiq_youtube_search: what's already ranking (avoid duplicating it)
-- vidiq_channel_analytics: channel avg views and best-performing topics
-- vidiq_generate_titles: 5 title candidates using keyword data
-- vidiq_score_title: score all 5 candidates — pick the highest scorer
-
-Look for:
-- High volume + low competition keywords → weave top 3-5 naturally into first 60s of narration
-- Outlier videos → use their angle and hook structure, not their content
-- Curiosity-gap title format: "Why X Never Y", "What Ancient Humans Did About X", "The Real Reason You X"
-
-## PHASE 2 — Write the script
-
-Use the winning title + vidIQ keyword insights to write a complete script matching this exact format:
-
-```
-TITLE: [winning title]
-KEYWORDS: [3-5 top keywords from vidIQ]
-
-[00:00-00:35] HOOK
-[provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
-
-[00:35-02:00] SECTION 1 — [section title]
-[narration prose]
-VISUAL: [which cat, what action, what prop — one line per scene beat]
-
-... 10-14 sections total ...
-
-[11:30-12:00] CTA CLOSE
-[subscribe prompt only — no teasing a next video]
-```
-
-### Script rules
-
-- Target 12:00 total (never under 9:00, never over 15:00)
-- The voiceover voice runs at ~160 wpm:
-  - 12-min target = ~1,920 words of narration (VISUAL lines don't count)
-  - 9-min minimum = ~1,440 words
-  - Each 60-90s section = 160-240 words of narration
-  - Hook (35s) = ~95 words. CTA (30s) = ~80 words.
-  - After writing, count narration words — if under 1,700, expand sections before finishing
-- Hook hard in the first 10 seconds — lead with the most surprising fact, not context
-- Every narration beat gets a VISUAL line showing the cat doing an action, not reacting
-- VISUAL lines must be literal: "cat holds five flat gold trophies" not "cat looks amazed"
-- Cats are visual helpers — they hold objects, point at diagrams, demonstrate actions
-- Cats do NOT react emotionally, look at the camera, or address the viewer
-- Vary which cat appears (orange, white, both) — never the same cat 3 beats in a row
-
-### Forbidden
-- Starting the hook with "In this video…", "Welcome back…", or "Today we're going to…"
-- VISUAL lines describing cat emotions: "cat looks surprised", "cat seems confused"
-- Generic visuals that could fit any moment in any video
-- CTA that teases a next video
-
-## OUTPUT
-
-Return the finished script in this exact format — nothing after it:
-
-===SCRIPT===
-[full script here with TITLE, KEYWORDS, timestamps, section headers, narration, and VISUAL lines]
-"""
-
-
-async def _run_script_agent(topic: str, log_fn) -> str:
+async def _run_script_agent(topic: str, profile: "Profile", log_fn) -> str:
     """Run Claude agent with vidIQ MCP to research topic and write script. Returns script text."""
-    claude_md   = load_claude_md()
-    style_sheet = load_style_sheet()
-
-    system_prompt = f"""{claude_md}
-
----
-STYLE SHEET:
-{style_sheet}
-
----
-TOPIC: {topic}
-"""
+    system_prompt = _build_agent_system_prompt(topic, profile)
+    agent_script_prompt = _build_agent_script_prompt(profile)
 
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
@@ -1103,7 +1170,7 @@ TOPIC: {topic}
 
     full_text = ""
     async for message in agent_query(
-        prompt=f"Topic: {topic}\n\n{AGENT_SCRIPT_PROMPT}",
+        prompt=f"Topic: {topic}\n\n{agent_script_prompt}",
         options=options,
     ):
         if isinstance(message, AssistantMessage):
@@ -1118,57 +1185,15 @@ TOPIC: {topic}
     return _extract("SCRIPT", full_text)
 
 
-def run_script_agent(topic: str, log_fn) -> str:
+def run_script_agent(topic: str, profile: "Profile", log_fn) -> str:
     """Sync wrapper around the async agent. Runs in a new event loop."""
-    return asyncio.run(_run_script_agent(topic, log_fn))
+    return asyncio.run(_run_script_agent(topic, profile, log_fn))
 
 
-VET_PROMPT = """
-You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
-
-STEP 1 — Pull live vidIQ data on the topic (run in parallel):
-- vidiq_keyword_research: confirm the top keywords and their search volume
-- vidiq_outliers: find the highest over-performing videos on this topic right now
-- vidiq_youtube_search: see what is currently ranking and how it is framed
-- vidiq_score_title: score the current script title and note the result
-
-STEP 2 — Review the script against the data:
-Using the vidIQ data and your own knowledge, check for:
-- FACTUAL ACCURACY: flag any claims that are outdated, exaggerated, or unsupported
-- MISSING ANGLES: high-performing outlier videos often cover a specific hook or angle — if the script misses the strongest one, note it
-- KEYWORD GAPS: if the top search-volume keywords for this topic are absent from the first 60 seconds of narration, flag them
-- TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative using the outlier data
-- WORD COUNT: narration must be 1,700-1,920 words (voice runs at ~160 wpm for a 12-minute target) — if short, expand thin sections
-
-STEP 3 — Rewrite the script with all fixes applied:
-Make only the changes the review identified. Do not restructure the whole script or change the channel tone.
-Preserve all VISUAL lines, timestamps, and section headers exactly unless a section was expanded.
-
-STEP 4 — Output:
-Return the vetted script in this exact format — nothing after it:
-
-===SCRIPT===
-[full revised script here]
-"""
-
-
-async def _run_vet_agent(topic: str, script: str, log_fn) -> str:
+async def _run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
     """Run a vidIQ-backed vetting pass on a generated script. Returns revised script text."""
-    claude_md   = load_claude_md()
-    style_sheet = load_style_sheet()
-
-    system_prompt = f"""{claude_md}
-
----
-STYLE SHEET:
-{style_sheet}
-
----
-TOPIC: {topic}
-
-CURRENT SCRIPT TO VET:
-{script}
-"""
+    system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
+    vet_prompt = _build_vet_prompt(profile)
 
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
@@ -1185,7 +1210,7 @@ CURRENT SCRIPT TO VET:
 
     full_text = ""
     async for message in agent_query(
-        prompt=f"Topic: {topic}\n\n{VET_PROMPT}",
+        prompt=f"Topic: {topic}\n\n{vet_prompt}",
         options=options,
     ):
         if isinstance(message, AssistantMessage):
@@ -1200,15 +1225,15 @@ CURRENT SCRIPT TO VET:
     return _extract("SCRIPT", full_text)
 
 
-def run_vet_agent(topic: str, script: str, log_fn) -> str:
+def run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
     """Sync wrapper around the async vet agent."""
-    return asyncio.run(_run_vet_agent(topic, script, log_fn))
+    return asyncio.run(_run_vet_agent(topic, script, profile, log_fn))
 
 
 # ── Shared production phase ───────────────────────────────────────────────────
 
 def _run_production(topic: str, prompts: list[dict], tts_script: str,
-                    out_dir: Path, client: anthropic.Anthropic,
+                    profile: "Profile", out_dir: Path, client: anthropic.Anthropic,
                     log_fn, stop_event=None, skip_existing_images=False) -> dict:
     """
     Phases 2-4: images + voiceover + QA + FCPXML.
@@ -1226,13 +1251,13 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
         if not tts_script:
             log_fn("⚠️  No TTS script available — skipping voiceover")
             return
-        audio_path = generate_voiceover(tts_script, out_dir, log_fn)
+        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn)
 
     vo_thread = threading.Thread(target=voiceover_thread, daemon=True)
     vo_thread.start()
 
     image_results = generate_all_images(
-        prompts, out_dir, log_fn, stop_event,
+        prompts, out_dir, profile, log_fn, stop_event,
         skip_existing=skip_existing_images,
     )
     log_fn(f"✅  {len(image_results)}/{len(prompts)} images ready")
@@ -1308,7 +1333,7 @@ def run_status(run_slug: str) -> dict:
     }
 
 
-def resume_pipeline(run_slug: str, progress_callback=None, stop_event=None) -> dict:
+def resume_pipeline(run_slug: str, profile: "Profile", progress_callback=None, stop_event=None) -> dict:
     """
     Resume a stopped pipeline run. Detects what is missing and regenerates only
     what is needed: image_prompts, tts_script, images, voiceover.
@@ -1316,7 +1341,7 @@ def resume_pipeline(run_slug: str, progress_callback=None, stop_event=None) -> d
     def log_fn(msg):
         log(msg, progress_callback)
 
-    if not check_keys(log_fn):
+    if not check_keys(profile, log_fn):
         return {"status": "error", "reason": "missing API keys"}
 
     out_dir = OUTPUT_ROOT / run_slug
@@ -1345,7 +1370,7 @@ def resume_pipeline(run_slug: str, progress_callback=None, stop_event=None) -> d
         log_fn("📝  Regenerating missing assets from script.txt:")
         if needs_prompts: log_fn("     • image_prompts.txt")
         if needs_tts:     log_fn("     • tts_script.txt")
-        tts_script, image_prompts_raw = _generate_tts_and_prompts(script, client, log_fn)
+        tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
         if needs_tts:
             tts_file.write_text(tts_script)
             log_fn("✅  tts_script.txt saved")
@@ -1364,15 +1389,15 @@ def resume_pipeline(run_slug: str, progress_callback=None, stop_event=None) -> d
     topic = script[:80]
 
     return _run_production(
-        topic, prompts, tts_script, out_dir, client,
+        topic, prompts, tts_script, profile, out_dir, client,
         log_fn, stop_event, skip_existing_images=True,
     )
 
 
 # ── Main Orchestrator ─────────────────────────────────────────────────────────
 
-def run_pipeline(topic: str, progress_callback=None, stop_event=None,
-                 approval_callback=None) -> dict:
+def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
+                 stop_event=None, approval_callback=None) -> dict:
     """
     Run the full pipeline for a given topic.
 
@@ -1388,38 +1413,33 @@ def run_pipeline(topic: str, progress_callback=None, stop_event=None,
 
     log_fn(f"\n🚀  Starting pipeline for: {topic}\n")
 
-    if not check_keys(log_fn):
+    if not check_keys(profile, log_fn):
         return {"status": "error", "reason": "missing API keys"}
 
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     slug    = slugify(topic)
     out_dir = make_output_dir(slug)
-
     log_fn(f"📁  Output directory: {out_dir}")
-
-    # ── Phase 1: Script ───────────────────────────────────────────────────────
 
     if VIDIQ_KEY:
         log_fn("🤖  Running vidIQ research + script agent...")
-        script = run_script_agent(topic, log_fn)
+        script = run_script_agent(topic, profile, log_fn)
         (out_dir / "research.txt").write_text("(handled by agent — see script.txt)")
         if not script:
             log_fn("❌  Agent did not produce a script — aborting")
             return {"status": "error", "reason": "agent produced no script"}
-
     else:
         log_fn("🔬  No vidIQ key — running standard research and script phases...")
         research = research_topic(topic, client, log_fn)
         (out_dir / "research.txt").write_text(research)
-        script = generate_script(topic, research, client, log_fn)
+        script = generate_script(topic, research, profile, client, log_fn)
 
     (out_dir / "script.txt").write_text(script)
-    log_fn(f"📝  Script written")
+    log_fn("📝  Script written")
 
-    # ── Script Vetting (vidIQ accuracy + SEO + word count check) ─────────────
     if VIDIQ_KEY:
         log_fn("🔎  Running vidIQ script vet...")
-        vetted = run_vet_agent(topic, script, log_fn)
+        vetted = run_vet_agent(topic, script, profile, log_fn)
         if vetted:
             script = vetted
             (out_dir / "script.txt").write_text(script)
@@ -1427,7 +1447,6 @@ def run_pipeline(topic: str, progress_callback=None, stop_event=None,
         else:
             log_fn("⚠️  Vet agent returned no output — proceeding with original script")
 
-    # ── Script Approval (before any paid generation) ──────────────────────────
     log_fn("\n" + "─" * 50)
     log_fn("📋  SCRIPT READY FOR REVIEW")
     log_fn(f"     Read it at: {out_dir / 'script.txt'}")
@@ -1443,14 +1462,13 @@ def run_pipeline(topic: str, progress_callback=None, stop_event=None,
         approved = answer == "y"
 
     if not approved:
-        log_fn("🚫  Script rejected — pipeline stopped. Edit script.txt and re-run.")
+        log_fn("🚫  Script rejected — pipeline stopped.")
         return {"status": "rejected", "out_dir": str(out_dir), "script": str(out_dir / "script.txt")}
 
     log_fn("✅  Script approved — generating TTS and image prompts...")
 
-    # ── Phase 1b: TTS + image prompts from approved script ────────────────────
     script = (out_dir / "script.txt").read_text()
-    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, client, log_fn)
+    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
 
     prompts = parse_image_prompts(image_prompts_raw)
     log_fn(f"📝  {len(prompts)} image prompts parsed")
@@ -1463,19 +1481,38 @@ def run_pipeline(topic: str, progress_callback=None, stop_event=None,
     if stop_event and stop_event.is_set():
         return {"status": "cancelled", "out_dir": str(out_dir)}
 
-    # ── Phases 2-4: Images + Voiceover + QA + FCPXML
-    return _run_production(
-        topic, prompts, tts_script, out_dir, client,
-        log_fn, stop_event,
-    )
+    return _run_production(topic, prompts, tts_script, profile, out_dir, client, log_fn, stop_event)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) < 2:
-        print("Usage: python pipeline.py \"your topic here\"")
+    import argparse
+    from profile import load_profile, list_profiles
+
+    parser = argparse.ArgumentParser(description="YouTube Pipeline")
+    parser.add_argument("topic", nargs="+", help="Video topic")
+    parser.add_argument("--profile", default=None, help="Profile name (folder under profiles/)")
+    args = parser.parse_args()
+
+    topic = " ".join(args.topic)
+
+    available = list_profiles()
+    if not available:
+        print("No profiles found. Create profiles/<name>/profile.yaml first.")
         sys.exit(1)
-    topic = " ".join(sys.argv[1:])
-    run_pipeline(topic)
+
+    if args.profile:
+        profile_name = args.profile
+    elif len(available) == 1:
+        profile_name = available[0]
+        print(f"Using profile: {profile_name}")
+    else:
+        print("Multiple profiles found. Specify one with --profile:")
+        for p in available:
+            print(f"  {p}")
+        sys.exit(1)
+
+    profile = load_profile(profile_name)
+    run_pipeline(topic, profile)

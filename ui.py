@@ -15,6 +15,7 @@ from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, regenerate_im
                       assemble_palmier_timeline, _palmier_available,
                       parse_image_prompts, get_audio_duration, GOOGLE_MODEL_OPTIONS,
                       run_status)
+from profile import load_profile, list_profiles
 
 app = Flask(__name__)
 OUTPUT_ROOT = PROJECT_ROOT / "output"
@@ -47,6 +48,18 @@ def detect_stage(msg: str) -> str | None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.route("/profiles")
+def get_profiles():
+    profiles = []
+    for name in list_profiles():
+        try:
+            p = load_profile(name)
+            profiles.append({"name": name, "display": f"{p.channel['name']} — {p.channel['niche']}"})
+        except Exception:
+            profiles.append({"name": name, "display": name})
+    return jsonify(profiles)
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -54,10 +67,27 @@ def index():
 
 @app.route("/run", methods=["POST"])
 def run():
-    data           = request.get_json(force=True)
-    topic          = (data.get("topic") or "").strip()
+    data         = request.get_json(force=True)
+    topic        = (data.get("topic") or "").strip()
+    profile_name = (data.get("profile") or "").strip()
+
     if not topic:
         return jsonify({"ok": False, "error": "No topic provided"})
+
+    available = list_profiles()
+    if not available:
+        return jsonify({"ok": False, "error": "No profiles found. Create profiles/<name>/profile.yaml first."})
+
+    if not profile_name:
+        if len(available) == 1:
+            profile_name = available[0]
+        else:
+            return jsonify({"ok": False, "error": f"Select a profile. Available: {available}"})
+
+    try:
+        profile = load_profile(profile_name)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
 
     lq = queue.Queue()
     aq = queue.Queue()
@@ -76,7 +106,7 @@ def run():
 
     def worker():
         try:
-            run_pipeline(topic, progress_callback=progress_cb,
+            run_pipeline(topic, profile, progress_callback=progress_cb,
                          stop_event=se, approval_callback=approval_cb)
         except Exception as e:
             lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
@@ -140,10 +170,24 @@ def reject():
 
 @app.route("/resume", methods=["POST"])
 def resume():
-    data     = request.get_json(force=True)
-    run_slug = (data.get("run_slug") or "").strip()
+    data         = request.get_json(force=True)
+    run_slug     = (data.get("run_slug") or "").strip()
+    profile_name = (data.get("profile") or "").strip()
+
     if not run_slug:
         return jsonify({"ok": False, "error": "No run_slug provided"})
+
+    available = list_profiles()
+    if not available:
+        return jsonify({"ok": False, "error": "No profiles found. Create profiles/<name>/profile.yaml first."})
+
+    if not profile_name:
+        profile_name = available[0]
+
+    try:
+        profile = load_profile(profile_name)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
 
     lq = queue.Queue()
     se = threading.Event()
@@ -157,7 +201,7 @@ def resume():
 
     def worker():
         try:
-            resume_pipeline(run_slug, progress_callback=progress_cb, stop_event=se)
+            resume_pipeline(run_slug, profile, progress_callback=progress_cb, stop_event=se)
         except Exception as e:
             lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
         finally:
@@ -402,9 +446,12 @@ def regenerate_audio():
     def progress_cb(msg: str):
         lq.put({"type": "log", "stage": "voice", "msg": msg})
 
+    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
+    profile = load_profile(profile_name)
+
     def worker():
         try:
-            generate_voiceover(tts_path.read_text(), run_dir, progress_cb)
+            generate_voiceover(tts_path.read_text(), run_dir, profile, progress_cb)
         except Exception as e:
             lq.put({"type": "log", "stage": "voice", "msg": f"❌  Error: {e}"})
         finally:
@@ -421,21 +468,25 @@ def revise():
     import anthropic
     import re
     from pipeline import (ANTHROPIC_KEY, CLAUDE_MODEL, VIDIQ_KEY,
-                          load_claude_md, load_style_sheet, run_vet_agent)
+                          _build_agent_system_prompt, run_vet_agent)
+    from profile import load_profile, list_profiles
 
     data     = request.get_json(force=True)
     script   = (data.get("script") or "").strip()
     feedback = (data.get("feedback") or "").strip()
     topic    = (data.get("topic") or "").strip()
+    profile_name = (data.get("profile") or "").strip()
     if not script or not feedback:
         return jsonify({"ok": False, "error": "Missing script or feedback"})
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    prompt = f"""{load_claude_md()}
+    available = list_profiles()
+    if not profile_name:
+        profile_name = available[0] if available else None
+    profile = load_profile(profile_name) if profile_name else None
 
----
-STYLE SHEET:
-{load_style_sheet()}
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    system_ctx = _build_agent_system_prompt(topic or "video", profile) if profile else ""
+    prompt = f"""{system_ctx}
 
 ---
 You are revising a YouTube video script based on feedback. Apply the feedback precisely.
@@ -494,13 +545,26 @@ def serve_image(run_name: str, num: str):
 
 @app.route("/regenerate", methods=["POST"])
 def regen():
-    data       = request.get_json(force=True)
-    run_slug   = (data.get("run_slug") or "").strip()
-    image_nums = data.get("image_nums") or []
-    model_key  = (data.get("model_key") or "nano-banana-2").strip()
+    data         = request.get_json(force=True)
+    run_slug     = (data.get("run_slug") or "").strip()
+    image_nums   = data.get("image_nums") or []
+    model_key    = (data.get("model_key") or "nano-banana-2").strip()
+    profile_name = (data.get("profile") or "").strip()
 
     if not run_slug or not image_nums:
         return jsonify({"ok": False, "error": "Missing run_slug or image_nums"})
+
+    available = list_profiles()
+    if not available:
+        return jsonify({"ok": False, "error": "No profiles found."})
+
+    if not profile_name:
+        profile_name = available[0]
+
+    try:
+        profile = load_profile(profile_name)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
 
     lq = queue.Queue()
     se = threading.Event()
@@ -513,7 +577,7 @@ def regen():
 
     def worker():
         try:
-            regenerate_images(run_slug, image_nums, model_key, progress_callback=progress_cb)
+            regenerate_images(run_slug, image_nums, model_key, profile, progress_callback=progress_cb)
         except Exception as e:
             lq.put({"type": "log", "stage": "images", "msg": f"❌  Error: {e}"})
         finally:
