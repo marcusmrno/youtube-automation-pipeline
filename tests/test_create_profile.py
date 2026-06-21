@@ -2,12 +2,14 @@ import pytest
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from create_profile import next_version_name
 from profile_creator.image_gen import generate_anchor
 from profile_creator.claude_helpers import extract_fenced_block
+from profile_creator.anchors import run_full_anchors
 
 
 def test_base_name_gets_v2():
@@ -42,9 +44,6 @@ def test_extract_markdown_block():
     assert extract_fenced_block(text, "markdown") == "# Title"
 
 
-from profile_creator.anchors import run_full_anchors
-
-
 def test_run_full_anchors_skips_existing(tmp_path):
     anchors_dir = tmp_path / "anchors"
     anchors_dir.mkdir()
@@ -53,20 +52,21 @@ def test_run_full_anchors_skips_existing(tmp_path):
 
     profile_yaml = {
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
-        "image_style": {"anchor_priority": ["anchor-01", "anchor-02", "anchor-03"], "max_anchors": 14},
+        "image_style": {"max_anchors": 14},
     }
     prompts = ["prompt1", "prompt2", "prompt3"]
+    plan = [
+        {"label": "anchor-01", "tier": "full", "purpose": "test slot 1"},
+        {"label": "anchor-02", "tier": "full", "purpose": "test slot 2"},
+        {"label": "anchor-03", "tier": "full", "purpose": "test slot 3"},
+    ]
 
-    with patch("create_profile_anchors.generate_anchor", return_value=True) as mock_gen:
-        result = run_full_anchors(profile_yaml, anchors_dir, prompts, start_from=3)
+    with patch("profile_creator.anchors.generate_anchor", return_value=True) as mock_gen:
+        result = run_full_anchors(profile_yaml, anchors_dir, prompts, plan)
 
     # anchor-03 already exists, should not be generated
     called_names = [call.args[1].name for call in mock_gen.call_args_list]
     assert not any("anchor-03" in n for n in called_names)
-
-
-from unittest.mock import patch, MagicMock
-import yaml
 
 
 def test_run_create_writes_profile_files(tmp_path, monkeypatch):
@@ -98,7 +98,6 @@ characters:
 image_style:
   art_style_block: flat
   sky_rotation: blue
-  anchor_priority: [anchor-01]
   max_anchors: 2
 voice:
   voice_id: ${ELEVENLABS_VOICE_ID}
@@ -113,12 +112,12 @@ image_gen:
   regen_model: gemini-3.1-flash-image
   pro_model: gemini-3-pro-image"""
 
-    with patch("create_profile_new.anthropic.Anthropic"), \
-         patch("create_profile_new.clarification_loop", return_value=[]), \
-         patch("create_profile_new.generate_profile_content", return_value=(fake_yaml, "# Style\n")), \
-         patch("create_profile_new.generate_anchor_prompts", return_value=["p1", "p2"]), \
-         patch("create_profile_new.run_verification_anchors", return_value=True), \
-         patch("create_profile_new.run_full_anchors", return_value={"ok": [], "failed": []}), \
+    with patch("profile_creator.new.anthropic.Anthropic"), \
+         patch("profile_creator.new.clarification_loop", return_value=[]), \
+         patch("profile_creator.new.generate_profile_content", return_value=(fake_yaml, "# Style\n")), \
+         patch("profile_creator.new.generate_anchor_prompts", return_value=["p1", "p2"]), \
+         patch("profile_creator.new.run_verification_anchors", return_value=True), \
+         patch("profile_creator.new.run_full_anchors", return_value={"ok": [], "failed": []}), \
          patch("builtins.input", side_effect=["some channel concept", "---", "my-channel"]):
         m.run_create()
 
@@ -127,14 +126,10 @@ image_gen:
     assert (profile_dir / "style-sheet.md").exists()
 
 
-import shutil
-
-
 def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     import profile_creator.revise as m
     from create_profile import next_version_name
 
-    # Set up a fake existing profile
     src_dir = tmp_path / "my-channel"
     src_dir.mkdir()
     (src_dir / "anchors").mkdir()
@@ -162,7 +157,6 @@ characters:
 image_style:
   art_style_block: flat
   sky_rotation: blue
-  anchor_priority: [anchor-01]
   max_anchors: 2
 voice:
   voice_id: ${ELEVENLABS_VOICE_ID}
@@ -182,9 +176,9 @@ image_gen:
 
     updated_yaml = (src_dir / "profile.yaml").read_text()
 
-    with patch("create_profile_revise.anthropic.Anthropic"), \
-         patch("create_profile_revise.clarification_loop", return_value=[]), \
-         patch("create_profile_revise.generate_profile_content", return_value=(updated_yaml, "# Style\n")), \
+    with patch("profile_creator.revise.anthropic.Anthropic"), \
+         patch("profile_creator.revise.clarification_loop", return_value=[]), \
+         patch("profile_creator.revise.generate_profile_content", return_value=(updated_yaml, "# Style\n")), \
          patch("builtins.input", return_value="make it darker"):
         m.run_revise("my-channel")
 
@@ -197,9 +191,9 @@ image_gen:
 def test_generate_anchor_returns_false_on_exception(tmp_path):
     profile_yaml = {
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
-        "image_style": {"anchor_priority": [], "max_anchors": 14},
+        "image_style": {"max_anchors": 14},
     }
-    with patch("create_profile_image_gen.genai") as mock_genai:
+    with patch("profile_creator.image_gen.genai") as mock_genai:
         mock_genai.Client.return_value.models.generate_content.side_effect = Exception("API error")
         result = generate_anchor("test prompt", tmp_path / "anchor-01.png", profile_yaml, tmp_path)
     assert result is False

@@ -36,13 +36,17 @@ def generate_anchor(
 ) -> bool:
     """Generate a single anchor image. Returns True on success, False on failure."""
     model = profile_yaml["image_gen"]["default_model"]
-    anchor_priority = profile_yaml["image_style"].get("anchor_priority", [])
     max_anchors = profile_yaml["image_style"].get("max_anchors", 14)
 
-    # Load any existing anchors as references
+    # Load existing anchors in numerical order (lower numbers = higher priority)
     anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
-    anchor_map = {f.stem: f for f in anchor_files}
-    reference_files = [anchor_map[n] for n in anchor_priority if n in anchor_map][:max_anchors]
+    seen = set()
+    unique = []
+    for f in sorted(anchor_files, key=lambda p: p.stem):
+        if f.stem not in seen:
+            seen.add(f.stem)
+            unique.append(f)
+    reference_files = unique[:max_anchors]
 
     preamble = (
         "Reference images define the art style and characters — match them precisely.\n\n"

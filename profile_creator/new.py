@@ -9,9 +9,9 @@ from pathlib import Path
 import anthropic
 
 from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
-from .anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
 
-PROFILES_ROOT = Path(__file__).parent / "profiles"
+PROFILES_ROOT = Path(__file__).parent.parent / "profiles"
 ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()
 
 
@@ -44,7 +44,7 @@ def _choose_profile_name() -> str:
         return name
 
 
-def run_create() -> None:
+def run_create(seed_image: str | None = None) -> None:
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     brain_dump = _read_brain_dump()
@@ -55,6 +55,19 @@ def run_create() -> None:
     profile_name = _choose_profile_name()
     profile_dir  = PROFILES_ROOT / profile_name
     anchors_dir  = profile_dir / "anchors"
+
+    if seed_image:
+        seed_path = Path(seed_image)
+        if not seed_path.exists():
+            print(f"✗ Seed image not found: {seed_image}")
+            sys.exit(1)
+        anchors_dir.mkdir(parents=True, exist_ok=True)
+        from .image_gen import _standardize_image
+        import shutil
+        dest = anchors_dir / ("anchor-00" + seed_path.suffix)
+        shutil.copy2(seed_path, dest)
+        _standardize_image(dest)
+        print(f"✓  Seed image installed as {dest.name}")
 
     # Clarification loop
     messages = [{"role": "user", "content": brain_dump}]
@@ -78,21 +91,18 @@ def run_create() -> None:
     print(f"✓  Written: {profile_dir / 'profile.yaml'}")
     print(f"✓  Written: {profile_dir / 'style-sheet.md'}")
 
-    # Generate anchor prompts
-    max_anchors = profile_yaml["image_style"].get("max_anchors", 14)
-    print(f"\n⏳  Generating {max_anchors} anchor prompts...")
-    prompts = generate_anchor_prompts(client, profile_yaml, style_content, max_anchors)
+    # Build anchor plan and generate prompts
+    plan = build_anchor_plan(profile_yaml)
+    print(f"\n⏳  Generating {len(plan)} anchor prompts ({sum(1 for s in plan if s['tier'] == 'verification')} verification, {sum(1 for s in plan if s['tier'] == 'full')} full)...")
+    prompts, plan = generate_anchor_prompts(client, profile_yaml, style_content, plan)
 
-    # Verification anchors
-    run_verification_anchors(profile_yaml, anchors_dir, prompts)
+    # Verification anchors (character sheets — shown to user before continuing)
+    run_verification_anchors(profile_yaml, anchors_dir, prompts, plan)
 
     # Full anchor set
     print(f"\n⏳  Generating remaining anchors...")
-    result = run_full_anchors(profile_yaml, anchors_dir, prompts, start_from=3)
+    result = run_full_anchors(profile_yaml, anchors_dir, prompts, plan)
 
-    # Update anchor_priority in profile.yaml to match what was generated
-    all_anchors = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
-    profile_yaml["image_style"]["anchor_priority"] = [f.stem for f in sorted(all_anchors)]
     (profile_dir / "profile.yaml").write_text(
         yaml.dump(profile_yaml, default_flow_style=False, allow_unicode=True)
     )

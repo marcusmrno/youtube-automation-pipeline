@@ -66,7 +66,7 @@ def test_build_image_prompt_instructions_injects_characters(test_profile):
 
 
 def test_build_agent_script_prompt_injects_channel_identity(test_profile):
-    from pipeline import _build_agent_script_prompt
+    from prompts import _build_agent_script_prompt
     prompt = _build_agent_script_prompt(test_profile)
     assert test_profile.channel["niche"] in prompt
     assert test_profile.channel["tone"] in prompt

@@ -33,6 +33,16 @@ image_style:
     - anchor-01
     - anchor-02
   max_anchors: 2
+  scene_rules: |
+    ## Environment
+    - Always include a visible horizon line.
+    - Landscape/background (primary): choose from rolling hills, rocky terrain, desert dunes. Never reuse the same landscape two scenes in a row.
+    - Sky (secondary): rotate through sky blue → pale yellow → warm orange. Never the same sky twice in a row.
+    - Ground: flat solid color plane filling the bottom third. Always visible.
+    - Characters always stand on the ground plane — never floating.
+
+    ## Text in image
+    Whenever narration states a fact or stat: include it as bold uppercase marker text inside a grey rounded rectangle label box.
 
 voice:
   voice_id: "test-voice-id-123"

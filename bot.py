@@ -54,6 +54,7 @@ _state: dict = {
     "total_images":    0,
     "done_images":     0,
     "milestone_sent":  set(),
+    "profile_name":    None,   # None = use first available
 }
 
 
@@ -245,9 +246,46 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
         "/download [slug] — download run assets as zip (latest if omitted)\n"
+        "/profile — view or switch the active style profile\n"
         "/status — show current run status\n"
         "/stop — stop the current run",
         parse_mode="Markdown",
+    )
+
+
+@auth
+async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    available = list_profiles()
+    if not available:
+        await update.message.reply_text("❌ No profiles found. Create profiles/<name>/profile.yaml first.")
+        return
+
+    # If arg given, set directly
+    if context.args:
+        name = context.args[0].strip()
+        if name not in available:
+            await update.message.reply_text(
+                f"❌ Profile `{name}` not found.\n\nAvailable: {', '.join(f'`{p}`' for p in available)}",
+                parse_mode="Markdown",
+            )
+            return
+        _state["profile_name"] = name
+        await update.message.reply_text(f"✅ Profile set to `{name}`", parse_mode="Markdown")
+        return
+
+    # Otherwise show current + inline buttons to switch
+    current = _state["profile_name"] or available[0]
+    buttons = [
+        [InlineKeyboardButton(
+            f"{'✅ ' if p == current else ''}{p}",
+            callback_data=f"profile:{p}",
+        )]
+        for p in available
+    ]
+    await update.message.reply_text(
+        f"Active profile: `{current}`\n\nSelect a profile:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 
@@ -465,7 +503,8 @@ async def _start_pipeline(
         await update.message.reply_text("❌ No profiles found. Create profiles/<name>/profile.yaml first.")
         _state["running"] = False
         return
-    profile = load_profile(available[0])
+    profile_name = _state["profile_name"] or available[0]
+    profile = load_profile(profile_name)
 
     if topic:
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
@@ -486,7 +525,10 @@ async def _start_pipeline(
             stop_event=se,
         )
 
-    await update.message.reply_text(label, parse_mode="Markdown")
+    await update.message.reply_text(
+        f"{label}\nProfile: `{profile_name}`",
+        parse_mode="Markdown",
+    )
 
     def worker():
         try:
@@ -517,6 +559,16 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
     data = query.data
     ae   = _state.get("approval_event")
+
+    if data.startswith("profile:"):
+        name = data.split(":", 1)[1]
+        available = list_profiles()
+        if name in available:
+            _state["profile_name"] = name
+            await query.edit_message_text(f"✅ Profile set to `{name}`", parse_mode="Markdown")
+        else:
+            await query.edit_message_text(f"❌ Profile `{name}` no longer exists.", parse_mode="Markdown")
+        return
 
     if data == "approve":
         _state["approval_result"] = True
@@ -573,9 +625,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    # Build system prompt from profile (default to first profile)
+    # Build system prompt from profile
     _available = list_profiles()
-    _profile = load_profile(_available[0]) if _available else None
+    _profile_name = _state["profile_name"] or (_available[0] if _available else None)
+    _profile = load_profile(_profile_name) if _profile_name else None
     _topic = slug or "video"
     _sys = _build_agent_system_prompt(_topic, _profile) if _profile else ""
 
@@ -629,6 +682,7 @@ def main() -> None:
     app.add_handler(CommandHandler("run",      cmd_run))
     app.add_handler(CommandHandler("resume",   cmd_resume))
     app.add_handler(CommandHandler("download", cmd_download))
+    app.add_handler(CommandHandler("profile",  cmd_profile))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 

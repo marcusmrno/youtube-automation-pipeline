@@ -14,10 +14,10 @@ from .claude_helpers import (
     clarification_loop,
     generate_profile_content,
 )
-from .anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
 from create_profile import next_version_name
 
-PROFILES_ROOT = Path(__file__).parent / "profiles"
+PROFILES_ROOT = Path(__file__).parent.parent / "profiles"
 ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()
 
 STYLE_SENSITIVE_KEYS = {"art_style_block", "sky_rotation"}
@@ -105,12 +105,12 @@ def run_revise(profile_name: str) -> None:
     anchors_dir = v2_dir / "anchors"
 
     if regen_anchors:
-        max_anchors = new_yaml["image_style"].get("max_anchors", 14)
-        print(f"\n  Generating {max_anchors} anchor prompts...")
-        prompts = generate_anchor_prompts(client, new_yaml, new_style_text, max_anchors)
-        run_verification_anchors(new_yaml, anchors_dir, prompts)
+        plan = build_anchor_plan(new_yaml)
+        print(f"\n  Generating {len(plan)} anchor prompts...")
+        prompts, plan = generate_anchor_prompts(client, new_yaml, new_style_text, plan)
+        run_verification_anchors(new_yaml, anchors_dir, prompts, plan)
         print("\n  Generating remaining anchors...")
-        result = run_full_anchors(new_yaml, anchors_dir, prompts, start_from=3)
+        result = run_full_anchors(new_yaml, anchors_dir, prompts, plan)
     else:
         # Copy anchors from original
         src_anchors = profile_dir / "anchors"
@@ -119,9 +119,6 @@ def run_revise(profile_name: str) -> None:
             print(f"  Copied anchors from '{profile_name}'")
         result = {"ok": [], "failed": []}
 
-    # Update anchor_priority
-    all_anchors = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
-    new_yaml["image_style"]["anchor_priority"] = [f.stem for f in sorted(all_anchors)]
     (v2_dir / "profile.yaml").write_text(
         yaml.dump(new_yaml, default_flow_style=False, allow_unicode=True)
     )

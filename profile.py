@@ -49,15 +49,15 @@ def load_profile(name: str, profiles_root: Path = PROFILES_ROOT) -> Profile:
         voice_id = os.getenv(m.group(1), "")
     data["voice"]["voice_id"] = voice_id
 
-    chars = data["characters"]
+    chars = data.get("characters") or {}
     return Profile(
         name=name,
         dir=profile_dir,
         anchors_dir=profile_dir / "anchors",
         channel=data["channel"],
         script=data["script"],
-        characters=chars["roster"],
-        character_behavior=chars["behavior"],
+        characters=chars.get("roster") or [],
+        character_behavior=chars.get("behavior") or "",
         image_style=data["image_style"],
         voice=data["voice"],
         image_gen=data["image_gen"],

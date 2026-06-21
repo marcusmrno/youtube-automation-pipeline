@@ -83,11 +83,11 @@ def check_keys(profile: "Profile", log_fn) -> bool:
     if not GOOGLE_KEY:                 missing.append("GOOGLE_API_KEY")
     if not EL_KEY:                     missing.append("ELEVENLABS_API_KEY")
     if not profile.voice["voice_id"]:  missing.append("voice_id (in profile or ELEVENLABS_VOICE_ID env var)")
-    if not VIDIQ_KEY:                  missing.append("VIDIQ_API_KEY")
     if missing:
         log_fn(f"❌  Missing API keys in .env: {', '.join(missing)}")
         return False
-    log_fn("🔑  API keys loaded — Anthropic ✅  Google AI ✅  ElevenLabs ✅")
+    vidiq_status = "✅" if VIDIQ_KEY else "⚠️  not set (will use standard research)"
+    log_fn(f"🔑  API keys loaded — Anthropic ✅  Google AI ✅  ElevenLabs ✅  vidIQ {vidiq_status}")
     return True
 
 
@@ -257,6 +257,32 @@ def _standardize_image(path: Path) -> None:
     img.save(path)
 
 
+def _stretch_horizontal(img: Image.Image, pct: float) -> Image.Image:
+    w, h = img.size
+    new_w = int(w * (1 + pct))
+    stretched = img.resize((new_w, h), Image.LANCZOS)
+    left = (new_w - w) // 2
+    return stretched.crop((left, 0, left + w, h))
+
+
+def _stretch_vertical(img: Image.Image, pct: float) -> Image.Image:
+    w, h = img.size
+    new_h = int(h * (1 + pct))
+    stretched = img.resize((w, new_h), Image.LANCZOS)
+    top = (new_h - h) // 2
+    return stretched.crop((0, top, w, top + h))
+
+
+def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitude: float, log_fn) -> None:
+    """Generate b (horiz stretch) and c (vert stretch) flicker frames alongside source."""
+    img = Image.open(source_path).convert("RGB")
+    b_path = out_dir / f"{num}b.png"
+    c_path = out_dir / f"{num}c.png"
+    _stretch_horizontal(img, magnitude).save(b_path)
+    _stretch_vertical(img, magnitude).save(c_path)
+    log_fn(f"  🎞️  Flicker frames saved: {b_path.name}, {c_path.name}")
+
+
 def _image_mime(path: Path) -> str:
     """Detect image mime type from magic bytes."""
     header = path.read_bytes()[:4]
@@ -283,12 +309,12 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
 
     anchors_dir = profile.anchors_dir
     anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
-    anchor_map   = {f.stem: f for f in anchor_files}
-
+    seen = set()
     reference_files = []
-    for name in profile.image_style.get("anchor_priority", []):
-        if name in anchor_map:
-            reference_files.append(anchor_map[name])
+    for f in sorted(anchor_files, key=lambda p: p.stem):
+        if f.stem not in seen:
+            seen.add(f.stem)
+            reference_files.append(f)
     reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
 
     contents = [
@@ -355,7 +381,12 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
         ok = generate_image_google(p["prompt"], img_path, profile, log_fn)
         if ok:
-            results[num] = _find_image(out_dir / "images", num) or img_path
+            found = _find_image(out_dir / "images", num) or img_path
+            results[num] = found
+            flicker_cfg = profile.image_gen.get("flicker", {})
+            if flicker_cfg.get("enabled"):
+                magnitude = flicker_cfg.get("magnitude", 0.004)
+                generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
         else:
             log_fn(f"  ❌ Image {num} failed after 3 attempts — flagged")
     return results
@@ -401,6 +432,11 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
+            flicker_cfg = profile.image_gen.get("flicker", {}) if profile else {}
+            if flicker_cfg.get("enabled"):
+                magnitude = flicker_cfg.get("magnitude", 0.004)
+                found = _find_image(out_dir / "images", num) or img_path
+                generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
         else:
             log_fn(f"  ❌  {num} failed")
             results["failed"].append(num)

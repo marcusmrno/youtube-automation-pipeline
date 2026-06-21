@@ -49,6 +49,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="YouTube channel profile creator")
     parser.add_argument("--revise", metavar="PROFILE_NAME",
                         help="Name of an existing profile to revise")
+    parser.add_argument("--seed", metavar="IMAGE_PATH",
+                        help="Path to a seed image that anchors the visual style for all generated anchors")
     args = parser.parse_args()
 
     check_env()
@@ -80,7 +82,7 @@ def main() -> None:
                 return
 
         from profile_creator.new import run_create
-        run_create()
+        run_create(seed_image=args.seed)
 
 
 if __name__ == "__main__":

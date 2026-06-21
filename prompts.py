@@ -178,13 +178,22 @@ def _build_image_prompt_instructions(profile: "Profile") -> str:
     s = profile.script
     target_images = s["target_mins"] * 25  # ~25 cuts/minute
 
+    style       = profile.image_style["art_style_block"].strip()
+    scene_rules = (profile.image_style.get("scene_rules") or "").strip()
+
     char_block = profile.characters_block()
-    behavior   = profile.character_behavior.strip()
-    style      = profile.image_style["art_style_block"].strip()
-    sky        = profile.image_style.get("sky_rotation", "")
+    behavior   = (profile.character_behavior or "").strip()
+    characters_section = f"""## Characters — embed description verbatim in EVERY prompt
+
+{char_block}
+
+{behavior}
+
+---
+""" if char_block else ""
 
     template = f"""
-You are an image prompt writer for a flat 2D educational YouTube video pipeline targeting Google Gemini image generation.
+You are an image prompt writer for a YouTube video pipeline targeting Google Gemini image generation.
 
 Below is a segment of the script. Each VISUAL line shows the timestamp and narration that will be playing at that moment. Your job is to write one image prompt per VISUAL line — a scene that is a direct, literal translation of EXACTLY what the narrator says in that line.
 
@@ -198,38 +207,14 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 - The image must be SPECIFIC to its narration line — it must be impossible to swap it with any other image in the video
 - If the narration mentions a number, that number must appear large and prominent in the image
 - If the narration names a specific thing (organ, vitamin, country, person, object), that thing must be the main visual element
-- If the narration describes an action or process, a character must be physically performing or demonstrating it
+- If the narration describes an action or process, that action must be physically shown
 - Never show a "mood" or "vibe" — show the exact fact being stated
 - Never write a scene that could fit 3 different moments in the script
-
-**Forbidden:**
-- Characters looking surprised, confused, or reacting emotionally to narration
-- Generic "character standing in environment" scenes with no specific prop
-- Any prop or object not directly tied to the narration line
-- Reusing the same scene composition for consecutive prompts
-- Two consecutive prompts with the same sky color
-- Style prefix at the start of a prompt (pipeline prepends it automatically)
+- Style prefix at the start of a prompt is forbidden (pipeline prepends it automatically)
 
 ---
 
-## Character descriptions — embed verbatim in EVERY prompt
-
-{char_block}
-
-{behavior}
-
----
-
-## Environment
-- Always include a visible horizon line separating sky (top) from ground plane (bottom)
-- Sky color rotation: {sky}
-- Never the same sky twice in a row. No more than 1 in 3 prompts may use the first sky color.
-- Ground: flat solid color plane filling bottom third. Always visible.
-- Midground (optional): one flat silhouette layer. Solid fill only, no interior detail.
-- Characters always stand on the ground plane — never floating.
-
-## Text in image
-Whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
+{characters_section}{scene_rules}
 
 ---
 

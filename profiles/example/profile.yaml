@@ -60,7 +60,22 @@ image_style:
     - anchor-02
     - anchor-03
 
-  max_anchors: 6
+  max_anchors: 6   # anchors passed as references per image call — higher = more consistent, more expensive
+
+  scene_rules: |
+    ## Environment
+    - Always include a visible horizon line separating sky (top) from ground plane (bottom)
+    - **Landscape/background (primary):** Every scene must include a named, described landscape. Choose one per scene from: rolling hills, rocky terrain, desert dunes, dense forest treeline, snowy mountain peaks, coastal cliffs, grassy plains, jungle canopy edge, volcanic rocks, canyon walls, city skyline silhouette, farmland rows, frozen tundra. Describe the landscape's silhouette shape and fill color. Never reuse the same landscape two scenes in a row.
+    - **Sky (secondary — sits behind the landscape):** Rotate through pale yellow → soft coral → sky blue → mint green → lavender. Never the same sky color twice in a row.
+    - Ground: flat solid color plane filling the bottom third. Always visible.
+    - Characters always stand on the ground plane — never floating.
+
+    **Forbidden:**
+    - A scene with no described landscape type
+    - Two consecutive scenes with the same landscape type
+
+    ## Text in image
+    Whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
 
 # ── Voice / TTS ───────────────────────────────────────────────────────────────
 voice:
@@ -80,3 +95,6 @@ image_gen:
   default_model: "gemini-3.1-flash-image"
   regen_model: "gemini-3.1-flash-image"
   pro_model: "gemini-3-pro-image"
+  flicker:
+    enabled: false      # set to true to generate b/c flicker frames per image
+    magnitude: 0.004    # 0.4% stretch — adjust for more/less pronounced effect
