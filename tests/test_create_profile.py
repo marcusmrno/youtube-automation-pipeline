@@ -73,7 +73,6 @@ def test_run_create_writes_profile_files(tmp_path, monkeypatch):
     import create_profile_new as m
 
     monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
-    monkeypatch.setattr("builtins.input", lambda _="": "my-channel\n---")
 
     fake_yaml = """channel:
   name: Test Channel
@@ -120,7 +119,7 @@ image_gen:
          patch("create_profile_new.generate_anchor_prompts", return_value=["p1", "p2"]), \
          patch("create_profile_new.run_verification_anchors", return_value=True), \
          patch("create_profile_new.run_full_anchors", return_value={"ok": [], "failed": []}), \
-         patch("builtins.input", side_effect=["my-channel", "---"]):
+         patch("builtins.input", side_effect=["some channel concept", "---", "my-channel"]):
         m.run_create()
 
     profile_dir = tmp_path / "my-channel"

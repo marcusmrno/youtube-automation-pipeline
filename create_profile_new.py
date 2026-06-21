@@ -1,6 +1,7 @@
 """New profile creation flow."""
 from __future__ import annotations
 
+import re
 import sys
 import yaml
 from pathlib import Path
@@ -34,7 +35,6 @@ def _choose_profile_name() -> str:
         if not name:
             continue
         # sanitize to slug
-        import re
         name = re.sub(r"[^\w-]", "-", name.lower()).strip("-")
         dest = PROFILES_ROOT / name
         if dest.exists():
@@ -47,9 +47,12 @@ def _choose_profile_name() -> str:
 def run_create() -> None:
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    profile_name = _choose_profile_name()
-
     brain_dump = _read_brain_dump()
+    if not brain_dump:
+        print("No input provided. Exiting.")
+        sys.exit(0)
+
+    profile_name = _choose_profile_name()
     profile_dir  = PROFILES_ROOT / profile_name
     anchors_dir  = profile_dir / "anchors"
 
