@@ -38,6 +38,48 @@ def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
     assert any(isinstance(c, str) and "test prompt" in c for c in captured_contents)
 
 
+def test_build_script_prompt_injects_channel_identity(test_profile):
+    from pipeline import _build_script_prompt
+    prompt = _build_script_prompt("test topic", "fake research", test_profile)
+    assert test_profile.channel["niche"] in prompt
+    assert test_profile.channel["audience"] in prompt
+    assert test_profile.channel["tone"] in prompt
+    assert test_profile.channel["reference_channel"] in prompt
+    assert str(test_profile.script["target_mins"]) in prompt
+    assert str(test_profile.script["wpm"]) in prompt
+
+
+def test_build_tts_prompt_injects_tone_description(test_profile):
+    from pipeline import _build_tts_prompt
+    prompt = _build_tts_prompt("Some script text here.", test_profile)
+    assert test_profile.voice["tone_description"] in prompt
+    assert "Some script text here." in prompt
+
+
+def test_build_image_prompt_instructions_injects_characters(test_profile):
+    from pipeline import _build_image_prompt_instructions
+    instructions = _build_image_prompt_instructions(test_profile)
+    assert "Test Cat" in instructions
+    assert "round head" in instructions
+    assert "Other Cat" in instructions
+    assert test_profile.image_style["art_style_block"].strip() in instructions
+
+
+def test_build_agent_script_prompt_injects_channel_identity(test_profile):
+    from pipeline import _build_agent_script_prompt
+    prompt = _build_agent_script_prompt(test_profile)
+    assert test_profile.channel["niche"] in prompt
+    assert test_profile.channel["tone"] in prompt
+    assert str(test_profile.script["target_mins"]) in prompt
+
+
+def test_build_agent_system_prompt_uses_profile(test_profile):
+    from pipeline import _build_agent_system_prompt
+    prompt = _build_agent_system_prompt("test topic", test_profile)
+    assert test_profile.channel["niche"] in prompt
+    assert "test topic" in prompt
+
+
 def test_generate_voiceover_uses_profile_voice_settings(test_profile, tmp_path):
     """generate_voiceover should use voice_id and settings from profile."""
     (tmp_path / "audio").mkdir()
