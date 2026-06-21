@@ -146,17 +146,6 @@ The profile creator runs an interactive Claude conversation, generates anchor im
 
 ---
 
-## Characters
-
-Two flat 2D cat mascots appear in every video as visual helpers — they hold objects, point at diagrams, and stand in as example figures. They do not narrate or react emotionally.
-
-- **Orange Cat** — large orange tabby, black bowtie, explainer role
-- **White Cat** — small white fluffy cat, pink collar, grey eye patch, reactor role
-
-Character reference sheets (`anchor-01.png`) are always passed first to the image model to lock in the designs.
-
----
-
 ## Resuming a run
 
 If a run is interrupted, resume it without re-running research or script:
