@@ -127,6 +127,74 @@ image_gen:
     assert (profile_dir / "style-sheet.md").exists()
 
 
+import shutil
+
+
+def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
+    import create_profile_revise as m
+    from create_profile import next_version_name
+
+    # Set up a fake existing profile
+    src_dir = tmp_path / "my-channel"
+    src_dir.mkdir()
+    (src_dir / "anchors").mkdir()
+    (src_dir / "profile.yaml").write_text("""channel:
+  name: My Channel
+  niche: test
+  audience: test
+  tone: test
+  reference_channel: test
+  title_format: test
+script:
+  target_mins: 12
+  min_mins: 9
+  max_mins: 15
+  wpm: 160
+  hook_duration_s: 35
+  cta_duration_s: 30
+  section_count: "10-14"
+  section_duration_s: "60-90"
+characters:
+  roster:
+    - name: Test Cat
+      description: a cat
+  behavior: alternate
+image_style:
+  art_style_block: flat
+  sky_rotation: blue
+  anchor_priority: [anchor-01]
+  max_anchors: 2
+voice:
+  voice_id: ${ELEVENLABS_VOICE_ID}
+  model: eleven_v3
+  stability: 0.68
+  similarity_boost: 0.85
+  style: 0.0
+  use_speaker_boost: true
+  tone_description: test
+image_gen:
+  default_model: gemini-3.1-flash-image
+  regen_model: gemini-3.1-flash-image
+  pro_model: gemini-3-pro-image""")
+    (src_dir / "style-sheet.md").write_text("# Style")
+
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+
+    updated_yaml = (src_dir / "profile.yaml").read_text()
+
+    with patch("create_profile_revise.anthropic.Anthropic"), \
+         patch("create_profile_revise.clarification_loop", return_value=[]), \
+         patch("create_profile_revise.generate_profile_content", return_value=(updated_yaml, "# Style\n")), \
+         patch("create_profile_revise.extract_fenced_block", return_value=None), \
+         patch("builtins.input", return_value="make it darker"):
+        m.run_revise("my-channel")
+
+    v2_dir = tmp_path / "my-channel-v2"
+    assert v2_dir.exists()
+    assert (v2_dir / "profile.yaml").exists()
+    assert (v2_dir / "style-sheet.md").exists()
+
+
 def test_generate_anchor_returns_false_on_exception(tmp_path):
     profile_yaml = {
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
