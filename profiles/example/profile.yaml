@@ -1,0 +1,82 @@
+# ── Channel identity ──────────────────────────────────────────────────────────
+channel:
+  name: "Curious Critters"
+  niche: "animal facts and nature science"
+  audience: "curious adults who want surprising, well-researched facts"
+  tone: "conversational, warm, occasionally dry humor — never condescending"
+  reference_channel: "Kurzgesagt"
+  title_format: "Why [Animal] Does [Surprising Thing] — The Science"
+
+# ── Script settings ───────────────────────────────────────────────────────────
+script:
+  target_mins: 12
+  min_mins: 10
+  max_mins: 14
+  wpm: 150
+  hook_duration_s: 30
+  cta_duration_s: 20
+  section_count: 6
+  section_duration_s: "90-120"
+
+# ── Characters ────────────────────────────────────────────────────────────────
+characters:
+  roster:
+    - name: "Orange Cat"
+      description: >
+        A large, round orange tabby cat with thick black marker outlines and blotchy
+        orange fur filled with visible marker streaks. Wears a small black bowtie.
+        Big expressive eyes with oval pupils. Stands upright on two legs at about
+        human height. Slightly pudgy build. Always drawn in flat 2D with no shading.
+
+    - name: "White Cat"
+      description: >
+        A small, fluffy white cat with thick black marker outlines and soft grey
+        shading on the ears and tail tip. Wears a pink collar with a tiny bell.
+        Has a grey patch over one eye. Big round eyes. Stands upright on two legs,
+        noticeably shorter than Orange Cat. Always drawn in flat 2D with no shading.
+
+  behavior: |
+    ## Character behavior rules
+    - Characters hold, point at, or physically demonstrate the fact being narrated
+    - Characters never react emotionally to what is being said — no shocked faces, no thinking poses
+    - Props are always flat 2D objects matching the art style — no 3D or photorealistic items
+    - Never place both characters in the same scene unless the narration explicitly compares two things
+    - Vary which character appears — never the same character in more than 3 consecutive images
+
+# ── Image style ───────────────────────────────────────────────────────────────
+image_style:
+  art_style_block: |
+    Flat 2D illustration. Bold uneven black marker outlines — lines vary in thickness
+    and are slightly wobbly, not perfectly smooth. Color fills bleed slightly outside
+    the outlines with visible marker streaks and texture. Off-white warm paper
+    background (#F5F0E8). No gradients. No drop shadows. No photorealistic textures.
+    No smooth digital lines. All text is bold handwritten uppercase in black marker.
+    16:9 landscape composition.
+
+  sky_rotation: "pale yellow, soft coral, sky blue, mint green, lavender"
+
+  anchor_priority:
+    - anchor-01
+    - anchor-02
+    - anchor-03
+
+  max_anchors: 6
+
+# ── Voice / TTS ───────────────────────────────────────────────────────────────
+voice:
+  voice_id: "${ELEVENLABS_VOICE_ID}"   # or hardcode: "abc123..."
+  model: "eleven_v3"
+  tone_description: >
+    Warm and curious — like a knowledgeable friend sharing something fascinating.
+    Naturally conversational pace with occasional dry wit. Never robotic or
+    lecture-y. Genuine enthusiasm on reveals, not performed excitement.
+  stability: 0.65
+  similarity_boost: 0.85
+  style: 0.0
+  use_speaker_boost: true
+
+# ── Image generation ──────────────────────────────────────────────────────────
+image_gen:
+  default_model: "gemini-3.1-flash-image"
+  regen_model: "gemini-3.1-flash-image"
+  pro_model: "gemini-3-pro-image"

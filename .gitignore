@@ -1,7 +1,7 @@
 .env
 output/
+profiles/*
+!profiles/example/
 __pycache__/
 *.pyc
 .DS_Store
-
-profiles/

@@ -112,11 +112,11 @@ youtube-pipeline/
 │   ├── claude_helpers.py # Claude conversation helpers
 │   ├── anchors.py        # anchor image generation orchestration
 │   └── image_gen.py      # shared Google image gen helper
-├── profiles/             # one subfolder per channel profile
-│   └── cat-educational/
-│       ├── profile.yaml
+├── profiles/             # gitignored — your profiles live here
+│   └── example/          # committed reference — copy and rename to get started
+│       ├── profile.yaml  # full annotated schema with every supported field
 │       ├── style-sheet.md
-│       └── anchors/      # reference images passed to image gen
+│       └── anchors/      # drop anchor-01.png, anchor-02.png … here
 ├── templates/
 │   └── index.html        # web UI template
 ├── tests/
