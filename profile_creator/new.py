@@ -8,8 +8,8 @@ from pathlib import Path
 
 import anthropic
 
-from create_profile_claude import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
-from create_profile_anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
+from .anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
 
 PROFILES_ROOT = Path(__file__).parent / "profiles"
 ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()

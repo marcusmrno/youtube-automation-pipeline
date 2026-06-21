@@ -54,7 +54,7 @@ def main() -> None:
     check_env()
 
     if args.revise:
-        from create_profile_revise import run_revise
+        from profile_creator.revise import run_revise
         revise_name = re.sub(r"[^\w-]", "-", args.revise.lower()).strip("-")
         run_revise(revise_name)
     else:
@@ -75,11 +75,11 @@ def main() -> None:
                 except (ValueError, IndexError):
                     print("Invalid choice.")
                     sys.exit(1)
-                from create_profile_revise import run_revise
+                from profile_creator.revise import run_revise
                 run_revise(name)
                 return
 
-        from create_profile_new import run_create
+        from profile_creator.new import run_create
         run_create()
 
 

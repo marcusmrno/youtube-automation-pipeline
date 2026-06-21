@@ -5,7 +5,7 @@ import re
 import anthropic
 from pathlib import Path
 
-from create_profile_image_gen import generate_anchor
+from .image_gen import generate_anchor
 
 ANCHOR_SYSTEM = """You write image generation prompts for YouTube channel anchor images.
 Each prompt must:

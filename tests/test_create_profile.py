@@ -6,8 +6,8 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from create_profile import next_version_name
-from create_profile_image_gen import generate_anchor
-from create_profile_claude import extract_fenced_block
+from profile_creator.image_gen import generate_anchor
+from profile_creator.claude_helpers import extract_fenced_block
 
 
 def test_base_name_gets_v2():
@@ -42,7 +42,7 @@ def test_extract_markdown_block():
     assert extract_fenced_block(text, "markdown") == "# Title"
 
 
-from create_profile_anchors import run_full_anchors
+from profile_creator.anchors import run_full_anchors
 
 
 def test_run_full_anchors_skips_existing(tmp_path):
@@ -70,7 +70,7 @@ import yaml
 
 
 def test_run_create_writes_profile_files(tmp_path, monkeypatch):
-    import create_profile_new as m
+    import profile_creator.new as m
 
     monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
 
@@ -131,7 +131,7 @@ import shutil
 
 
 def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
-    import create_profile_revise as m
+    import profile_creator.revise as m
     from create_profile import next_version_name
 
     # Set up a fake existing profile

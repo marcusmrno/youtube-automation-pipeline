@@ -9,12 +9,12 @@ from pathlib import Path
 
 import anthropic
 
-from create_profile_claude import (
+from .claude_helpers import (
     SYSTEM_PROMPT_REVISE,
     clarification_loop,
     generate_profile_content,
 )
-from create_profile_anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
 from create_profile import next_version_name
 
 PROFILES_ROOT = Path(__file__).parent / "profiles"

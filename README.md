@@ -95,17 +95,54 @@ output/why-humans-sleep/
 
 ---
 
-## Key files
+## Project structure
 
-| File | Purpose |
-|------|---------|
-| `pipeline.py` | Core orchestrator — all pipeline logic |
-| `ui.py` | Flask web UI |
-| `bot.py` | Telegram bot interface |
-| `CLAUDE.md` | Channel identity and agent instructions |
-| `style-anchors/style-sheet.md` | Full visual style rules |
-| `style-anchors/anchor-prompts.md` | Prompts to regenerate anchor reference images |
-| `style-anchors/anchor-*.png` | Visual reference images passed to image gen |
+```
+youtube-pipeline/
+├── pipeline.py           # core orchestrator — research, script, images, audio, Palmier
+├── prompts.py            # all LLM prompt builders (pure functions, no API calls)
+├── agents.py             # vidIQ Claude agent runners (script + vet)
+├── profile.py            # Profile dataclass + loader
+├── ui.py                 # Flask web UI
+├── bot.py                # Telegram bot interface
+├── create_profile.py     # CLI entry point for profile creator
+├── profile_creator/      # profile creation subpackage
+│   ├── new.py            # new profile creation flow
+│   ├── revise.py         # profile revision flow (versioned copies)
+│   ├── claude_helpers.py # Claude conversation helpers
+│   ├── anchors.py        # anchor image generation orchestration
+│   └── image_gen.py      # shared Google image gen helper
+├── profiles/             # one subfolder per channel profile
+│   └── cat-educational/
+│       ├── profile.yaml
+│       ├── style-sheet.md
+│       └── anchors/      # reference images passed to image gen
+├── templates/
+│   └── index.html        # web UI template
+├── tests/
+│   ├── test_pipeline_prompts.py
+│   ├── test_profile.py
+│   └── test_create_profile.py
+└── output/               # generated assets (gitignored)
+```
+
+---
+
+## Channel profiles
+
+A profile defines everything about a channel — identity, characters, voice settings, image style, and anchor reference images. Profiles live under `profiles/<name>/`.
+
+**Create a new profile**
+```bash
+python create_profile.py
+```
+
+**Revise an existing profile**
+```bash
+python create_profile.py --revise cat-educational
+```
+
+The profile creator runs an interactive Claude conversation, generates anchor images for style approval, and writes a `profile.yaml` ready to use with the pipeline.
 
 ---
 
@@ -116,7 +153,7 @@ Two flat 2D cat mascots appear in every video as visual helpers — they hold ob
 - **Orange Cat** — large orange tabby, black bowtie, explainer role
 - **White Cat** — small white fluffy cat, pink collar, grey eye patch, reactor role
 
-Character reference sheets (`anchor-01.png`, `anchor-28.png`) are always passed first to the image model.
+Character reference sheets (`anchor-01.png`) are always passed first to the image model to lock in the designs.
 
 ---
 
