@@ -32,9 +32,9 @@ from pipeline import (
     resume_pipeline,
     run_status,
     slugify,
-    load_claude_md,
-    load_style_sheet,
+    _build_agent_system_prompt,
 )
+from profile import load_profile, list_profiles
 
 load_dotenv()
 
@@ -460,11 +460,19 @@ async def _start_pipeline(
     def progress_cb(msg: str):
         lq.put({"type": "log", "msg": msg})
 
+    available = list_profiles()
+    if not available:
+        await update.message.reply_text("❌ No profiles found. Create profiles/<name>/profile.yaml first.")
+        _state["running"] = False
+        return
+    profile = load_profile(available[0])
+
     if topic:
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
         label = f"▶️ Starting pipeline: *{topic}*"
         fn    = lambda: run_pipeline(
             topic,
+            profile,
             progress_callback=progress_cb,
             stop_event=se,
             approval_callback=approval_cb,
@@ -473,6 +481,7 @@ async def _start_pipeline(
         label = f"▶️ Resuming: *{run_slug}*"
         fn    = lambda: resume_pipeline(
             run_slug,
+            profile,
             progress_callback=progress_cb,
             stop_event=se,
         )
@@ -563,8 +572,15 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     import anthropic
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+    # Build system prompt from profile (default to first profile)
+    _available = list_profiles()
+    _profile = load_profile(_available[0]) if _available else None
+    _topic = slug or "video"
+    _sys = _build_agent_system_prompt(_topic, _profile) if _profile else ""
+
     prompt = (
-        f"{load_claude_md()}\n\n---\nSTYLE SHEET:\n{load_style_sheet()}\n\n---\n"
+        f"{_sys}\n\n---\n"
         "You are revising a YouTube video script based on feedback. Apply the feedback precisely.\n"
         "Keep everything not mentioned in the feedback exactly as-is.\n"
         "Return only the revised script — no preamble, no explanation.\n\n"
