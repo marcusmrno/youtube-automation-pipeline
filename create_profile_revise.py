@@ -13,7 +13,6 @@ from create_profile_claude import (
     SYSTEM_PROMPT_REVISE,
     clarification_loop,
     generate_profile_content,
-    extract_fenced_block,
 )
 from create_profile_anchors import generate_anchor_prompts, run_verification_anchors, run_full_anchors
 from create_profile import next_version_name
