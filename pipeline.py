@@ -496,14 +496,14 @@ def parse_image_prompts(raw: str) -> list[dict]:
 
 # ── Phase 2: Image Generation ─────────────────────────────────────────────────
 
-def check_keys(log_fn) -> bool:
+def check_keys(profile: "Profile", log_fn) -> bool:
     """Verify all API keys are present. Returns False and logs if any are missing."""
     missing = []
-    if not ANTHROPIC_KEY: missing.append("ANTHROPIC_API_KEY")
-    if not GOOGLE_KEY:    missing.append("GOOGLE_API_KEY")
-    if not EL_KEY:        missing.append("ELEVENLABS_API_KEY")
-    if not EL_VOICE_ID:   missing.append("ELEVENLABS_VOICE_ID")
-    if not VIDIQ_KEY:     missing.append("VIDIQ_API_KEY")
+    if not ANTHROPIC_KEY:              missing.append("ANTHROPIC_API_KEY")
+    if not GOOGLE_KEY:                 missing.append("GOOGLE_API_KEY")
+    if not EL_KEY:                     missing.append("ELEVENLABS_API_KEY")
+    if not profile.voice["voice_id"]:  missing.append("voice_id (in profile or ELEVENLABS_VOICE_ID env var)")
+    if not VIDIQ_KEY:                  missing.append("VIDIQ_API_KEY")
     if missing:
         log_fn(f"❌  Missing API keys in .env: {', '.join(missing)}")
         return False
@@ -706,16 +706,19 @@ def _split_into_chunks(text: str, max_chars: int = 4500) -> list[str]:
 
 
 def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
+               voice_id: str = "", model: str = "",
                prev_text: str = "", next_text: str = "") -> bytes | None:
     """Send one chunk to ElevenLabs. Returns raw mp3 bytes or None on failure."""
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{EL_VOICE_ID}"
+    vid = voice_id or EL_VOICE_ID
+    mdl = model or EL_MODEL
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
     params = {"output_format": "mp3_44100_192"}
     payload = {
         "text": text,
-        "model_id": EL_MODEL,
+        "model_id": mdl,
         "voice_settings": voice_settings,
     }
-    if EL_MODEL != "eleven_v3":
+    if mdl != "eleven_v3":
         if prev_text:
             payload["previous_text"] = prev_text
         if next_text:
@@ -735,15 +738,18 @@ def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
     return None
 
 
-def generate_voiceover(tts_script: str, out_dir: Path, log_fn) -> Path | None:
+def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn) -> Path | None:
     """Call ElevenLabs TTS API in chunks. Returns path to mp3 or None on failure."""
     log_fn("🎙  Generating voiceover...")
+
+    voice_id = profile.voice["voice_id"]
+    el_model = profile.voice.get("model", EL_MODEL)
     headers = {"xi-api-key": EL_KEY, "Content-Type": "application/json"}
     voice_settings = {
-        "stability": 0.68,
-        "similarity_boost": 0.85,
-        "style": 0.0,
-        "use_speaker_boost": True,
+        "stability":        profile.voice.get("stability", 0.68),
+        "similarity_boost": profile.voice.get("similarity_boost", 0.85),
+        "style":            profile.voice.get("style", 0.0),
+        "use_speaker_boost": profile.voice.get("use_speaker_boost", True),
     }
 
     chunks = _split_into_chunks(tts_script)
@@ -755,6 +761,7 @@ def generate_voiceover(tts_script: str, out_dir: Path, log_fn) -> Path | None:
         prev_text = chunks[i - 1] if i > 0 else ""
         next_text = chunks[i + 1] if i < len(chunks) - 1 else ""
         data = _tts_chunk(chunk, headers, voice_settings, log_fn,
+                          voice_id=voice_id, model=el_model,
                           prev_text=prev_text, next_text=next_text)
         if data is None:
             log_fn(f"❌  Voiceover failed on chunk {i+1}")
@@ -1208,11 +1215,16 @@ def run_vet_agent(topic: str, script: str, log_fn) -> str:
 
 def _run_production(topic: str, prompts: list[dict], tts_script: str,
                     out_dir: Path, client: anthropic.Anthropic,
-                    log_fn, stop_event=None, skip_existing_images=False) -> dict:
+                    log_fn, stop_event=None, skip_existing_images=False,
+                    profile=None) -> dict:
     """
     Phases 2-4: images + voiceover + QA + FCPXML.
     Called by both run_pipeline and resume_pipeline.
     """
+    if profile is None:
+        from profile import load_profile
+        profile = load_profile("cat-educational")
+
     audio_path = None
 
     def voiceover_thread():
@@ -1225,7 +1237,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
         if not tts_script:
             log_fn("⚠️  No TTS script available — skipping voiceover")
             return
-        audio_path = generate_voiceover(tts_script, out_dir, log_fn)
+        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn)
 
     vo_thread = threading.Thread(target=voiceover_thread, daemon=True)
     vo_thread.start()
@@ -1315,7 +1327,10 @@ def resume_pipeline(run_slug: str, progress_callback=None, stop_event=None) -> d
     def log_fn(msg):
         log(msg, progress_callback)
 
-    if not check_keys(log_fn):
+    from profile import load_profile
+    profile = load_profile("cat-educational")
+
+    if not check_keys(profile, log_fn):
         return {"status": "error", "reason": "missing API keys"}
 
     out_dir = OUTPUT_ROOT / run_slug
@@ -1387,7 +1402,10 @@ def run_pipeline(topic: str, progress_callback=None, stop_event=None,
 
     log_fn(f"\n🚀  Starting pipeline for: {topic}\n")
 
-    if not check_keys(log_fn):
+    from profile import load_profile
+    profile = load_profile("cat-educational")
+
+    if not check_keys(profile, log_fn):
         return {"status": "error", "reason": "missing API keys"}
 
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)

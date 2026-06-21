@@ -36,3 +36,26 @@ def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
 
     # The first content element should be the prompt string
     assert any(isinstance(c, str) and "test prompt" in c for c in captured_contents)
+
+
+def test_generate_voiceover_uses_profile_voice_settings(test_profile, tmp_path):
+    """generate_voiceover should use voice_id and settings from profile."""
+    (tmp_path / "audio").mkdir()
+
+    captured_payloads = []
+
+    def fake_post(url, headers, params, json, timeout):
+        captured_payloads.append(json)
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.content = b"ID3" + b"\x00" * 100
+        return mock_resp
+
+    import pipeline
+    with patch("pipeline.requests.post", side_effect=fake_post):
+        pipeline.generate_voiceover("Hello world test.", tmp_path, test_profile, print)
+
+    assert len(captured_payloads) == 1
+    payload = captured_payloads[0]
+    assert payload["model_id"] == "eleven_v3"
+    assert payload["voice_settings"]["stability"] == 0.68
