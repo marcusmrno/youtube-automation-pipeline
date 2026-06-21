@@ -65,6 +65,69 @@ def test_run_full_anchors_skips_existing(tmp_path):
     assert not any("anchor-03" in n for n in called_names)
 
 
+from unittest.mock import patch, MagicMock
+import yaml
+
+
+def test_run_create_writes_profile_files(tmp_path, monkeypatch):
+    import create_profile_new as m
+
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _="": "my-channel\n---")
+
+    fake_yaml = """channel:
+  name: Test Channel
+  niche: test
+  audience: test
+  tone: test
+  reference_channel: test
+  title_format: test
+script:
+  target_mins: 12
+  min_mins: 9
+  max_mins: 15
+  wpm: 160
+  hook_duration_s: 35
+  cta_duration_s: 30
+  section_count: "10-14"
+  section_duration_s: "60-90"
+characters:
+  roster:
+    - name: Test Cat
+      description: a test cat
+  behavior: alternate
+image_style:
+  art_style_block: flat
+  sky_rotation: blue
+  anchor_priority: [anchor-01]
+  max_anchors: 2
+voice:
+  voice_id: ${ELEVENLABS_VOICE_ID}
+  model: eleven_v3
+  stability: 0.68
+  similarity_boost: 0.85
+  style: 0.0
+  use_speaker_boost: true
+  tone_description: test
+image_gen:
+  default_model: gemini-3.1-flash-image
+  regen_model: gemini-3.1-flash-image
+  pro_model: gemini-3-pro-image"""
+
+    with patch("create_profile_new.anthropic.Anthropic"), \
+         patch("create_profile_new.clarification_loop", return_value=[]), \
+         patch("create_profile_new.generate_profile_content", return_value=(fake_yaml, "# Style\n")), \
+         patch("create_profile_new.generate_anchor_prompts", return_value=["p1", "p2"]), \
+         patch("create_profile_new.run_verification_anchors", return_value=True), \
+         patch("create_profile_new.run_full_anchors", return_value={"ok": [], "failed": []}), \
+         patch("builtins.input", side_effect=["my-channel", "---"]):
+        m.run_create()
+
+    profile_dir = tmp_path / "my-channel"
+    assert (profile_dir / "profile.yaml").exists()
+    assert (profile_dir / "style-sheet.md").exists()
+
+
 def test_generate_anchor_returns_false_on_exception(tmp_path):
     profile_yaml = {
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
