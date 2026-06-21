@@ -185,7 +185,6 @@ image_gen:
     with patch("create_profile_revise.anthropic.Anthropic"), \
          patch("create_profile_revise.clarification_loop", return_value=[]), \
          patch("create_profile_revise.generate_profile_content", return_value=(updated_yaml, "# Style\n")), \
-         patch("create_profile_revise.extract_fenced_block", return_value=None), \
          patch("builtins.input", return_value="make it darker"):
         m.run_revise("my-channel")
 
