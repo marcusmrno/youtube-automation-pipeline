@@ -465,21 +465,25 @@ def revise():
     import anthropic
     import re
     from pipeline import (ANTHROPIC_KEY, CLAUDE_MODEL, VIDIQ_KEY,
-                          load_claude_md, load_style_sheet, run_vet_agent)
+                          _build_agent_system_prompt, run_vet_agent)
+    from profile import load_profile, list_profiles
 
     data     = request.get_json(force=True)
     script   = (data.get("script") or "").strip()
     feedback = (data.get("feedback") or "").strip()
     topic    = (data.get("topic") or "").strip()
+    profile_name = (data.get("profile") or "").strip()
     if not script or not feedback:
         return jsonify({"ok": False, "error": "Missing script or feedback"})
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    prompt = f"""{load_claude_md()}
+    available = list_profiles()
+    if not profile_name:
+        profile_name = available[0] if available else None
+    profile = load_profile(profile_name) if profile_name else None
 
----
-STYLE SHEET:
-{load_style_sheet()}
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    system_ctx = _build_agent_system_prompt(topic or "video", profile) if profile else ""
+    prompt = f"""{system_ctx}
 
 ---
 You are revising a YouTube video script based on feedback. Apply the feedback precisely.
