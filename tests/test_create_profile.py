@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from create_profile import next_version_name
 from create_profile_image_gen import generate_anchor
+from create_profile_claude import extract_fenced_block
 
 
 def test_base_name_gets_v2():
@@ -24,6 +25,21 @@ def test_v9_gets_v10():
 def test_name_ending_in_number_not_version():
     # "channel-2" is not a version slug — treat as base
     assert next_version_name("channel-2") == "channel-2-v2"
+
+
+def test_extract_yaml_block():
+    text = 'Some text\n```yaml\nkey: value\n```\nMore text'
+    assert extract_fenced_block(text, "yaml") == "key: value"
+
+
+def test_extract_missing_block_returns_none():
+    text = "No fenced blocks here"
+    assert extract_fenced_block(text, "yaml") is None
+
+
+def test_extract_markdown_block():
+    text = '```markdown\n# Title\n```'
+    assert extract_fenced_block(text, "markdown") == "# Title"
 
 
 def test_generate_anchor_returns_false_on_exception(tmp_path):
