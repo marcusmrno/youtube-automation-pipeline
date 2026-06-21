@@ -1,0 +1,407 @@
+"""
+Prompt builder functions — pure functions that return strings, no API calls.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from profile import Profile
+
+
+def _extract(tag: str, text: str) -> str:
+    m = re.search(rf"==={tag}===(.*?)(?====|\Z)", text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def _build_script_prompt(topic: str, research: str, profile: "Profile") -> str:
+    s = profile.script
+    c = profile.channel
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+    max_words    = s["max_mins"] * s["wpm"]
+    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
+    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
+    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
+    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+
+    template = f"""
+You are a script writer for a faceless educational YouTube channel.
+
+## Channel Identity
+- Niche: {c["niche"]}
+- Target audience: {c["audience"]}
+- Tone: {c["tone"]}
+- Reference channel: {c["reference_channel"]} — study the hook style and pacing
+- Titles: {c["title_format"]}
+
+## Script Structure
+- Hook (0:00-0:{s["hook_duration_s"]:02d}): Provocative opening statement or surprising fact. No intro, no "welcome back".
+- {s["section_count"]} content sections with clear [MM:SS-MM:SS] timestamps
+- Each section {s["section_duration_s"]} seconds
+- CTA close (last {s["cta_duration_s"]} seconds): Subscribe prompt only — no teasing or referencing a next video
+
+## Word Count Rules
+The voiceover is delivered at ~{s["wpm"]} words per minute.
+- {s["target_mins"]}-minute target = ~{target_words} words of narration
+- {s["min_mins"]}-minute minimum  = ~{min_words} words of narration
+- {s["max_mins"]}-minute maximum = ~{max_words} words of narration
+- Each {s["section_duration_s"]} second section needs {section_min}-{section_max} words of narration
+- Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA close ({s["cta_duration_s"]}s) = ~{cta_words} words.
+After writing, count your narration words. If under {round(min_words * 1.1)}, expand sections before returning.
+
+---
+TOPIC: {topic}
+
+---
+RESEARCH & VERIFIED FACTS:
+{research}
+
+IMPORTANT: Base the script only on the verified facts above.
+- Do not invent statistics or claims not supported by the research.
+- Avoid any misconceptions listed above.
+- Where confidence is noted as lower, use softened language ("some researchers suggest", "evidence points to", etc.).
+- Use the hook angles as inspiration for the opening {s["hook_duration_s"]} seconds.
+
+Your task: Write a full narration-only script. Do not describe visuals, camera directions, or what should appear on screen — write only what the narrator speaks aloud. Structure with [MM:SS-MM:SS] section timestamps.
+
+Return your response in this exact format — no other text:
+
+===SCRIPT===
+[full script here]
+"""
+
+    override = profile.dir / "overrides" / "script_prompt.txt"
+    if override.exists():
+        return override.read_text()
+    return template
+
+
+def _build_tts_prompt(script: str, profile: "Profile") -> str:
+    template = f"""
+You are preparing a TTS narration for ElevenLabs {profile.voice.get("model", "eleven_v3")} from a finished YouTube video script.
+
+SCRIPT:
+{script}
+
+## Extraction rules
+- Strip all timestamps, VISUAL lines, section headers, and stage directions.
+- Keep only the words spoken aloud, in order, as naturally flowing prose.
+- Do NOT use SSML tags — {profile.voice.get("model", "eleven_v3")} does not support them.
+- Do NOT use tags that describe visuals or actions (e.g. [grinning], [pacing]) — only auditory tags.
+- Do NOT change any words — only add/remove/reposition tags and adjust punctuation/capitalisation for emphasis.
+
+## Emphasis techniques
+- Use ellipses (...) for dramatic pauses and weight at key moments.
+- Use ALL CAPS for a single word of genuine vocal stress — one per sentence max.
+- Do not use both ALL CAPS and a tag on the same phrase — pick one.
+- Short sentences = faster delivery. Long sentences = slower, more weight. Vary deliberately.
+- Exclamation marks add energy; question marks invite the listener to lean in.
+
+## Audio tags — place immediately before the segment they modify, or after a natural pause mid-sentence
+Target density: 1–2 tags per 200 words (~10–16 tags for a full 12-minute script). Too few is flat; too many is performed.
+Do not stack two tags back-to-back with no words between them.
+
+Laughter (graduated — pick the right intensity):
+  [chuckles]        mild irony, "of course this is how it works"
+  [laughs]          a stat or fact is genuinely absurd
+  [laughs harder]   escalating absurdity — rare
+  [giggles]         lighter, more playful moments
+  [snorts]          dry involuntary reaction to something ridiculous
+  [wheezing]        extreme — use only for the single funniest moment in the whole script
+
+Breathing & texture:
+  [sighs]           tired of a myth; "and then obviously…" moments
+  [exhales]         releasing tension after a heavy section
+  [whispers]        sharing something counterintuitive that feels like a secret
+  [swallows]        before delivering a hard truth
+  [gulps]           before something shocking or uncomfortable
+
+Emotions:
+  [excited]         a genuinely surprising fact or big reveal
+  [surprised]       when a fact defies common sense
+  [curious]         posing a question the audience is already wondering
+  [thoughtful]      before a nuanced or considered point
+  [impressed]       acknowledging something remarkable
+  [delighted]       a satisfying explanation clicking into place
+  [sarcastic]       quoting conventional wisdom you're about to debunk
+  [mischievously]   setting up a twist or gotcha
+  [frustrated]      something preventable went wrong; systemic failure
+  [angry]           genuine outrage — historical injustice, lives lost unnecessarily
+  [annoyed]         milder frustration; "this again" energy
+  [appalled]        moral shock at a behaviour or fact
+  [sad]             acknowledging real human cost
+  [sympathetic]     speaking to an audience who may have experienced this
+  [sheepishly]      correcting a complication or admitting nuance
+  [nervously]       building unease before a reveal
+  [alarmed]         urgent warning; something worse than expected
+  [panicking]       high-stakes escalation — use once max, near the climax
+  [reassuring]      after a scary section; "here's what you can do"
+  [warmly]          CTA close ONLY — one tag at the very start, then no more tags after it
+  [professional]    delivering a crisp fact or instruction
+  [questioning]     rhetorical question the audience is asking themselves
+  [happy]           a good outcome; something working as intended
+
+## Section-to-tag mapping
+Hook first sentence          → [whispers] or [excited]
+Hook absurd opening stat     → [laughs] or [surprised]
+Setting up a myth to debunk  → [sarcastic] or [thoughtful]
+The debunk itself            → [sighs] or [appalled]
+Counterintuitive reveal      → [surprised] or [mischievously]
+Gross or disturbing fact     → [appalled] or [gulps]
+Historical injustice         → [angry] or [frustrated]
+Human cost / empathy moment  → [sympathetic] or [sad]
+Absurd statistic             → [chuckles] or [snorts]
+"Here's what works" pivot    → [reassuring] or [exhales]
+Tension before consequence   → [nervously] or [alarmed]
+Rhetorical question          → [questioning] or [curious]
+CTA close                    → [warmly] once at the very start, then no more tags
+
+## Channel tone
+{profile.voice["tone_description"]}
+
+Return only this, no other text:
+
+===TTS_SCRIPT===
+[clean narration here]
+"""
+
+    override = profile.dir / "overrides" / "tts_prompt.txt"
+    if override.exists():
+        return override.read_text()
+    return template
+
+
+def _build_image_prompt_instructions(profile: "Profile") -> str:
+    s = profile.script
+    target_images = s["target_mins"] * 25  # ~25 cuts/minute
+
+    char_block = profile.characters_block()
+    behavior   = profile.character_behavior.strip()
+    style      = profile.image_style["art_style_block"].strip()
+    sky        = profile.image_style.get("sky_rotation", "")
+
+    template = f"""
+You are an image prompt writer for a flat 2D educational YouTube video pipeline targeting Google Gemini image generation.
+
+Below is a segment of the script. Each VISUAL line shows the timestamp and narration that will be playing at that moment. Your job is to write one image prompt per VISUAL line — a scene that is a direct, literal translation of EXACTLY what the narrator says in that line.
+
+---
+
+## The Prime Directive
+
+For each narration beat, ask: what is the single most concrete, specific thing being said right now? Build the entire image around showing that one thing as literally and directly as possible.
+
+**Rules:**
+- The image must be SPECIFIC to its narration line — it must be impossible to swap it with any other image in the video
+- If the narration mentions a number, that number must appear large and prominent in the image
+- If the narration names a specific thing (organ, vitamin, country, person, object), that thing must be the main visual element
+- If the narration describes an action or process, a character must be physically performing or demonstrating it
+- Never show a "mood" or "vibe" — show the exact fact being stated
+- Never write a scene that could fit 3 different moments in the script
+
+**Forbidden:**
+- Characters looking surprised, confused, or reacting emotionally to narration
+- Generic "character standing in environment" scenes with no specific prop
+- Any prop or object not directly tied to the narration line
+- Reusing the same scene composition for consecutive prompts
+- Two consecutive prompts with the same sky color
+- Style prefix at the start of a prompt (pipeline prepends it automatically)
+
+---
+
+## Character descriptions — embed verbatim in EVERY prompt
+
+{char_block}
+
+{behavior}
+
+---
+
+## Environment
+- Always include a visible horizon line separating sky (top) from ground plane (bottom)
+- Sky color rotation: {sky}
+- Never the same sky twice in a row. No more than 1 in 3 prompts may use the first sky color.
+- Ground: flat solid color plane filling bottom third. Always visible.
+- Midground (optional): one flat silhouette layer. Solid fill only, no interior detail.
+- Characters always stand on the ground plane — never floating.
+
+## Text in image
+Whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
+
+---
+
+## Art style — end EVERY prompt with this exact block
+
+{style}
+
+---
+
+## Format
+
+Write one prompt per NARRATION BEAT. A {s["target_mins"]}-minute video needs ~{target_images} prompts total.
+
+For each prompt, derive a tight timestamp from narration pacing (~3-4 seconds per image).
+Format each line as:
+NNN | MM:SS-MM:SS | [full prompt]
+
+Number sequentially from wherever instructed — never restart from 001 mid-batch.
+Do NOT include a style prefix. Write ALL prompts for this segment.
+
+Return only:
+
+===IMAGE_PROMPTS===
+[prompts here]
+"""
+
+    override = profile.dir / "overrides" / "image_prompt_instructions.txt"
+    if override.exists():
+        return override.read_text()
+    return template
+
+
+def _build_agent_script_prompt(profile: "Profile") -> str:
+    s = profile.script
+    c = profile.channel
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
+    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
+    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
+    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+
+    char_names = " / ".join(ch["name"] for ch in profile.characters)
+    char_block = profile.characters_block()
+
+    return f"""
+You are writing a YouTube video script for a channel: {c["name"]}.
+Follow this two-phase process exactly — never skip research to jump straight to writing.
+
+## PHASE 1 — Research (run ALL of these in parallel)
+
+- vidiq_keyword_research: search volume + competition for the topic
+- vidiq_outliers: videos over-performing right now (reveals best angle/format)
+- vidiq_youtube_search: what's already ranking (avoid duplicating it)
+- vidiq_channel_analytics: channel avg views and best-performing topics
+- vidiq_generate_titles: 5 title candidates using keyword data
+- vidiq_score_title: score all 5 candidates — pick the highest scorer
+
+Look for:
+- High volume + low competition keywords → weave top 3-5 naturally into first 60s of narration
+- Outlier videos → use their angle and hook structure, not their content
+- Channel niche: {c["niche"]}
+- Channel tone: {c["tone"]}
+- Title format: {c["title_format"]}
+
+## PHASE 2 — Write the script
+
+Use the winning title + vidIQ keyword insights to write a complete script matching this exact format:
+
+```
+TITLE: [winning title]
+KEYWORDS: [3-5 top keywords from vidIQ]
+
+[00:00-00:{s["hook_duration_s"]:02d}] HOOK
+[provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
+
+[00:{s["hook_duration_s"]:02d}-02:00] SECTION 1 — [section title]
+[narration prose]
+VISUAL: [which character, what action, what prop — one line per scene beat]
+
+... {s["section_count"]} sections total ...
+
+[CTA CLOSE — last {s["cta_duration_s"]} seconds]
+[subscribe prompt only — no teasing a next video]
+```
+
+### Script rules
+
+- Target {s["target_mins"]}:00 total (never under {s["min_mins"]}:00, never over {s["max_mins"]}:00)
+- The voiceover voice runs at ~{s["wpm"]} wpm:
+  - {s["target_mins"]}-min target = ~{target_words} words of narration
+  - {s["min_mins"]}-min minimum = ~{min_words} words
+  - Each {s["section_duration_s"]}s section = {section_min}-{section_max} words of narration
+  - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA ({s["cta_duration_s"]}s) = ~{cta_words} words.
+  - After writing, count narration words — if under {round(min_words * 1.1)}, expand sections before finishing
+- Hook hard in the first 10 seconds — lead with the most surprising fact, not context
+- Every narration beat gets a VISUAL line showing a character doing an action, not reacting
+- VISUAL lines must be literal: "cat holds five flat gold trophies" not "cat looks amazed"
+- Vary which character appears ({char_names}) — never the same character 3 beats in a row
+
+## Characters
+
+{char_block}
+
+{profile.character_behavior.strip()}
+
+### Forbidden
+- Starting the hook with "In this video…", "Welcome back…", or "Today we're going to…"
+- VISUAL lines describing character emotions
+- Generic visuals that could fit any moment in any video
+- CTA that teases a next video
+
+## OUTPUT
+
+Return the finished script in this exact format — nothing after it:
+
+===SCRIPT===
+[full script here with TITLE, KEYWORDS, timestamps, section headers, narration, and VISUAL lines]
+"""
+
+
+def _build_vet_prompt(profile: "Profile") -> str:
+    s = profile.script
+    target_words = s["target_mins"] * s["wpm"]
+    min_words    = s["min_mins"] * s["wpm"]
+
+    return f"""
+You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
+
+STEP 1 — Pull live vidIQ data on the topic (run in parallel):
+- vidiq_keyword_research: confirm the top keywords and their search volume
+- vidiq_outliers: find the highest over-performing videos on this topic right now
+- vidiq_youtube_search: see what is currently ranking and how it is framed
+- vidiq_score_title: score the current script title and note the result
+
+STEP 2 — Review the script against the data:
+- FACTUAL ACCURACY: flag any claims that are outdated, exaggerated, or unsupported
+- MISSING ANGLES: if the script misses the strongest outlier hook angle, note it
+- KEYWORD GAPS: if the top keywords are absent from the first 60 seconds, flag them
+- TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative
+- WORD COUNT: narration must be {round(min_words * 1.1)}-{target_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
+
+STEP 3 — Rewrite the script with all fixes applied:
+Make only the changes the review identified. Do not restructure the whole script or change the channel tone.
+Preserve all VISUAL lines, timestamps, and section headers exactly unless a section was expanded.
+
+STEP 4 — Output:
+Return the vetted script in this exact format — nothing after it:
+
+===SCRIPT===
+[full revised script here]
+"""
+
+
+def _build_agent_system_prompt(topic: str, profile: "Profile") -> str:
+    c = profile.channel
+    char_block = profile.characters_block()
+    style      = profile.image_style["art_style_block"].strip()
+
+    return f"""## Channel: {c["name"]}
+Niche: {c["niche"]}
+Audience: {c["audience"]}
+Tone: {c["tone"]}
+
+## Characters
+{char_block}
+
+{profile.character_behavior.strip()}
+
+## Visual Style
+{style}
+
+---
+TOPIC: {topic}
+"""
