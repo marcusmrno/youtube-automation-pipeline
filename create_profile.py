@@ -55,7 +55,8 @@ def main() -> None:
 
     if args.revise:
         from create_profile_revise import run_revise
-        run_revise(args.revise)
+        revise_name = re.sub(r"[^\w-]", "-", args.revise.lower()).strip("-")
+        run_revise(revise_name)
     else:
         # Interactive: ask create-new or revise existing
         from profile import list_profiles

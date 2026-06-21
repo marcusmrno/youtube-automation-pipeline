@@ -110,6 +110,8 @@ def run_full_anchors(
     start_from: int = 3,
 ) -> dict:
     """Generate anchors from start_from onward, skipping existing files."""
+    if start_from < 3:
+        start_from = 3  # anchors 1-2 are verification anchors, always generated separately
     anchors_dir.mkdir(parents=True, exist_ok=True)
     ok_list: list[str] = []
     failed_list: list[str] = []

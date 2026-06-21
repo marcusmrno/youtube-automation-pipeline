@@ -36,6 +36,8 @@ def _style_changed(old_yaml: dict, new_yaml: dict) -> bool:
 
 
 def run_revise(profile_name: str) -> None:
+    # Sanitize profile_name to prevent path traversal regardless of call site
+    profile_name = re.sub(r"[^\w-]", "-", profile_name.lower()).strip("-")
     profile_dir = PROFILES_ROOT / profile_name
     if not profile_dir.exists() or not (profile_dir / "profile.yaml").exists():
         print(f"x Profile '{profile_name}' not found at {profile_dir}")

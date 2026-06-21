@@ -149,7 +149,12 @@ def generate_profile_content(
     system: str,
     messages: list[dict],
 ) -> tuple[str, str]:
-    """Request profile generation. Returns (yaml_content, markdown_content)."""
+    """Request profile generation. Returns (yaml_content, markdown_content).
+
+    NOTE: mutates the messages list in place by appending the "Generate the profile now."
+    user turn and Claude's assistant reply. Callers that read messages[-1]["content"] after
+    this call are relying on that final assistant message being present.
+    """
     messages.append({"role": "user", "content": "Generate the profile now."})
     response = client.messages.create(
         model="claude-sonnet-4-6",
