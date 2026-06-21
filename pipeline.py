@@ -1488,8 +1488,31 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) < 2:
-        print("Usage: python pipeline.py \"your topic here\"")
+    import argparse
+    from profile import load_profile, list_profiles
+
+    parser = argparse.ArgumentParser(description="YouTube Pipeline")
+    parser.add_argument("topic", nargs="+", help="Video topic")
+    parser.add_argument("--profile", default=None, help="Profile name (folder under profiles/)")
+    args = parser.parse_args()
+
+    topic = " ".join(args.topic)
+
+    available = list_profiles()
+    if not available:
+        print("No profiles found. Create profiles/<name>/profile.yaml first.")
         sys.exit(1)
-    topic = " ".join(sys.argv[1:])
-    run_pipeline(topic)
+
+    if args.profile:
+        profile_name = args.profile
+    elif len(available) == 1:
+        profile_name = available[0]
+        print(f"Using profile: {profile_name}")
+    else:
+        print("Multiple profiles found. Specify one with --profile:")
+        for p in available:
+            print(f"  {p}")
+        sys.exit(1)
+
+    profile = load_profile(profile_name)
+    run_pipeline(topic, profile)
