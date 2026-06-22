@@ -207,7 +207,7 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
             base_instructions
             + f"\nSCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
             f"NUMBERING: {numbering}\n"
-            f"TARGET: ~25 prompts per minute of content. Write one prompt per scene beat, not one per section."
+            f"TARGET: one image per sentence. Every distinct idea or statement is its own visual frame — never combine two sentences into one image. If a sentence has two distinct claims, split into two images."
         )
         log_fn(f"  Generating image prompts ({batch_label})...")
         with client.messages.stream(
@@ -846,18 +846,30 @@ def run_status(run_slug: str) -> dict:
     }
 
 
-def resume_pipeline(run_slug: str, profile: "Profile", progress_callback=None, stop_event=None) -> dict:
+def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_callback=None, stop_event=None) -> dict:
     """Resume a stopped pipeline run, regenerating only what is missing."""
+    from profile import load_profile as _load_profile
+
     def log_fn(msg):
         log(msg, progress_callback)
-
-    if not check_keys(profile, log_fn):
-        return {"status": "error", "reason": "missing API keys"}
 
     out_dir = OUTPUT_ROOT / run_slug
     if not out_dir.exists():
         log_fn(f"❌  Output folder not found: {out_dir}")
         return {"status": "error", "reason": "run folder not found"}
+
+    if profile is None:
+        profile_file = out_dir / "profile.txt"
+        if profile_file.exists():
+            profile_name = profile_file.read_text().strip()
+            log_fn(f"📋  Loading saved profile: {profile_name}")
+            profile = _load_profile(profile_name)
+        else:
+            log_fn("❌  No profile.txt found in run folder and no profile passed — cannot resume")
+            return {"status": "error", "reason": "profile unknown"}
+
+    if not check_keys(profile, log_fn):
+        return {"status": "error", "reason": "missing API keys"}
 
     script_file  = out_dir / "script.txt"
     prompts_file = out_dir / "image_prompts.txt"
@@ -926,6 +938,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     slug    = slugify(topic)
     out_dir = make_output_dir(slug)
+    (out_dir / "profile.txt").write_text(profile.name)
     log_fn(f"📁  Output directory: {out_dir}")
 
     if VIDIQ_KEY:

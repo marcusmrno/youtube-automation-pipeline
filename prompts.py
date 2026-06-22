@@ -50,7 +50,7 @@ The voiceover is delivered at ~{s["wpm"]} words per minute.
 - {s["max_mins"]}-minute maximum = ~{max_words} words of narration
 - Each {s["section_duration_s"]} second section needs {section_min}-{section_max} words of narration
 - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA close ({s["cta_duration_s"]}s) = ~{cta_words} words.
-After writing, count your narration words. If under {round(min_words * 1.1)}, expand sections before returning.
+After writing, count your narration words. If under {round(target_words * 0.9)}, expand sections before returning.
 
 ---
 TOPIC: {topic}
@@ -176,7 +176,6 @@ Return only this, no other text:
 
 def _build_image_prompt_instructions(profile: "Profile") -> str:
     s = profile.script
-    target_images = s["target_mins"] * 25  # ~25 cuts/minute
 
     style       = profile.image_style["art_style_block"].strip()
     scene_rules = (profile.image_style.get("scene_rules") or "").strip()
@@ -226,9 +225,9 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 
 ## Format
 
-Write one prompt per NARRATION BEAT. A {s["target_mins"]}-minute video needs ~{target_images} prompts total.
+Every sentence gets its own image. Every distinct idea, fact, or statement is a separate visual frame — do not combine two sentences into one image. If a sentence contains two distinct claims, split it into two images. The only exception is a sentence so short it finishes a thought started in the previous one.
 
-For each prompt, derive a tight timestamp from narration pacing (~3-4 seconds per image).
+For each prompt, derive a tight timestamp from the narration pacing.
 Format each line as:
 NNN | MM:SS-MM:SS | [full prompt]
 

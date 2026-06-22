@@ -503,12 +503,12 @@ async def _start_pipeline(
         await update.message.reply_text("❌ No profiles found. Create profiles/<name>/profile.yaml first.")
         _state["running"] = False
         return
-    profile_name = _state["profile_name"] or available[0]
-    profile = load_profile(profile_name)
 
     if topic:
+        profile_name = _state["profile_name"] or available[0]
+        profile = load_profile(profile_name)
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
-        label = f"▶️ Starting pipeline: *{topic}*"
+        label = f"▶️ Starting pipeline: *{topic}*\nProfile: `{profile_name}`"
         fn    = lambda: run_pipeline(
             topic,
             profile,
@@ -517,7 +517,14 @@ async def _start_pipeline(
             approval_callback=approval_cb,
         )
     else:
-        label = f"▶️ Resuming: *{run_slug}*"
+        # Resume: load profile from saved run folder; fall back to selected state
+        saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt"
+        if saved_profile_file.exists():
+            profile_name = saved_profile_file.read_text().strip()
+        else:
+            profile_name = _state["profile_name"] or available[0]
+        profile = load_profile(profile_name)
+        label = f"▶️ Resuming: *{run_slug}*\nProfile: `{profile_name}`"
         fn    = lambda: resume_pipeline(
             run_slug,
             profile,
@@ -526,7 +533,7 @@ async def _start_pipeline(
         )
 
     await update.message.reply_text(
-        f"{label}\nProfile: `{profile_name}`",
+        label,
         parse_mode="Markdown",
     )
 
