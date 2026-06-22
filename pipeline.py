@@ -44,6 +44,7 @@ GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 PALMIER_MCP_URL = (os.getenv("PALMIER_MCP_URL") or "http://127.0.0.1:19789/mcp").strip()
 
 CLAUDE_MODEL  = "claude-sonnet-4-6"
+HAIKU_MODEL   = "claude-haiku-4-5-20251001"
 EL_MODEL      = "eleven_v3"
 GOOGLE_MODEL  = "gemini-3.1-flash-image"   # bulk generation + regen
 GOOGLE_PRO_MODEL = "gemini-3-pro-image"    # highest quality, slowest
@@ -123,7 +124,7 @@ Return your response in this exact format:
 """
 
     response = client.messages.create(
-        model=CLAUDE_MODEL,
+        model=HAIKU_MODEL,
         max_tokens=3000,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -170,7 +171,7 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     log_fn("✍️  Extracting TTS narration from script...")
     tts_prompt = _build_tts_prompt(script, profile)
     r1 = client.messages.create(
-        model=CLAUDE_MODEL,
+        model=HAIKU_MODEL,
         max_tokens=8000,
         messages=[{"role": "user", "content": tts_prompt}]
     )

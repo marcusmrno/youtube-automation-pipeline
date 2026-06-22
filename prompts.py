@@ -64,6 +64,7 @@ IMPORTANT: Base the script only on the verified facts above.
 - Avoid any misconceptions listed above.
 - Where confidence is noted as lower, use softened language ("some researchers suggest", "evidence points to", etc.).
 - Use the hook angles as inspiration for the opening {s["hook_duration_s"]} seconds.
+- Each core idea may be introduced ONCE. Callbacks are only allowed if they add new information — never re-explain a mechanism already stated. If you find yourself repeating the same concept in different words, cut it.
 
 Your task: Write a full narration-only script. Do not describe visuals, camera directions, or what should appear on screen — write only what the narrator speaks aloud. Structure with [MM:SS-MM:SS] section timestamps.
 
@@ -340,6 +341,7 @@ VISUAL: [which character, what action, what prop — one line per scene beat]
 - VISUAL lines describing character emotions
 - Generic visuals that could fit any moment in any video
 - CTA that teases a next video
+- Re-explaining a concept already introduced — each core idea appears once. Callbacks only if they add new information.
 
 ## OUTPUT
 
@@ -370,6 +372,7 @@ STEP 2 — Review the script against the data:
 - KEYWORD GAPS: if the top keywords are absent from the first 60 seconds, flag them
 - TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative
 - WORD COUNT: narration must be {round(min_words * 1.1)}-{target_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
+- IDEA REPETITION: flag any core idea explained more than once. Each mechanism or concept must appear only once — callbacks are only allowed if they add new information. Remove or rewrite any section that re-explains something already stated.
 
 STEP 3 — Rewrite the script with all fixes applied:
 Make only the changes the review identified. Do not restructure the whole script or change the channel tone.

@@ -27,7 +27,10 @@ VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
 _VIDIQ_KEY    = (os.getenv("VIDIQ_API_KEY") or "").strip()
 
 
-def _vidiq_options(max_turns: int) -> ClaudeAgentOptions:
+VET_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _vidiq_options(max_turns: int, model: str | None = None) -> ClaudeAgentOptions:
     return ClaudeAgentOptions(
         mcp_servers={
             "vidiq": {
@@ -38,6 +41,7 @@ def _vidiq_options(max_turns: int) -> ClaudeAgentOptions:
         },
         permission_mode="bypassPermissions",
         max_turns=max_turns,
+        model=model,
     )
 
 
@@ -47,9 +51,10 @@ async def _run_agent(
     max_turns: int,
     extract_tag: str,
     log_fn,
+    model: str | None = None,
 ) -> str:
     """Core agent loop — streams messages and returns extracted tagged section."""
-    options = _vidiq_options(max_turns)
+    options = _vidiq_options(max_turns, model=model)
     options.system_prompt = system_prompt
 
     full_text = ""
@@ -75,7 +80,7 @@ async def _run_script_agent(topic: str, profile: "Profile", log_fn) -> str:
 async def _run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
     system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
     user_prompt   = f"Topic: {topic}\n\n{_build_vet_prompt(profile)}"
-    return await _run_agent(system_prompt, user_prompt, max_turns=20, extract_tag="SCRIPT", log_fn=log_fn)
+    return await _run_agent(system_prompt, user_prompt, max_turns=20, extract_tag="SCRIPT", log_fn=log_fn, model=VET_MODEL)
 
 
 def run_script_agent(topic: str, profile: "Profile", log_fn) -> str:
