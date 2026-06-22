@@ -253,6 +253,14 @@ def send_to_palmier():
     if not run_slug:
         return jsonify({"ok": False, "error": "No run_slug provided"})
 
+    profile_file = OUTPUT_ROOT / run_slug / "profile.txt"
+    send_profile = None
+    if profile_file.exists():
+        try:
+            send_profile = load_profile(profile_file.read_text().strip())
+        except Exception:
+            pass
+
     out_dir = OUTPUT_ROOT / run_slug
     if not out_dir.exists():
         return jsonify({"ok": False, "error": "Run folder not found"})
@@ -285,7 +293,7 @@ def send_to_palmier():
 
     def worker():
         try:
-            assemble_palmier_timeline(prompts, image_results, audio_path, out_dir, progress_cb)
+            assemble_palmier_timeline(prompts, image_results, audio_path, out_dir, progress_cb, profile=send_profile)
         except Exception as e:
             lq.put({"type": "log", "stage": "timeline", "msg": f"❌  Error: {e}"})
         finally:
@@ -529,6 +537,7 @@ def list_images(run_name: str):
     imgs = sorted(
         p.stem for p in img_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg")
+        and not p.stem.endswith("_bob")
     )
     return jsonify(imgs)
 

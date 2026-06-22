@@ -207,7 +207,10 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
             base_instructions
             + f"\nSCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
             f"NUMBERING: {numbering}\n"
-            f"TARGET: one image per sentence. Every distinct idea or statement is its own visual frame — never combine two sentences into one image. If a sentence has two distinct claims, split into two images."
+            f"TARGET DENSITY: one image every 3–4 seconds — roughly 15+ prompts per minute of narration. A 14-minute script needs ~210+ prompts. If you finish a batch with fewer than 15 prompts per minute, you are combining too many sentences — go back and split them. "
+            f"Every sentence gets its own image, including transition sentences. Never combine two sentences into one prompt. A sentence listing multiple items (A, B, and C) must be split into one prompt per item. "
+            f"Transition phrases like 'Now the opposite kind.', 'The team continues.', 'So back to that opening promise.', 'Remember X' each get their own prompt. "
+            f"Timestamps are 3–4 seconds each, never more than 5. Verify timestamps are contiguous — end of prompt N = start of prompt N+1, no gaps."
         )
         log_fn(f"  Generating image prompts ({batch_label})...")
         with client.messages.stream(
@@ -274,13 +277,15 @@ def _stretch_vertical(img: Image.Image, pct: float) -> Image.Image:
 
 
 def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitude: float, log_fn) -> None:
-    """Generate b (horiz stretch) and c (vert stretch) flicker frames alongside source."""
+    """Generate b (horiz stretch) and c (vert stretch) flicker frames in out_dir/flicker/."""
+    flicker_dir = out_dir / "flicker"
+    flicker_dir.mkdir(exist_ok=True)
     img = Image.open(source_path).convert("RGB")
-    b_path = out_dir / f"{num}b.png"
-    c_path = out_dir / f"{num}c.png"
+    b_path = flicker_dir / f"{num}b.png"
+    c_path = flicker_dir / f"{num}c.png"
     _stretch_horizontal(img, magnitude).save(b_path)
     _stretch_vertical(img, magnitude).save(c_path)
-    log_fn(f"  🎞️  Flicker frames saved: {b_path.name}, {c_path.name}")
+    log_fn(f"  🎞️  Flicker frames saved: flicker/{b_path.name}, flicker/{c_path.name}")
 
 
 def _image_mime(path: Path) -> str:
@@ -318,9 +323,11 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
     reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
 
     contents = [
-        f"The FIRST reference image is the new multi-angle character reference sheet — match these two cat characters exactly in every scene. "
-        f"The SECOND reference image is the original character reference sheet — use both together to lock in the character designs. "
-        f"The remaining reference images define the art style to follow precisely.\n\n"
+        f"Reference images are provided in this order:\n"
+        f"  anchor-01: Full cast reference sheet — all characters side by side, exact proportions and scale.\n"
+        f"  anchor-02: Multi-angle reference sheet — each character shown front, 3/4, side, and back. Match these character designs exactly in every scene.\n"
+        f"  anchor-03: Example content scene — shows background, props, and art style in a real frame.\n"
+        f"  anchor-04 onward: Additional style and scene references — follow the art style shown precisely.\n\n"
         f"STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines with visible marker streaks. "
         f"Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
         f"{prompt}",
@@ -703,6 +710,7 @@ def assemble_palmier_timeline(
     audio_path: Path | None,
     out_dir: Path,
     log_fn,
+    profile: "Profile | None" = None,
 ) -> None:
     """Import all pipeline assets into Palmier and assemble the timeline."""
     log_fn("🎬  Assembling timeline in Palmier...")
@@ -724,14 +732,29 @@ def assemble_palmier_timeline(
 
     prompt_by_num = {p["num"]: p for p in prompts}
 
-    log_fn(f"  Importing {len(valid_nums)} images into Palmier...")
-    media_refs = {}
+    images_dir  = out_dir / "images"
+    flicker_dir = images_dir / "flicker"
+    flicker_cfg = (profile.image_gen.get("flicker", {}) if profile else {})
+    use_flicker   = flicker_cfg.get("enabled", False)
+
+    log_fn(f"  Importing {len(valid_nums)} images into Palmier{'  (flicker enabled)' if use_flicker else ''}...")
+    media_refs = {}   # num -> {"a": id, "b": id, "c": id}
     for num in valid_nums:
         r = _palmier_call("import_media", {
             "source": {"path": str(image_results[num].resolve())},
             "name": num,
         })
-        media_refs[num] = _extract_asset_id(r, "import_media")
+        refs = {"a": _extract_asset_id(r, "import_media")}
+        if use_flicker:
+            for variant in ("b", "c"):
+                vpath = _find_image(flicker_dir, f"{num}{variant}")
+                if vpath:
+                    rv = _palmier_call("import_media", {
+                        "source": {"path": str(vpath.resolve())},
+                        "name": f"{num}{variant}",
+                    })
+                    refs[variant] = _extract_asset_id(rv, "import_media")
+        media_refs[num] = refs
 
     audio_ref = None
     if audio_path and audio_path.exists():
@@ -743,17 +766,42 @@ def assemble_palmier_timeline(
         audio_ref = _extract_asset_id(r, "import_media")
 
     log_fn("  Placing clips on timeline...")
-    entries    = []
+    entries     = []
     start_frame = 0
+
+    # Flicker cycle: b(1) c(1) alternating
+    FLICKER_CYCLE = [("b", 1), ("c", 1)]
+
     for num in valid_nums:
         clip_dur_s      = _prompt_duration(prompt_by_num[num], base_dur_s, scale)
         clip_dur_frames = max(1, round(clip_dur_s * project_fps))
-        entries.append({
-            "mediaRef":       media_refs[num],
-            "startFrame":     start_frame,
-            "durationFrames": clip_dur_frames,
-        })
+        refs            = media_refs[num]
+
+        if use_flicker and "b" in refs and "c" in refs:
+            cycle_len  = sum(f for _, f in FLICKER_CYCLE)
+            remaining  = clip_dur_frames
+            frame_pos  = start_frame
+            while remaining > 0:
+                for variant, frames in FLICKER_CYCLE:
+                    take = min(frames, remaining)
+                    if take <= 0:
+                        break
+                    entries.append({
+                        "mediaRef":       refs[variant],
+                        "startFrame":     frame_pos,
+                        "durationFrames": take,
+                    })
+                    frame_pos += take
+                    remaining -= take
+        else:
+            entries.append({
+                "mediaRef":       refs["a"],
+                "startFrame":     start_frame,
+                "durationFrames": clip_dur_frames,
+            })
+
         start_frame += clip_dur_frames
+
     _palmier_call("add_clips", {"entries": entries})
 
     if audio_ref:

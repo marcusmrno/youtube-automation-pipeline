@@ -115,7 +115,7 @@ Laughter (graduated — pick the right intensity):
 Breathing & texture:
   [sighs]           tired of a myth; "and then obviously…" moments
   [exhales]         releasing tension after a heavy section
-  [whispers]        sharing something counterintuitive that feels like a secret
+  [whispers]        sharing something counterintuitive that feels like a secret — use at most once per script, only if no other tag fits
   [swallows]        before delivering a hard truth
   [gulps]           before something shocking or uncomfortable
 
@@ -145,7 +145,7 @@ Emotions:
   [happy]           a good outcome; something working as intended
 
 ## Section-to-tag mapping
-Hook first sentence          → [whispers] or [excited]
+Hook first sentence          → [excited] or [curious]
 Hook absurd opening stat     → [laughs] or [surprised]
 Setting up a myth to debunk  → [sarcastic] or [thoughtful]
 The debunk itself            → [sighs] or [appalled]
@@ -210,6 +210,15 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 - Never show a "mood" or "vibe" — show the exact fact being stated
 - Never write a scene that could fit 3 different moments in the script
 - Style prefix at the start of a prompt is forbidden (pipeline prepends it automatically)
+- **Every word of narration must be covered by an image. Zero gaps.** Timestamps must span the full audio with no uncovered narration.
+
+**Transition sentences are not skippable.** Short pivot phrases like "Now the opposite kind.", "The team continues.", "So back to that opening promise.", "Remember the fat-soluble ones" are their own image beats. Never merge them silently into the next content beat.
+
+How to visualize transitions by type:
+- **Section pivot** ("Now…", "Next up…", "Moving on…"): title-card showing the name/letter of the incoming topic large center frame — cat pointing at it
+- **Callback/recall** ("Back to…", "Remember…"): the key prop from the earlier beat re-shown, with a bold RECALL label or arrow pointing back to it
+- **Summary pivot** ("Here's where X really matters", "The team continues"): a visual summary of what is about to be elaborated — the relevant diagram or object group already on screen
+- **Consequence setup** ("Without X…", "Run low for long enough…"): show the consequence visually with a red X or fading/cracking element, even before the full sentence lands
 
 ---
 
@@ -225,9 +234,15 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 
 ## Format
 
-Every sentence gets its own image. Every distinct idea, fact, or statement is a separate visual frame — do not combine two sentences into one image. If a sentence contains two distinct claims, split it into two images. The only exception is a sentence so short it finishes a thought started in the previous one.
+Target density: **one image every 3–4 seconds**. A 14-minute video should produce ~210–280 prompts. If you are writing fewer than 15 prompts per minute of narration, you are combining too many sentences — stop and split them.
 
-For each prompt, derive a tight timestamp from the narration pacing.
+Every sentence gets its own image. Every distinct idea, fact, or statement is a separate visual frame — do not combine two sentences into one image. If a sentence contains two distinct claims, split it into two images. A sentence with a list (e.g. "It does A, B, and C") must be split into one image per item if each item is meaningfully different.
+
+**Before writing, read every sentence in the segment.** For each sentence, decide its image. Transition sentences ("Now…", "Next up…", "The team continues.", "Remember…", "So back to…", "Here's where…") must each get their own prompt — they are not merging candidates.
+
+After writing, do a final gap check: scan the timestamps and confirm no narration sentence is left uncovered. The end of prompt N must equal the start of prompt N+1.
+
+For each prompt, derive a tight timestamp from the narration pacing. Timestamps are 3–4 seconds each — never longer than 5 seconds unless the sentence is unusually slow.
 Format each line as:
 NNN | MM:SS-MM:SS | [full prompt]
 
