@@ -494,6 +494,21 @@ def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
     return None
 
 
+def _fix_mp3_duration(path: Path, log_fn) -> None:
+    """Null out the Xing/Info VBR header so players use file-size/bitrate for duration."""
+    data = bytearray(path.read_bytes())
+    offset = 0
+    if data[:3] == b'ID3':
+        offset = ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
+                  (data[8] & 0x7f) << 7  | (data[9] & 0x7f)) + 10
+    for marker in [b'Xing', b'Info']:
+        pos = data[offset:offset + 4096].find(marker)
+        if pos != -1:
+            data[offset + pos:offset + pos + 4] = b'    '
+            log_fn(f"  🔧  Fixed MP3 duration header ({marker.decode()} marker removed)")
+    path.write_bytes(data)
+
+
 def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn) -> Path | None:
     """Call ElevenLabs TTS API in chunks. Returns path to mp3 or None on failure."""
     log_fn("🎙  Generating voiceover...")
@@ -535,6 +550,7 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
 
     audio_path = out_dir / "audio" / "voiceover.mp3"
     audio_path.write_bytes(merged)
+    _fix_mp3_duration(audio_path, log_fn)
     log_fn("✅  Voiceover generated")
     return audio_path
 
