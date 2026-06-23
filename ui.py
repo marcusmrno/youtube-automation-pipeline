@@ -1,11 +1,13 @@
 """
 YouTube Pipeline — Flask UI
 Run: python ui.py
-Opens at http://localhost:7860
+Opens at http://0.0.0.0:7860
 """
 
+import anthropic
 import json
 import queue
+import re
 import threading
 from pathlib import Path
 
@@ -14,8 +16,13 @@ import pipeline
 from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, regenerate_images,
                       assemble_palmier_timeline, _palmier_available,
                       parse_image_prompts, get_audio_duration, GOOGLE_MODEL_OPTIONS,
-                      run_status)
+                      run_status, ANTHROPIC_KEY, CLAUDE_MODEL, VIDIQ_KEY,
+                      generate_clarifying_questions, generate_approach_pitches)
 from profile import load_profile, list_profiles
+from agents import run_vet_agent
+from prompts import _build_agent_system_prompt, _extract
+
+_noop_log = lambda _: None
 
 app = Flask(__name__)
 OUTPUT_ROOT = PROJECT_ROOT / "output"
@@ -351,7 +358,7 @@ def runs_with_prompts():
     if not OUTPUT_ROOT.exists():
         return jsonify([])
     result = [d.name for d in OUTPUT_ROOT.iterdir()
-              if d.is_dir() and (d / "script.txt").exists()]
+              if d.is_dir() and (d / "image_prompts.txt").exists()]
     return jsonify(sorted(result, reverse=True))
 
 
@@ -435,8 +442,6 @@ def save_script(run_name: str):
 
 @app.route("/clarifying_questions", methods=["POST"])
 def get_clarifying_questions():
-    from pipeline import generate_clarifying_questions, ANTHROPIC_KEY, HAIKU_MODEL
-
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
     profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
@@ -445,13 +450,10 @@ def get_clarifying_questions():
         return jsonify({"ok": False, "error": "Topic required"})
 
     profile = load_profile(profile_name)
-    client = pipeline.anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
-    def dummy_log(msg):
-        pass
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     try:
-        questions = generate_clarifying_questions(topic, profile, client, dummy_log)
+        questions = generate_clarifying_questions(topic, profile, client, _noop_log)
         return jsonify({"ok": True, "questions": questions})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -459,8 +461,6 @@ def get_clarifying_questions():
 
 @app.route("/approach_pitches", methods=["POST"])
 def get_approach_pitches():
-    from pipeline import generate_approach_pitches, ANTHROPIC_KEY, HAIKU_MODEL
-
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
     answers = (data.get("answers") or "").strip()
@@ -470,13 +470,10 @@ def get_approach_pitches():
         return jsonify({"ok": False, "error": "Topic and answers required"})
 
     profile = load_profile(profile_name)
-    client = pipeline.anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
-    def dummy_log(msg):
-        pass
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     try:
-        pitches = generate_approach_pitches(topic, answers, profile, client, dummy_log)
+        pitches = generate_approach_pitches(topic, answers, profile, client, _noop_log)
         return jsonify({"ok": True, "pitches": pitches})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -526,12 +523,6 @@ def regenerate_audio():
 
 @app.route("/revise", methods=["POST"])
 def revise():
-    import anthropic
-    import re
-    from pipeline import (ANTHROPIC_KEY, CLAUDE_MODEL, VIDIQ_KEY,
-                          _build_agent_system_prompt, run_vet_agent)
-    from profile import load_profile, list_profiles
-
     data     = request.get_json(force=True)
     script   = (data.get("script") or "").strip()
     feedback = (data.get("feedback") or "").strip()
@@ -567,13 +558,12 @@ CURRENT SCRIPT:
         max_tokens=8000,
         messages=[{"role": "user", "content": prompt}]
     )
-    text = response.content[0].text
-    m = re.search(r"===SCRIPT===(.*)", text, re.DOTALL)
-    revised = m.group(1).strip() if m else text.strip()
+    text    = response.content[0].text
+    revised = _extract("SCRIPT", text) or text.strip()
 
-    if VIDIQ_KEY and revised:
-        logs = []
-        vetted = run_vet_agent(topic or "video", revised, lambda msg: logs.append(msg))
+    if VIDIQ_KEY and revised and profile:
+        logs   = []
+        vetted = run_vet_agent(topic or "video", revised, profile, lambda msg: logs.append(msg))
         if vetted:
             revised = vetted
 

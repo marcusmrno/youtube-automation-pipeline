@@ -23,7 +23,7 @@ from telegram.ext import (
     filters,
 )
 
-import anthropic as anthropic_sdk
+import anthropic
 import pipeline
 from pipeline import (
     OUTPUT_ROOT,
@@ -35,9 +35,9 @@ from pipeline import (
     slugify,
     generate_clarifying_questions,
     generate_approach_pitches,
-    _build_agent_system_prompt,
 )
 from profile import load_profile, list_profiles
+from prompts import _build_agent_system_prompt, _extract
 
 load_dotenv()
 
@@ -267,7 +267,7 @@ async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAU
 
     profile_name = _state["profile_name"] or available[0]
     profile = load_profile(profile_name)
-    client = anthropic_sdk.Anthropic(api_key=ANTHROPIC_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     await update.message.reply_text(f"🤔 Thinking about your topic: *{topic}*…", parse_mode="Markdown")
 
@@ -305,7 +305,7 @@ async def _send_approach_pitches(update: Update, context: ContextTypes.DEFAULT_T
     available    = list_profiles()
     profile_name = _state["profile_name"] or available[0]
     profile      = load_profile(profile_name)
-    client       = anthropic_sdk.Anthropic(api_key=ANTHROPIC_KEY)
+    client       = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     await context.bot.send_message(chat_id=chat_id, text="💡 Pitching approaches…")
 
@@ -773,7 +773,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text("✏️ Revising script…")
 
-    import anthropic
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
@@ -799,8 +798,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             messages=[{"role": "user", "content": prompt}],
         )
         text    = response.content[0].text
-        m       = re.search(r"===SCRIPT===(.*)", text, re.DOTALL)
-        revised = m.group(1).strip() if m else text.strip()
+        revised = _extract("SCRIPT", text) or text.strip()
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True

@@ -22,7 +22,6 @@ from PIL import Image
 
 from agents import run_script_agent, run_vet_agent
 from prompts import (
-    _build_agent_system_prompt,   # re-exported for bot.py
     _build_clarifying_questions_prompt,
     _build_approach_pitch_prompt,
     _build_script_prompt,
@@ -52,13 +51,21 @@ GOOGLE_MODEL  = "gemini-3.1-flash-image"   # bulk generation + regen
 GOOGLE_PRO_MODEL = "gemini-3-pro-image"    # highest quality, slowest
 
 GOOGLE_MODEL_OPTIONS = {
-    "2.5-flash":     GOOGLE_MODEL,
     "nano-banana-2": GOOGLE_MODEL,
     "3-pro":         GOOGLE_PRO_MODEL,
 }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+_genai_client = None
+
+def _get_genai_client() -> "genai.Client":
+    global _genai_client
+    if _genai_client is None:
+        _genai_client = genai.Client(api_key=GOOGLE_KEY)
+    return _genai_client
+
 
 def log(msg: str, progress_callback=None):
     print(msg)
@@ -337,15 +344,9 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
     return None
 
 
-def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
-                          model: str = None) -> bool:
-    """Generate image via Google AI with style anchors as references."""
-    from profile import Profile  # local import avoids circular deps at module level
-
-    if model is None:
-        model = profile.image_gen["default_model"]
-
-    anchors_dir = profile.anchors_dir
+def _load_anchor_parts(profile: "Profile") -> list:
+    """Pre-load anchor images as genai Parts. Call once per run, not per image."""
+    anchors_dir  = profile.anchors_dir
     anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
     seen = set()
     reference_files = []
@@ -354,6 +355,20 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
             seen.add(f.stem)
             reference_files.append(f)
     reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
+    return [
+        genai_types.Part.from_bytes(data=ref.read_bytes(), mime_type=_image_mime(ref))
+        for ref in reference_files
+    ]
+
+
+def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
+                          model: str = None, anchor_parts: list | None = None) -> bool:
+    """Generate image via Google AI with style anchors as references."""
+    if model is None:
+        model = profile.image_gen["default_model"]
+
+    if anchor_parts is None:
+        anchor_parts = _load_anchor_parts(profile)
 
     contents = [
         f"Reference images are provided in this order:\n"
@@ -365,15 +380,9 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
         f"Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
         f"{prompt}",
     ]
-    for ref_path in reference_files:
-        contents.append(
-            genai_types.Part.from_bytes(
-                data=ref_path.read_bytes(),
-                mime_type=_image_mime(ref_path),
-            )
-        )
+    contents.extend(anchor_parts)
 
-    client = genai.Client(api_key=GOOGLE_KEY)
+    client = _get_genai_client()
     for attempt in range(3):
         try:
             log_fn(f"  ⏳  Sending request to Google AI [{model}] (attempt {attempt+1})...")
@@ -405,6 +414,7 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
 def generate_all_images(prompts: list[dict], out_dir: Path,
                         profile: "Profile", log_fn, stop_event=None, skip_existing=False) -> dict:
     """Generate images sequentially. Returns {num: path} for successful images."""
+    anchor_parts = _load_anchor_parts(profile)
     results = {}
     total = len(prompts)
     for i, p in enumerate(prompts):
@@ -419,7 +429,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
             continue
 
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
-        ok = generate_image_google(p["prompt"], img_path, profile, log_fn)
+        ok = generate_image_google(p["prompt"], img_path, profile, log_fn, anchor_parts=anchor_parts)
         if ok:
             found = _find_image(out_dir / "images", num) or img_path
             results[num] = found
@@ -440,7 +450,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
 
     model = None
     if profile is not None:
-        key_map = {"2.5-flash": "default_model", "nano-banana-2": "regen_model", "3-pro": "pro_model"}
+        key_map = {"nano-banana-2": "regen_model", "3-pro": "pro_model"}
         profile_key = key_map.get(model_key)
         if profile_key:
             model = profile.image_gen.get(profile_key)
@@ -462,13 +472,14 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     if missing:
         log_fn(f"⚠️  Image numbers not found in prompts: {missing}")
 
+    anchor_parts = _load_anchor_parts(profile) if profile is not None else None
     results = {"regenerated": [], "failed": []}
     for num in targets:
         if num not in all_prompts:
             continue
         img_path = out_dir / "images" / f"{num}.png"
         log_fn(f"🔄  Regenerating {num} using {model_key}...")
-        ok = generate_image_google(all_prompts[num]["prompt"], img_path, profile, log_fn, model=model)
+        ok = generate_image_google(all_prompts[num]["prompt"], img_path, profile, log_fn, model=model, anchor_parts=anchor_parts)
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
@@ -534,13 +545,24 @@ def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
     return None
 
 
+def _id3_skip_offset(data) -> int:
+    """Return byte offset of the first MP3 frame, skipping the ID3v2 header if present."""
+    if data[:3] == b'ID3':
+        return ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
+                (data[8] & 0x7f) << 7  | (data[9] & 0x7f)) + 10
+    return 0
+
+
+def _strip_id3(data: bytes) -> bytes:
+    """Strip the ID3v2 header from the start of MP3 data."""
+    offset = _id3_skip_offset(data)
+    return data[offset:] if offset else data
+
+
 def _fix_mp3_duration(path: Path, log_fn) -> None:
     """Null out the Xing/Info VBR header so players use file-size/bitrate for duration."""
-    data = bytearray(path.read_bytes())
-    offset = 0
-    if data[:3] == b'ID3':
-        offset = ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
-                  (data[8] & 0x7f) << 7  | (data[9] & 0x7f)) + 10
+    data   = bytearray(path.read_bytes())
+    offset = _id3_skip_offset(bytes(data))
     for marker in [b'Xing', b'Info']:
         pos = data[offset:offset + 4096].find(marker)
         if pos != -1:
@@ -578,13 +600,6 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
             return None
         parts.append(data)
 
-    def _strip_id3(data: bytes) -> bytes:
-        if data[:3] == b'ID3':
-            size = ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
-                    (data[8] & 0x7f) << 7  | (data[9] & 0x7f))
-            return data[size + 10:]
-        return data
-
     # Keep ID3 header from first chunk only; strip from the rest
     merged = parts[0] + b"".join(_strip_id3(p) for p in parts[1:])
 
@@ -606,12 +621,8 @@ def get_audio_duration(audio_path: Path) -> float:
     """
     if not audio_path or not audio_path.exists():
         return 720.0
-    data = audio_path.read_bytes()
-    offset = 0
-    if data[:3] == b'ID3':
-        size = ((data[6] & 0x7f) << 21 | (data[7] & 0x7f) << 14 |
-                (data[8] & 0x7f) << 7  | (data[9] & 0x7f))
-        offset = size + 10
+    data   = audio_path.read_bytes()
+    offset = _id3_skip_offset(data)
 
     BITRATES    = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320]
     SAMPLERATES = [44100, 48000, 32000]
@@ -694,8 +705,8 @@ def _extract_asset_id(result: dict, tool: str) -> str:
 
 def _palmier_available() -> bool:
     try:
-        requests.post(PALMIER_MCP_URL, json={"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=5)
-        return True
+        r = requests.post(PALMIER_MCP_URL, json={"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=5)
+        return r.ok
     except Exception:
         return False
 
@@ -1041,7 +1052,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     if VIDIQ_KEY:
         log_fn("🤖  Running vidIQ research + script agent...")
-        script = run_script_agent(topic, profile, log_fn)
+        script = run_script_agent(topic, profile, log_fn, approach_context)
         (out_dir / "research.txt").write_text("(handled by agent — see script.txt)")
         if not script:
             log_fn("❌  Agent did not produce a script — aborting")

@@ -333,7 +333,7 @@ Return only:
     return template
 
 
-def _build_agent_script_prompt(profile: "Profile") -> str:
+def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
     target_words = s["target_mins"] * s["wpm"]
@@ -345,6 +345,17 @@ def _build_agent_script_prompt(profile: "Profile") -> str:
 
     char_names = " / ".join(ch["name"] for ch in profile.characters)
     char_block = profile.characters_block()
+
+    approach_section = ""
+    if approach_context.strip():
+        approach_section = f"""
+## Creator's Angle & Context
+{approach_context}
+
+Use this context alongside the vidIQ research to shape the angle, emphasis, and which aspects to highlight.
+
+---
+"""
 
     return f"""
 You are writing a YouTube video script for a channel: {c["name"]}.
@@ -367,7 +378,7 @@ Look for:
 - Title format: {c["title_format"]}
 
 ## PHASE 2 — Write the script
-
+{approach_section}
 Use the winning title + vidIQ keyword insights to write a complete script matching this exact format:
 
 ```
