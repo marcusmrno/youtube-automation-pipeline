@@ -385,10 +385,10 @@ def get_prompts(run_name: str):
     for line in path.read_text().splitlines():
         parts = line.split("|", 2)
         if len(parts) == 3:
-            num = parts[0].strip().zfill(3)
-            ts  = parts[1].strip()
-            txt = parts[2].strip()
-            prompts[num] = {"timestamp": ts, "prompt": txt}
+            num    = parts[0].strip().zfill(3)
+            source = parts[1].strip()
+            txt    = parts[2].strip()
+            prompts[num] = {"source": source, "prompt": txt}
     return jsonify(prompts)
 
 
