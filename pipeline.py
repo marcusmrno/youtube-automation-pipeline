@@ -724,27 +724,10 @@ def _ts_to_seconds(ts: str) -> float | None:
 
 
 def _prompt_duration(prompt: dict, fallback: float, scale: float = 1.0) -> float:
-    ts = prompt.get("ts", "")
-    if "-" in ts:
-        start_str, end_str = ts.split("-", 1)
-        start = _ts_to_seconds(start_str)
-        end   = _ts_to_seconds(end_str)
-        if start is not None and end is not None and end > start:
-            return (end - start) * scale
     return fallback
 
 
 def _timestamp_scale(prompts: list[dict], actual_duration: float) -> float:
-    last_end = 0.0
-    for p in prompts:
-        ts = p.get("ts", "")
-        if "-" in ts:
-            _, end_str = ts.split("-", 1)
-            end = _ts_to_seconds(end_str)
-            if end is not None and end > last_end:
-                last_end = end
-    if last_end > 0 and actual_duration > 0:
-        return actual_duration / last_end
     return 1.0
 
 
@@ -772,7 +755,8 @@ def assemble_palmier_timeline(
     base_dur_frames = max(1, round(base_dur_s * project_fps))
     scale           = _timestamp_scale(prompts, total_duration) if total_duration else 1.0
 
-    log_fn(f"  ⏱  Audio duration: {total_duration:.1f}s — timestamp scale: {scale:.3f}")
+    if total_duration:
+        log_fn(f"  ⏱  Audio duration: {total_duration:.1f}s — equal distribution across {len(valid_nums)} images")
 
     prompt_by_num = {p["num"]: p for p in prompts}
 
