@@ -1104,7 +1104,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     (out_dir / "tts_script.txt").write_text(tts_script)
     (out_dir / "image_prompts.txt").write_text(
-        "\n".join(f"{p['num']} | {p['ts']} | {p['prompt']}" for p in prompts)
+        "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
     )
 
     if stop_event and stop_event.is_set():

@@ -312,11 +312,11 @@ Every sentence gets its own image. Every distinct idea, fact, or statement is a 
 
 **Before writing, read every sentence in the segment.** For each sentence, decide its image. Transition sentences ("Now…", "Next up…", "The team continues.", "Remember…", "So back to…", "Here's where…") must each get their own prompt — they are not merging candidates.
 
-After writing, do a final gap check: scan the timestamps and confirm no narration sentence is left uncovered. The end of prompt N must equal the start of prompt N+1.
+After writing, do a final gap check: confirm every narration sentence has a prompt.
 
-For each prompt, derive a tight timestamp from the narration pacing. Timestamps are 3–4 seconds each — never longer than 5 seconds unless the sentence is unusually slow.
+For each prompt, copy the exact narration sentence you are illustrating as the source field.
 Format each line as:
-NNN | MM:SS-MM:SS | [full prompt]
+NNN | [exact source sentence] | [full prompt]
 
 Number sequentially from wherever instructed — never restart from 001 mid-batch.
 Do NOT include a style prefix. Write ALL prompts for this segment.
