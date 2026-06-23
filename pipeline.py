@@ -27,6 +27,8 @@ from prompts import (
     _build_script_prompt,
     _build_tts_prompt,
     _build_image_prompt_instructions,
+    _build_image_prompt_vet_instructions,
+    _build_image_prompt_rewrite_instructions,
     _extract,
 )
 
@@ -283,6 +285,84 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     image_prompts = "\n".join(deduped_lines)
     log_fn(f"✅  Image prompts generated — {last_prompt_num} total")
     return tts_script, image_prompts
+
+
+def _vet_image_prompts(
+    prompts: list[dict],
+    profile: "Profile",
+    client: anthropic.Anthropic,
+    log_fn,
+) -> list[dict]:
+    """Two-stage vetting: Haiku detects problems, Sonnet rewrites flagged prompts."""
+    import json as _json
+
+    prompt_lines = "\n".join(
+        f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts
+    )
+
+    # Stage 1 — detection (Haiku)
+    vet_instructions = _build_image_prompt_vet_instructions(profile)
+    log_fn("🔎  Vetting image prompts (Stage 1: detection)...")
+    try:
+        r1 = client.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": vet_instructions + "\n\n" + prompt_lines}]
+        )
+        raw_flags = r1.content[0].text.strip()
+        flagged: list[dict] = _json.loads(raw_flags)
+    except Exception as e:
+        log_fn(f"⚠️  Vetting Stage 1 failed ({e}) — using original prompts")
+        return prompts
+
+    if not flagged:
+        log_fn(f"✅  All {len(prompts)} image prompts passed vetting")
+        return prompts
+
+    log_fn(f"  ✏️  {len(flagged)} prompts flagged — rewriting (Stage 2: Sonnet)...")
+
+    # Build flagged subset for Stage 2
+    prompt_by_num = {p["num"]: p for p in prompts}
+    flagged_lines = []
+    for f in flagged:
+        num = str(f["num"]).zfill(3)
+        if num not in prompt_by_num:
+            continue
+        p = prompt_by_num[num]
+        detail = f.get("detail", f.get("reason", ""))
+        flagged_lines.append(
+            f"{p['num']} | {p['source']} | {p['prompt']} | REASON: {f['reason']} — {detail}"
+        )
+
+    if not flagged_lines:
+        return prompts
+
+    # Stage 2 — rewrite (Sonnet)
+    rewrite_instructions = _build_image_prompt_rewrite_instructions(profile)
+    try:
+        r2 = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": rewrite_instructions + "\n\n" + "\n".join(flagged_lines)}]
+        )
+        rewritten_raw = r2.content[0].text.strip()
+        rewritten = parse_image_prompts(rewritten_raw)
+    except Exception as e:
+        log_fn(f"⚠️  Vetting Stage 2 failed ({e}) — using original prompts")
+        return prompts
+
+    if not rewritten:
+        log_fn("⚠️  Vetting Stage 2 returned no prompts — using original prompts")
+        return prompts
+
+    # Merge rewrites back into original list
+    rewritten_by_num = {p["num"]: p for p in rewritten}
+    result = []
+    for p in prompts:
+        result.append(rewritten_by_num.get(p["num"], p))
+
+    log_fn(f"✅  {len(rewritten)} prompts rewritten by vetting")
+    return result
 
 
 # ── Phase 2: Image Generation ─────────────────────────────────────────────────
