@@ -189,7 +189,7 @@ def generate_script(topic: str, research: str, profile: "Profile",
 
 
 def parse_image_prompts(raw: str) -> list[dict]:
-    """Parse NNN | MM:SS-MM:SS | prompt lines into list of dicts, deduplicated by number."""
+    """Parse NNN | source line | prompt lines into list of dicts, deduplicated by number."""
     seen: dict[str, dict] = {}
     for line in raw.strip().splitlines():
         line = line.strip()
@@ -198,9 +198,9 @@ def parse_image_prompts(raw: str) -> list[dict]:
         parts = line.split("|", 2)
         if len(parts) == 3:
             num    = parts[0].strip().zfill(3)
-            ts     = parts[1].strip()
+            source = parts[1].strip()
             prompt = parts[2].strip()
-            seen[num] = {"num": num, "ts": ts, "prompt": prompt}
+            seen[num] = {"num": num, "source": source, "prompt": prompt}
     return [seen[k] for k in sorted(seen)]
 
 
