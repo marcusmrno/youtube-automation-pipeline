@@ -23,6 +23,7 @@ from telegram.ext import (
     filters,
 )
 
+import anthropic as anthropic_sdk
 import pipeline
 from pipeline import (
     OUTPUT_ROOT,
@@ -32,6 +33,8 @@ from pipeline import (
     resume_pipeline,
     run_status,
     slugify,
+    generate_clarifying_questions,
+    generate_approach_pitches,
     _build_agent_system_prompt,
 )
 from profile import load_profile, list_profiles
@@ -42,19 +45,24 @@ BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ALLOWED_USER_ID = int(os.getenv("TELEGRAM_USER_ID", "0"))
 
 _state: dict = {
-    "running":         False,
-    "run_slug":        None,
-    "stop_event":      None,
-    "loop":            None,
-    "approval_event":  None,
-    "approval_result": None,
-    "revision_mode":   False,
-    "chat_id":         None,
-    "log_queue":       None,
-    "total_images":    0,
-    "done_images":     0,
-    "milestone_sent":  set(),
-    "profile_name":    None,   # None = use first available
+    "running":           False,
+    "run_slug":          None,
+    "stop_event":        None,
+    "loop":              None,
+    "approval_event":    None,
+    "approval_result":   None,
+    "revision_mode":     False,
+    "clarifying_mode":   False,   # waiting for answers to clarifying questions
+    "clarifying_topic":  None,    # topic being planned
+    "clarifying_questions": None, # parsed list of {question, default} dicts
+    "approach_pitches":  None,    # raw pitches text for context storage
+    "approach_answers":  None,    # user's answers to clarifying questions
+    "chat_id":           None,
+    "log_queue":         None,
+    "total_images":      0,
+    "done_images":       0,
+    "milestone_sent":    set(),
+    "profile_name":      None,   # None = use first available
 }
 
 
@@ -236,13 +244,108 @@ async def _deliver_completion(app: Application, chat_id: int, result: dict) -> N
             f.close()
 
 
+# ── Clarifying questions + approach pitches ────────────────────────────────────
+
+def _parse_clarifying_questions(text: str) -> list[dict]:
+    items = []
+    for block in re.split(r'\n(?=\d+\.)', text.strip()):
+        lines = block.strip().split('\n')
+        question = re.sub(r'^\d+\.\s*', '', lines[0]).strip()
+        default_line = next((l for l in lines if l.strip().lower().startswith('default:')), '')
+        default = re.sub(r'(?i)^\s*default:\s*', '', default_line).strip()
+        if question:
+            items.append({'question': question, 'default': default})
+    return items
+
+
+async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str) -> None:
+    chat_id = update.effective_chat.id
+    available = list_profiles()
+    if not available:
+        await update.message.reply_text("❌ No profiles found.")
+        return
+
+    profile_name = _state["profile_name"] or available[0]
+    profile = load_profile(profile_name)
+    client = anthropic_sdk.Anthropic(api_key=ANTHROPIC_KEY)
+
+    await update.message.reply_text(f"🤔 Thinking about your topic: *{topic}*…", parse_mode="Markdown")
+
+    loop = asyncio.get_running_loop()
+    def _generate():
+        return generate_clarifying_questions(topic, profile, client, lambda _: None)
+
+    try:
+        questions_text = await loop.run_in_executor(None, _generate)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error generating questions: {e}")
+        return
+
+    parsed = _parse_clarifying_questions(questions_text)
+    _state["clarifying_mode"]      = True
+    _state["clarifying_topic"]     = topic
+    _state["clarifying_questions"] = parsed
+
+    lines = ["📋 *A few quick questions before we write the script:*\n"]
+    for i, item in enumerate(parsed, 1):
+        lines.append(f"*{i}. {item['question']}*")
+        if item['default']:
+            lines.append(f"   _Default: {item['default']}_")
+        lines.append("")
+
+    lines.append("Reply with your answers (numbered), or send `default` to use all suggested answers.")
+
+    await context.bot.send_message(chat_id=chat_id, text='\n'.join(lines), parse_mode="Markdown")
+
+
+async def _send_approach_pitches(update: Update, context: ContextTypes.DEFAULT_TYPE, answers: str) -> None:
+    chat_id = update.effective_chat.id
+    topic   = _state["clarifying_topic"]
+
+    available    = list_profiles()
+    profile_name = _state["profile_name"] or available[0]
+    profile      = load_profile(profile_name)
+    client       = anthropic_sdk.Anthropic(api_key=ANTHROPIC_KEY)
+
+    await context.bot.send_message(chat_id=chat_id, text="💡 Pitching approaches…")
+
+    loop = asyncio.get_running_loop()
+    def _generate():
+        return generate_approach_pitches(topic, answers, profile, client, lambda _: None)
+
+    try:
+        pitches_text = await loop.run_in_executor(None, _generate)
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error generating pitches: {e}")
+        return
+
+    _state["approach_pitches"] = pitches_text
+    _state["approach_answers"] = answers
+
+    # Trim to Telegram message limit
+    display = pitches_text[:3800] + ("…" if len(pitches_text) > 3800 else "")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Approach 1", callback_data="approach:1"),
+         InlineKeyboardButton("✅ Approach 2", callback_data="approach:2"),
+         InlineKeyboardButton("✅ Approach 3", callback_data="approach:3")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="approach:cancel")],
+    ])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=display,
+        reply_markup=keyboard,
+    )
+
+
 # ── Command handlers ───────────────────────────────────────────────────────────
 
 @auth
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🎬 *YT Pipeline Bot*\n\n"
-        "/run <topic> — start a new pipeline run\n"
+        "/run <topic> — plan & start a pipeline run\n"
+        "   ↳ asks clarifying questions, pitches 3 approaches, then runs\n"
+        "   ↳ reply `default` to auto-fill all suggested answers\n"
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
         "/download [slug] — download run assets as zip (latest if omitted)\n"
@@ -432,7 +535,7 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not topic:
         await update.message.reply_text("Usage: /run <topic>")
         return
-    await _start_pipeline(update, context, topic=topic)
+    await _send_clarifying_questions(update, context, topic=topic)
 
 
 @auth
@@ -468,10 +571,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # ── Pipeline runner ────────────────────────────────────────────────────────────
 
 async def _start_pipeline(
-    update: Update,
+    update,
     context: ContextTypes.DEFAULT_TYPE,
     topic: str | None = None,
     run_slug: str | None = None,
+    approach_context: str = "",
 ) -> None:
     chat_id = update.effective_chat.id
     app     = context.application
@@ -500,7 +604,7 @@ async def _start_pipeline(
 
     available = list_profiles()
     if not available:
-        await update.message.reply_text("❌ No profiles found. Create profiles/<name>/profile.yaml first.")
+        await context.bot.send_message(chat_id, "❌ No profiles found. Create profiles/<name>/profile.yaml first.")
         _state["running"] = False
         return
 
@@ -515,6 +619,7 @@ async def _start_pipeline(
             progress_callback=progress_cb,
             stop_event=se,
             approval_callback=approval_cb,
+            approach_context=approach_context,
         )
     else:
         # Resume: load profile from saved run folder; fall back to selected state
@@ -532,10 +637,7 @@ async def _start_pipeline(
             stop_event=se,
         )
 
-    await update.message.reply_text(
-        label,
-        parse_mode="Markdown",
-    )
+    await context.bot.send_message(chat_id, label, parse_mode="Markdown")
 
     def worker():
         try:
@@ -566,6 +668,24 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
     data = query.data
     ae   = _state.get("approval_event")
+
+    if data.startswith("approach:"):
+        choice = data.split(":", 1)[1]
+        await query.edit_message_reply_markup(None)
+        if choice == "cancel":
+            _state["clarifying_topic"]     = None
+            _state["approach_answers"]     = None
+            _state["approach_pitches"]     = None
+            await query.message.reply_text("❌ Pipeline planning cancelled.")
+            return
+        approach_context = _state.get("approach_answers") or ""
+        topic            = _state["clarifying_topic"]
+        _state["clarifying_topic"]  = None
+        _state["approach_answers"]  = None
+        _state["approach_pitches"]  = None
+        await query.message.reply_text(f"✅ Approach {choice} selected — starting pipeline…")
+        await _start_pipeline(query, context, topic=topic, approach_context=approach_context)
+        return
 
     if data.startswith("profile:"):
         name = data.split(":", 1)[1]
@@ -605,6 +725,31 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @auth
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Handle clarifying question answers
+    if _state.get("clarifying_mode"):
+        text = update.message.text.strip()
+        parsed = _state.get("clarifying_questions") or []
+
+        if text.lower() == "default":
+            # Use all defaults
+            parts = []
+            for i, item in enumerate(parsed, 1):
+                parts.append(f"{i}. {item['question']}\n   Answer: {item['default'] or '(no default)'}")
+            answers = '\n\n'.join(parts)
+        else:
+            # Pair user's numbered answers back to questions
+            raw_answers = re.split(r'\n(?=\d+[\.\)])', text)
+            parts = []
+            for i, item in enumerate(parsed, 1):
+                user_ans = raw_answers[i - 1].strip() if i <= len(raw_answers) else ''
+                user_ans = re.sub(r'^\d+[\.\)]\s*', '', user_ans).strip()
+                parts.append(f"{i}. {item['question']}\n   Answer: {user_ans or item['default'] or '(no answer)'}")
+            answers = '\n\n'.join(parts)
+
+        _state["clarifying_mode"] = False
+        await _send_approach_pitches(update, context, answers)
+        return
+
     if not _state.get("revision_mode"):
         if not _state.get("running"):
             await update.message.reply_text("No pipeline running. Use /run <topic> to start.")

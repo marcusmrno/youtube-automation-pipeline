@@ -67,9 +67,10 @@ def index():
 
 @app.route("/run", methods=["POST"])
 def run():
-    data         = request.get_json(force=True)
-    topic        = (data.get("topic") or "").strip()
-    profile_name = (data.get("profile") or "").strip()
+    data               = request.get_json(force=True)
+    topic              = (data.get("topic") or "").strip()
+    profile_name       = (data.get("profile") or "").strip()
+    approach_context   = (data.get("approach_context") or "").strip()
 
     if not topic:
         return jsonify({"ok": False, "error": "No topic provided"})
@@ -107,7 +108,8 @@ def run():
     def worker():
         try:
             run_pipeline(topic, profile, progress_callback=progress_cb,
-                         stop_event=se, approval_callback=approval_cb)
+                         stop_event=se, approval_callback=approval_cb,
+                         approach_context=approach_context)
         except Exception as e:
             lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
         finally:
@@ -427,6 +429,57 @@ def save_script(run_name: str):
         return jsonify({"ok": False, "error": "Run folder not found"})
     path.write_text(text)
     return jsonify({"ok": True})
+
+
+# ── Script planning endpoints ─────────────────────────────────────────────────
+
+@app.route("/clarifying_questions", methods=["POST"])
+def get_clarifying_questions():
+    from pipeline import generate_clarifying_questions, ANTHROPIC_KEY, HAIKU_MODEL
+
+    data = request.get_json(force=True)
+    topic = (data.get("topic") or "").strip()
+    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
+
+    if not topic:
+        return jsonify({"ok": False, "error": "Topic required"})
+
+    profile = load_profile(profile_name)
+    client = pipeline.anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+    def dummy_log(msg):
+        pass
+
+    try:
+        questions = generate_clarifying_questions(topic, profile, client, dummy_log)
+        return jsonify({"ok": True, "questions": questions})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/approach_pitches", methods=["POST"])
+def get_approach_pitches():
+    from pipeline import generate_approach_pitches, ANTHROPIC_KEY, HAIKU_MODEL
+
+    data = request.get_json(force=True)
+    topic = (data.get("topic") or "").strip()
+    answers = (data.get("answers") or "").strip()
+    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
+
+    if not topic or not answers:
+        return jsonify({"ok": False, "error": "Topic and answers required"})
+
+    profile = load_profile(profile_name)
+    client = pipeline.anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+    def dummy_log(msg):
+        pass
+
+    try:
+        pitches = generate_approach_pitches(topic, answers, profile, client, dummy_log)
+        return jsonify({"ok": True, "pitches": pitches})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 # ── Audio endpoints ───────────────────────────────────────────────────────────

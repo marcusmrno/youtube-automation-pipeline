@@ -16,7 +16,67 @@ def _extract(tag: str, text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _build_script_prompt(topic: str, research: str, profile: "Profile") -> str:
+def _build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:
+    c = profile.channel
+    template = f"""
+You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
+
+A creator wants to make a video about: {topic}
+
+Generate 4-5 clarifying questions that will help nail the angle of this video. For each question:
+- Ask something specific and useful (angle, outcome, misconceptions, target audience, emphasis)
+- Immediately follow it with a "Default:" line: a short, evidence-backed suggested answer that reflects the strongest/most interesting direction for this topic on YouTube
+
+Make questions punchy and answerable in 1-2 sentences. Defaults should be opinionated and grounded in what actually performs well for educational content on this subject.
+
+Format EXACTLY like this (no deviations):
+
+1. [Question text]
+   Default: [Suggested evidence-backed answer]
+
+2. [Question text]
+   Default: [Suggested evidence-backed answer]
+
+(continue for all questions)
+
+Return only the numbered questions and defaults, no preamble or closing text."""
+    return template
+
+
+def _build_approach_pitch_prompt(topic: str, answers: str, profile: "Profile") -> str:
+    c = profile.channel
+    template = f"""
+You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
+
+## Video Topic
+{topic}
+
+## Creator's Context & Answers
+{answers}
+
+Based on this, pitch 3 distinct, evidence-based approaches to this video. For each approach:
+- Give it a short name (3-5 words)
+- Explain the core angle in one sentence
+- List 2-3 reasons why this angle works for the audience
+- Note what misconceptions or ideas it directly addresses
+
+Make pitches concrete and opinionated. The creator will pick one to move forward with.
+
+Format as:
+
+### Approach 1: [Name]
+**Angle:** [One sentence core idea]
+**Why it works:**
+- [Reason 1]
+- [Reason 2]
+- [Reason 3]
+**Addresses:** [Key misconceptions or ideas]
+
+[Repeat for approaches 2 and 3]"""
+    return template
+
+
+def _build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
     target_words = s["target_mins"] * s["wpm"]
@@ -26,6 +86,17 @@ def _build_script_prompt(topic: str, research: str, profile: "Profile") -> str:
     cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
     section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
     section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+
+    approach_section = ""
+    if approach_context.strip():
+        approach_section = f"""
+## Creator's Video Idea & Angle
+Based on the creator's clarifying answers below, tailor your script to match their intended focus:
+{approach_context}
+
+Use this context to guide your angle, emphasis, and which aspects of the research to highlight.
+---
+"""
 
     template = f"""
 You are a script writer for a faceless educational YouTube channel.
@@ -55,7 +126,7 @@ After writing, count your narration words. If under {round(target_words * 0.9)},
 ---
 TOPIC: {topic}
 
----
+{approach_section}---
 RESEARCH & VERIFIED FACTS:
 {research}
 

@@ -749,11 +749,15 @@ html, body {
 .gallery-grid {
   flex: 1;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 16px 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, 200px);
   gap: 12px;
   align-content: start;
+  width: 100%;
+  min-width: min-content;
+  grid-auto-rows: max-content;
 }
 
 .img-card {
@@ -781,8 +785,8 @@ html, body {
 
 .img-card-thumb {
   width: 100%;
-  aspect-ratio: 16/9;
-  object-fit: cover;
+  aspect-ratio: auto;
+  object-fit: contain;
   display: block;
   background: var(--bg);
 }
@@ -944,6 +948,19 @@ html, body {
 }
 .btn-lightbox-close:hover { border-color: var(--red); color: var(--red); }
 
+.btn-lightbox-select {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-lightbox-select:hover { border-color: var(--blue); color: var(--blue); }
+.btn-lightbox-select.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
+
 .lightbox-img-wrap {
   background: var(--bg);
   border-left: 1px solid var(--border);
@@ -969,6 +986,9 @@ html, body {
   border-radius: 0 0 var(--radius) var(--radius);
   padding: 12px 16px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .lightbox-prompt-label {
   font-family: var(--display);
@@ -992,6 +1012,58 @@ html, body {
 }
 .lightbox-prompt-text::-webkit-scrollbar { width: 4px; }
 .lightbox-prompt-text::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+
+.lightbox-script-section {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  color: var(--text);
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.lightbox-script-section::-webkit-scrollbar { width: 4px; }
+.lightbox-script-section::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+.lightbox-script-title {
+  font-family: var(--display);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin-bottom: 5px;
+  display: block;
+}
+
+.lightbox-prompt-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.lightbox-prompt-summary {
+  font-family: var(--display);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 0;
+}
+.lightbox-prompt-summary::-webkit-details-marker { display: none; }
+.lightbox-prompt-summary::before {
+  content: '▶';
+  font-size: 0.45rem;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+details[open] .lightbox-prompt-summary::before { transform: rotate(90deg); }
+details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
 
 /* ── Animations ── */
 @keyframes pulse-blue {
@@ -1247,6 +1319,7 @@ html, body {
     <div class="lightbox-header">
       <span class="lightbox-num" id="lightboxNum"></span>
       <span class="lightbox-ts" id="lightboxTs"></span>
+      <button class="btn-lightbox-select" id="lightboxSelectBtn" onclick="toggleLightboxSelect()">✓ Mark for regen</button>
       <div class="lightbox-nav">
         <button class="lightbox-nav-btn" id="lightboxPrev" onclick="lightboxStep(-1)">&#8592;</button>
         <span class="lightbox-counter" id="lightboxCounter"></span>
@@ -1258,8 +1331,14 @@ html, body {
       <img class="lightbox-img" id="lightboxImg" src="" alt="">
     </div>
     <div class="lightbox-prompt-wrap">
-      <span class="lightbox-prompt-label">Prompt</span>
-      <div class="lightbox-prompt-text" id="lightboxPrompt"></div>
+      <details class="lightbox-prompt-details" open>
+        <summary class="lightbox-prompt-summary" id="lightboxScriptTitle">Script</summary>
+        <div class="lightbox-script-section" id="lightboxScript"></div>
+      </details>
+      <details class="lightbox-prompt-details">
+        <summary class="lightbox-prompt-summary">Prompt</summary>
+        <div class="lightbox-prompt-text" id="lightboxPrompt"></div>
+      </details>
     </div>
   </div>
 </div>
@@ -1286,6 +1365,37 @@ html, body {
         <button class="btn-revise" id="reviseBtn" onclick="reviseScript()">↻ Revise</button>
         <button class="btn-approve" onclick="approveScript()">✓ Approve &amp; Start Production</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Script Planning: Clarifying Questions ── -->
+<div class="review-overlay" id="clarifyingQuestionsOverlay" style="display:none;">
+  <div class="review-panel" style="max-height:85vh;">
+    <div class="review-header">
+      <span class="review-title">Let's Clarify Your Video Idea</span>
+      <span class="review-subtitle">Edit the defaults or write your own answers</span>
+    </div>
+    <div id="clarifyingQuestionsContent" style="overflow-y:auto;flex:1;min-height:0;margin-bottom:12px;"></div>
+    <div class="review-footer">
+      <button class="btn-reject" onclick="closeClarifyingQuestions()">Cancel</button>
+      <button class="btn-revise" id="useDefaultsBtn" onclick="useAllDefaults()">↓ Use All Defaults</button>
+      <button class="btn-approve" onclick="submitClarifyingAnswers()">Continue →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Script Planning: Approach Pitches ── -->
+<div class="review-overlay" id="approachPitchesOverlay" style="display:none;">
+  <div class="review-panel" style="max-height:80vh;overflow-y:auto;">
+    <div class="review-header">
+      <span class="review-title">Choose Your Approach</span>
+      <span class="review-subtitle">Pick the angle that resonates with you</span>
+    </div>
+    <div id="approachPitchesContent" style="color:var(--text);font-family:var(--sans);font-size:0.78rem;line-height:1.7;margin-bottom:16px;white-space:pre-wrap;word-break:break-word;"></div>
+    <div id="approachSelectionBtns" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
+    <div class="review-footer">
+      <button class="btn-reject" onclick="closeApproachPitches()">Back</button>
     </div>
   </div>
 </div>
@@ -1662,8 +1772,10 @@ async function runPipeline() {
   } else {
     const topic = document.getElementById('topicInput').value.trim();
     if (!topic) { document.getElementById('topicInput').focus(); return; }
-    endpoint = '/run';
-    payload  = { topic, profile: document.getElementById('profileSelect').value };
+
+    // For topic mode, show clarifying questions first
+    await showClarifyingQuestions(topic);
+    return;
   }
 
   // UI state
@@ -1819,6 +1931,204 @@ async function rejectScript() {
   setRunFinished(false);
 }
 
+// ── Script Planning ────────────────────────────────────────────────────────
+
+let _planningTopic = '';
+let _planningAnswers = '';
+let _selectedApproach = '';
+
+let _parsedQuestions = [];
+
+function parseClarifyingQuestions(text) {
+  const items = [];
+  const blocks = text.trim().split(/\n(?=\d+\.)/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const questionLine = lines[0].replace(/^\d+\.\s*/, '').trim();
+    const defaultLine = lines.find(l => l.trim().startsWith('Default:'));
+    const defaultText = defaultLine ? defaultLine.replace(/^\s*Default:\s*/i, '').trim() : '';
+    if (questionLine) items.push({ question: questionLine, default: defaultText });
+  }
+  return items;
+}
+
+function renderClarifyingQuestions(items) {
+  const container = document.getElementById('clarifyingQuestionsContent');
+  container.innerHTML = '';
+  items.forEach((item, i) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-bottom:16px;';
+    wrap.innerHTML = `
+      <label style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);display:block;margin-bottom:4px;">
+        ${i + 1}. ${item.question}
+      </label>
+      ${item.default ? `<div style="font-family:var(--mono);font-size:0.65rem;color:var(--dim);margin-bottom:5px;padding:5px 8px;border-left:2px solid var(--border-2);line-height:1.5;">Default: ${item.default}</div>` : ''}
+      <textarea
+        class="review-script"
+        id="cq-answer-${i}"
+        rows="2"
+        placeholder="Your answer…"
+        style="resize:none;flex:none;margin:0;"
+      ></textarea>
+    `;
+    container.appendChild(wrap);
+  });
+}
+
+async function showClarifyingQuestions(topic) {
+  _planningTopic = topic;
+  const profile = document.getElementById('profileSelect').value;
+
+  const qOverlay = document.getElementById('clarifyingQuestionsOverlay');
+  const qContent = document.getElementById('clarifyingQuestionsContent');
+  qContent.innerHTML = '<div style="font-family:var(--mono);font-size:0.75rem;color:var(--muted);padding:8px 0;">Generating questions…</div>';
+  qOverlay.style.display = 'flex';
+  document.getElementById('useDefaultsBtn').disabled = true;
+
+  try {
+    const res = await fetch('/clarifying_questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, profile_name: profile }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      _parsedQuestions = parseClarifyingQuestions(data.questions);
+      renderClarifyingQuestions(_parsedQuestions);
+      document.getElementById('useDefaultsBtn').disabled = false;
+    } else {
+      qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${data.error}</div>`;
+    }
+  } catch (e) {
+    qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${e.message}</div>`;
+  }
+}
+
+function useAllDefaults() {
+  _parsedQuestions.forEach((item, i) => {
+    const ta = document.getElementById(`cq-answer-${i}`);
+    if (ta && item.default) ta.value = item.default;
+  });
+}
+
+function closeClarifyingQuestions() {
+  document.getElementById('clarifyingQuestionsOverlay').style.display = 'none';
+  _parsedQuestions = [];
+  _planningAnswers = '';
+}
+
+async function submitClarifyingAnswers() {
+  const parts = _parsedQuestions.map((item, i) => {
+    const ta = document.getElementById(`cq-answer-${i}`);
+    const answer = ta ? ta.value.trim() : '';
+    return `${i + 1}. ${item.question}\n   Answer: ${answer || item.default || '(no answer)'}`;
+  });
+  _planningAnswers = parts.join('\n\n');
+
+  if (!_planningAnswers.trim()) return;
+  document.getElementById('clarifyingQuestionsOverlay').style.display = 'none';
+  await showApproachPitches();
+}
+
+async function showApproachPitches() {
+  const profile = document.getElementById('profileSelect').value;
+
+  const aOverlay = document.getElementById('approachPitchesOverlay');
+  const aContent = document.getElementById('approachPitchesContent');
+  aContent.textContent = 'Generating approaches…';
+  aOverlay.style.display = 'flex';
+
+  try {
+    const res = await fetch('/approach_pitches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: _planningTopic,
+        answers: _planningAnswers,
+        profile_name: profile
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      aContent.textContent = data.pitches;
+
+      const btnContainer = document.getElementById('approachSelectionBtns');
+      btnContainer.innerHTML = `
+        <button class="btn btn-primary" onclick="selectApproach(1)" style="text-align:left;padding:12px;white-space:normal;height:auto;">
+          ✓ Choose Approach 1
+        </button>
+        <button class="btn btn-primary" onclick="selectApproach(2)" style="text-align:left;padding:12px;white-space:normal;height:auto;">
+          ✓ Choose Approach 2
+        </button>
+        <button class="btn btn-primary" onclick="selectApproach(3)" style="text-align:left;padding:12px;white-space:normal;height:auto;">
+          ✓ Choose Approach 3
+        </button>
+      `;
+    } else {
+      aContent.textContent = `Error: ${data.error}`;
+    }
+  } catch (e) {
+    aContent.textContent = `Error: ${e.message}`;
+  }
+}
+
+function closeApproachPitches() {
+  document.getElementById('approachPitchesOverlay').style.display = 'none';
+  document.getElementById('clarifyingQuestionsOverlay').style.display = 'flex';
+}
+
+async function selectApproach(num) {
+  _selectedApproach = `Approach ${num}`;
+  document.getElementById('approachPitchesOverlay').style.display = 'none';
+
+  await continuePipelineExecution();
+}
+
+async function continuePipelineExecution() {
+  const topic = _planningTopic;
+  const profile = document.getElementById('profileSelect').value;
+  const endpoint = '/run';
+  const payload = {
+    topic,
+    profile,
+    approach_context: _planningAnswers
+  };
+
+  running = true;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  setGlobalStatus('running', 'Running…');
+  resetStages();
+  clearLogSections();
+
+  const res  = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    addLogLine(null, `❌ ${data.error || 'Failed to start pipeline'}`);
+    setRunFinished(false);
+    return;
+  }
+
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    handleEvent(event);
+  };
+  eventSource.onerror = () => {
+    if (running) {
+      addLogLine(null, '❌ Connection lost');
+      setRunFinished(false);
+    }
+    eventSource.close();
+  };
+}
+
 // ── Sidebar ───────────────────────────────────────────────────────────────
 
 function switchTab(name) {
@@ -1905,10 +2215,41 @@ async function loadRunFiles(run) {
 
 // ── Image Gallery ─────────────────────────────────────────────────────────
 
-let galleryRun      = null;
-let gallerySelected = new Set();
-let galleryNums     = [];
-let galleryPrompts  = {};
+let galleryRun             = null;
+let gallerySelected        = new Set();
+let galleryNums            = [];
+let galleryPrompts         = {};
+let galleryScriptSections  = [];
+
+function _tsToSeconds(ts) {
+  const [m, s] = ts.split(':').map(Number);
+  return m * 60 + s;
+}
+
+function parseScriptSections(text) {
+  const sections = [];
+  const re = /^\[(\d{2}:\d{2})-(\d{2}:\d{2})\]\s*(.+)$/;
+  let cur = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const m = line.match(re);
+    if (m) {
+      if (cur) sections.push(cur);
+      cur = { start: _tsToSeconds(m[1]), end: _tsToSeconds(m[2]), title: m[3].trim(), lines: [] };
+    } else if (cur && line && !line.startsWith('VISUAL:') && !line.startsWith('TITLE:') && !line.startsWith('KEYWORDS:')) {
+      cur.lines.push(line);
+    }
+  }
+  if (cur) sections.push(cur);
+  return sections;
+}
+
+function findScriptSection(imageTs) {
+  if (!galleryScriptSections.length || !imageTs) return null;
+  const start = _tsToSeconds(imageTs.split('-')[0]);
+  return galleryScriptSections.find(s => start >= s.start && start < s.end)
+      || galleryScriptSections[galleryScriptSections.length - 1];
+}
 let lightboxIdx     = 0;
 
 async function refreshImagePicker() {
@@ -1932,11 +2273,13 @@ async function openGallery() {
   gallerySelected.clear();
   document.getElementById('galleryRunLabel').textContent = run;
   document.getElementById('galleryOverlay').classList.add('visible');
-  const [, prompts] = await Promise.all([
+  const [, prompts, scriptRes] = await Promise.all([
     loadGalleryImages(),
     fetch(`/prompts/${encodeURIComponent(run)}`).then(r => r.json()),
+    fetch(`/script/${encodeURIComponent(run)}`).then(r => r.json()),
   ]);
   galleryPrompts = prompts;
+  galleryScriptSections = scriptRes.ok ? parseScriptSections(scriptRes.text) : [];
 }
 
 function closeGallery() {
@@ -2022,13 +2365,31 @@ function renderLightbox() {
   const meta    = galleryPrompts[num] || {};
   const src     = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
 
-  document.getElementById('lightboxNum').textContent     = `Image ${num}`;
-  document.getElementById('lightboxTs').textContent      = meta.timestamp || '';
-  document.getElementById('lightboxImg').src             = src;
-  document.getElementById('lightboxPrompt').textContent  = meta.prompt || '(no prompt found)';
-  document.getElementById('lightboxCounter').textContent = `${lightboxIdx + 1} / ${total}`;
+  const section = findScriptSection(meta.timestamp);
+  document.getElementById('lightboxNum').textContent        = `Image ${num}`;
+  document.getElementById('lightboxTs').textContent         = meta.timestamp || '';
+  document.getElementById('lightboxImg').src                = src;
+  document.getElementById('lightboxPrompt').textContent     = meta.prompt || '(no prompt found)';
+  document.getElementById('lightboxScriptTitle').textContent = section ? section.title : 'Script';
+  document.getElementById('lightboxScript').textContent     = section ? section.lines.join('\n\n') : '(no script found)';
+  document.getElementById('lightboxCounter').textContent    = `${lightboxIdx + 1} / ${total}`;
   document.getElementById('lightboxPrev').disabled       = lightboxIdx === 0;
   document.getElementById('lightboxNext').disabled       = lightboxIdx === total - 1;
+
+  const selectBtn = document.getElementById('lightboxSelectBtn');
+  if (gallerySelected.has(num)) {
+    selectBtn.classList.add('selected');
+    selectBtn.textContent = '✓ Selected for regen';
+  } else {
+    selectBtn.classList.remove('selected');
+    selectBtn.textContent = '✓ Mark for regen';
+  }
+}
+
+function toggleLightboxSelect() {
+  const num = galleryNums[lightboxIdx];
+  toggleSelect(num);
+  renderLightbox();
 }
 
 function updateSelCount() {

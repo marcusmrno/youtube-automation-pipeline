@@ -23,6 +23,8 @@ from PIL import Image
 from agents import run_script_agent, run_vet_agent
 from prompts import (
     _build_agent_system_prompt,   # re-exported for bot.py
+    _build_clarifying_questions_prompt,
+    _build_approach_pitch_prompt,
     _build_script_prompt,
     _build_tts_prompt,
     _build_image_prompt_instructions,
@@ -135,9 +137,39 @@ Return your response in this exact format:
 
 # ── Phase 1: Writing ──────────────────────────────────────────────────────────
 
+def generate_clarifying_questions(topic: str, profile: "Profile",
+                                  client: anthropic.Anthropic, log_fn) -> str:
+    """Generate clarifying questions about the video topic."""
+    prompt = _build_clarifying_questions_prompt(topic, profile)
+    log_fn("❓ Generating clarifying questions...")
+    r = client.messages.create(
+        model=HAIKU_MODEL,
+        max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    questions = r.content[0].text.strip()
+    log_fn("✅  Questions ready")
+    return questions
+
+
+def generate_approach_pitches(topic: str, answers: str, profile: "Profile",
+                              client: anthropic.Anthropic, log_fn) -> str:
+    """Generate 3 evidence-based approach pitches based on topic + user answers."""
+    prompt = _build_approach_pitch_prompt(topic, answers, profile)
+    log_fn("💡 Pitching approaches...")
+    r = client.messages.create(
+        model=HAIKU_MODEL,
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    pitches = r.content[0].text.strip()
+    log_fn("✅  Approaches pitched")
+    return pitches
+
+
 def generate_script(topic: str, research: str, profile: "Profile",
-                    client: anthropic.Anthropic, log_fn) -> str:
-    prompt = _build_script_prompt(topic, research, profile)
+                    client: anthropic.Anthropic, log_fn, approach_context: str = "") -> str:
+    prompt = _build_script_prompt(topic, research, profile, approach_context)
     log_fn("✍️  Writing script...")
     r = client.messages.create(
         model=CLAUDE_MODEL,
@@ -981,7 +1013,7 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
 # ── Main Orchestrator ─────────────────────────────────────────────────────────
 
 def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
-                 stop_event=None, approval_callback=None) -> dict:
+                 stop_event=None, approval_callback=None, approach_context: str = "") -> dict:
     """
     Run the full pipeline for a given topic.
 
@@ -991,6 +1023,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
                         Called after script is written, before any paid API calls.
                         Return True to proceed, False to abort.
                         If None, CLI input() is used instead.
+    approach_context:   str — user's clarifying answers about the video idea
     """
     def log_fn(msg):
         log(msg, progress_callback)
@@ -1017,7 +1050,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
         log_fn("🔬  No vidIQ key — running standard research and script phases...")
         research = research_topic(topic, client, log_fn)
         (out_dir / "research.txt").write_text(research)
-        script = generate_script(topic, research, profile, client, log_fn)
+        script = generate_script(topic, research, profile, client, log_fn, approach_context)
 
     (out_dir / "script.txt").write_text(script)
     log_fn("📝  Script written")
