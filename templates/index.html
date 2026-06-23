@@ -2227,28 +2227,48 @@ function _tsToSeconds(ts) {
 }
 
 function parseScriptSections(text) {
+  // Returns { sections: [{title, lines}], visualSectionMap: {promptNum(1-based index) -> sectionIndex} }
   const sections = [];
-  const re = /^\[(\d{2}:\d{2})-(\d{2}:\d{2})\]\s*(.+)$/;
+  const sectionHeaderRe = /^\[[\d:–\-]+\]\s*(.+)$/;
   let cur = null;
+
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    const m = line.match(re);
-    if (m) {
+    const hm = line.match(sectionHeaderRe);
+    if (hm) {
       if (cur) sections.push(cur);
-      cur = { start: _tsToSeconds(m[1]), end: _tsToSeconds(m[2]), title: m[3].trim(), lines: [] };
-    } else if (cur && line && !line.startsWith('VISUAL:') && !line.startsWith('TITLE:') && !line.startsWith('KEYWORDS:')) {
-      cur.lines.push(line);
+      cur = { title: hm[1].trim(), lines: [] };
+    } else if (cur) {
+      if (!line.startsWith('VISUAL:') && !line.startsWith('TITLE:') && !line.startsWith('KEYWORDS:') && line) {
+        cur.lines.push(line);
+      }
     }
   }
   if (cur) sections.push(cur);
-  return sections;
+
+  const sectionMap = {};
+  let curSectionIdx = -1;
+  let vIdx = 0;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line.match(sectionHeaderRe)) {
+      curSectionIdx++;
+    } else if (line.startsWith('VISUAL:') && curSectionIdx >= 0) {
+      vIdx++;
+      sectionMap[vIdx] = curSectionIdx;
+    }
+  }
+
+  return { sections, visualSectionMap: sectionMap };
 }
 
-function findScriptSection(imageTs) {
-  if (!galleryScriptSections.length || !imageTs) return null;
-  const start = _tsToSeconds(imageTs.split('-')[0]);
-  return galleryScriptSections.find(s => start >= s.start && start < s.end)
-      || galleryScriptSections[galleryScriptSections.length - 1];
+function findScriptSection(imageNum) {
+  // imageNum is "001", "042", etc. — 1-based ordinal matching VISUAL line order
+  if (!galleryScriptSections || !galleryScriptSections.sections) return null;
+  const idx = parseInt(imageNum, 10);
+  const sectionIdx = galleryScriptSections.visualSectionMap[idx];
+  if (sectionIdx === undefined) return null;
+  return galleryScriptSections.sections[sectionIdx] || null;
 }
 let lightboxIdx     = 0;
 
@@ -2279,7 +2299,7 @@ async function openGallery() {
     fetch(`/script/${encodeURIComponent(run)}`).then(r => r.json()),
   ]);
   galleryPrompts = prompts;
-  galleryScriptSections = scriptRes.ok ? parseScriptSections(scriptRes.text) : [];
+  galleryScriptSections = scriptRes.ok ? parseScriptSections(scriptRes.text) : { sections: [], visualSectionMap: {} };
 }
 
 function closeGallery() {
@@ -2365,9 +2385,9 @@ function renderLightbox() {
   const meta    = galleryPrompts[num] || {};
   const src     = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
 
-  const section = findScriptSection(meta.timestamp);
+  const section = findScriptSection(num);
   document.getElementById('lightboxNum').textContent        = `Image ${num}`;
-  document.getElementById('lightboxTs').textContent         = meta.timestamp || '';
+  document.getElementById('lightboxTs').textContent         = meta.source ? `Source: ${meta.source.slice(0, 80)}` : '';
   document.getElementById('lightboxImg').src                = src;
   document.getElementById('lightboxPrompt').textContent     = meta.prompt || '(no prompt found)';
   document.getElementById('lightboxScriptTitle').textContent = section ? section.title : 'Script';
