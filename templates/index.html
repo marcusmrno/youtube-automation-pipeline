@@ -2219,7 +2219,7 @@ let galleryRun             = null;
 let gallerySelected        = new Set();
 let galleryNums            = [];
 let galleryPrompts         = {};
-let galleryScriptSections  = [];
+let galleryScriptSections = { sections: [], visualSectionMap: {} };
 
 function _tsToSeconds(ts) {
   const [m, s] = ts.split(':').map(Number);
