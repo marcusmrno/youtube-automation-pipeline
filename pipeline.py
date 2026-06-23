@@ -1067,7 +1067,11 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
             tts_file.write_text(tts_script)
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
-            prompts_file.write_text(image_prompts_raw)
+            fresh_prompts = parse_image_prompts(image_prompts_raw)
+            fresh_prompts = _vet_image_prompts(fresh_prompts, profile, client, log_fn)
+            prompts_file.write_text(
+                "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in fresh_prompts)
+            )
             log_fn("✅  image_prompts.txt saved")
     else:
         tts_script = tts_file.read_text()
@@ -1165,6 +1169,8 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     prompts = parse_image_prompts(image_prompts_raw)
     log_fn(f"📝  {len(prompts)} image prompts parsed")
+
+    prompts = _vet_image_prompts(prompts, profile, client, log_fn)
 
     (out_dir / "tts_script.txt").write_text(tts_script)
     (out_dir / "image_prompts.txt").write_text(
