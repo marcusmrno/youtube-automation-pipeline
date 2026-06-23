@@ -333,6 +333,98 @@ Return only:
     return template
 
 
+def _build_image_prompt_vet_instructions(profile: "Profile") -> str:
+    char_block = profile.characters_block()
+    style      = profile.image_style["art_style_block"].strip()
+
+    return f"""You are vetting image prompts for a YouTube video pipeline.
+
+## Channel context
+{char_block}
+
+## Art style
+{style}
+
+---
+
+You will receive a list of image prompts in this format:
+NNN | [source line] | [prompt]
+
+The source line is the exact narration sentence the prompt was generated from.
+
+## Your job
+
+Read all prompts and flag any that have one or more of these problems:
+
+1. **RELEVANCE** — the prompt does not illustrate what the source line says. The visual content is unrelated, too vague, or shows something from a different part of the script.
+
+2. **ADJACENT_SIMILARITY** — this prompt and the one immediately before or after it describe nearly the same scene (same character position, same object, same setting with no meaningful visual difference).
+
+3. **SCENE_OVERUSE** — the same scene archetype appears more than 3 times across the full list. Count occurrences of recurring archetypes (e.g. "cat at a whiteboard", "cat floating in space", "cat pointing at a chart") and flag the less important occurrences beyond the third.
+
+## Output format
+
+Return a JSON array. If no prompts need fixing, return an empty array `[]`.
+
+For each flagged prompt:
+{{
+  "num": "NNN",
+  "reason": "RELEVANCE | ADJACENT_SIMILARITY | SCENE_OVERUSE",
+  "detail": "one sentence explaining the specific problem"
+}}
+
+Return ONLY the JSON array. No explanation, no markdown fences.
+"""
+
+
+def _build_image_prompt_rewrite_instructions(profile: "Profile") -> str:
+    char_block = profile.characters_block()
+    style      = profile.image_style["art_style_block"].strip()
+    scene_rules = (profile.image_style.get("scene_rules") or "").strip()
+
+    characters_section = f"""## Characters — embed description verbatim in EVERY prompt
+
+{char_block}
+
+---
+""" if char_block else ""
+
+    return f"""You are rewriting flagged image prompts for a YouTube video pipeline.
+
+{characters_section}## Art style — end EVERY prompt with this exact block
+
+{style}
+
+{scene_rules}
+
+---
+
+You will receive a list of flagged prompts in this format:
+NNN | [source line] | [prompt] | REASON: [reason and detail]
+
+## Your job
+
+Rewrite each prompt to fix the stated problem:
+
+- **RELEVANCE**: rewrite the prompt so it directly and literally illustrates the source line
+- **ADJACENT_SIMILARITY**: change the scene so it is visually distinct from its neighbors (different angle, object placement, background element, or subject action)
+- **SCENE_OVERUSE**: vary the scene — use a different setting, activity, or framing that still fits the source line
+
+Rules:
+- Keep the same prompt number
+- Keep the same source line verbatim
+- Do NOT include a style prefix — the art style block goes at the end only
+- The rewritten prompt must still match the source line content
+
+## Output format
+
+Return each rewritten prompt as:
+NNN | [source line unchanged] | [rewritten prompt]
+
+One per line. Return ONLY the prompt lines. No explanation.
+"""
+
+
 def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
