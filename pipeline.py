@@ -197,6 +197,7 @@ def parse_image_prompts(raw: str) -> list[dict]:
         line = line.strip()
         if not line:
             continue
+        # Source lines must not contain '|' — the delimiter; narration sentences don't in practice
         parts = line.split("|", 2)
         if len(parts) == 3:
             num    = parts[0].strip().zfill(3)
@@ -325,13 +326,14 @@ def _vet_image_prompts(
     prompt_by_num = {p["num"]: p for p in prompts}
     flagged_lines = []
     for f in flagged:
-        num = str(f["num"]).zfill(3)
-        if num not in prompt_by_num:
+        num = str(f.get("num", "")).zfill(3)
+        if not num.strip("0") or num not in prompt_by_num:
             continue
+        reason = f.get("reason", "")
+        detail = f.get("detail", reason)
         p = prompt_by_num[num]
-        detail = f.get("detail", f.get("reason", ""))
         flagged_lines.append(
-            f"{p['num']} | {p['source']} | {p['prompt']} | REASON: {f['reason']} — {detail}"
+            f"{p['num']} | {p['source']} | {p['prompt']} | REASON: {reason} — {detail}"
         )
 
     if not flagged_lines:
@@ -803,13 +805,6 @@ def _ts_to_seconds(ts: str) -> float | None:
     return None
 
 
-def _prompt_duration(prompt: dict, fallback: float, scale: float = 1.0) -> float:
-    return fallback
-
-
-def _timestamp_scale(prompts: list[dict], actual_duration: float) -> float:
-    return 1.0
-
 
 def assemble_palmier_timeline(
     prompts: list[dict],
@@ -833,7 +828,6 @@ def assemble_palmier_timeline(
     total_duration  = get_audio_duration(audio_path) if audio_path else None
     base_dur_s      = (total_duration / len(valid_nums)) if total_duration else 2.5
     base_dur_frames = max(1, round(base_dur_s * project_fps))
-    scale           = _timestamp_scale(prompts, total_duration) if total_duration else 1.0
 
     if total_duration:
         log_fn(f"  ⏱  Audio duration: {total_duration:.1f}s — equal distribution across {len(valid_nums)} images")
@@ -881,7 +875,7 @@ def assemble_palmier_timeline(
     FLICKER_CYCLE = [("b", 1), ("c", 1)]
 
     for num in valid_nums:
-        clip_dur_s      = _prompt_duration(prompt_by_num[num], base_dur_s, scale)
+        clip_dur_s      = base_dur_s
         clip_dur_frames = max(1, round(clip_dur_s * project_fps))
         refs            = media_refs[num]
 

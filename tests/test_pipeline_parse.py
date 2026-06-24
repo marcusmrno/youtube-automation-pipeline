@@ -8,7 +8,7 @@ if "claude_agent_sdk" not in sys.modules:
     sys.modules["claude_agent_sdk"] = mock_sdk
     sys.modules["claude_agent_sdk.types"] = mock_sdk
 
-from pipeline import parse_image_prompts, _prompt_duration
+from pipeline import parse_image_prompts
 
 
 def test_parse_new_format_source_field():
@@ -62,12 +62,3 @@ def test_parse_pipe_in_prompt_body_preserved():
 def test_parse_empty_string_returns_empty():
     assert parse_image_prompts("") == []
 
-
-def test_prompt_duration_returns_fallback_when_no_ts():
-    prompt = {"num": "001", "source": "some line", "prompt": "some prompt"}
-    assert _prompt_duration(prompt, fallback=3.0) == 3.0
-
-
-def test_prompt_duration_returns_fallback_with_scale():
-    prompt = {"num": "001", "source": "some line", "prompt": "some prompt"}
-    assert _prompt_duration(prompt, fallback=3.0, scale=2.0) == 3.0

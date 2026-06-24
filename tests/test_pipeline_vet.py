@@ -99,3 +99,24 @@ def test_vet_returns_original_on_empty_stage2_response():
 
     assert result == prompts
     assert any("⚠️" in m for m in logs)
+
+
+def test_vet_handles_missing_keys_in_flagged_entry():
+    """Stage 1 returns valid JSON but entries missing num/reason — should not crash."""
+    prompts = _make_prompts(3)
+    profile = _mock_profile()
+    client  = MagicMock()
+
+    # Entry with missing "num" key — should be skipped gracefully
+    flagged = json.dumps([{"reason": "RELEVANCE", "detail": "bad"}])
+    stage1_resp = MagicMock()
+    stage1_resp.content = [MagicMock(text=flagged)]
+
+    # Stage 2 won't run since no valid flagged lines built
+    client.messages.create.return_value = stage1_resp
+
+    logs = []
+    result = _vet_image_prompts(prompts, profile, client, logs.append)
+
+    # Should return originals without crashing (skipped the malformed entry)
+    assert result == prompts
