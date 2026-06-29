@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from profile import Profile
 
-from pipeline import OUTPUT_ROOT
+from pipeline import OUTPUT_ROOT, generate_image_google, _load_anchor_parts
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
@@ -256,3 +256,31 @@ def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[
             return parsed
         log_fn(f"⚠️  Thumbnail prompts malformed on attempt {attempt}")
     raise ValueError("thumbnail prompt generation failed twice — aborting metadata run")
+
+
+def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> list[dict]:
+    """Render each thumbnail serially. Returns one entry per input with filename and any error."""
+    thumb_dir = run_dir / "thumbnails"
+    thumb_dir.mkdir(exist_ok=True)
+    anchor_parts = _load_anchor_parts(profile)
+    model = profile.image_gen.get("pro_model") or profile.image_gen["default_model"]
+
+    out: list[dict] = []
+    for i, p in enumerate(prompts, start=1):
+        filename = f"thumbnails/thumb-{i:02d}.png"
+        img_path = run_dir / filename
+        log_fn(f"🖼   Rendering thumbnail {i}/{len(prompts)}...")
+        try:
+            ok = generate_image_google(
+                p["prompt"], img_path, profile, log_fn,
+                model=model, anchor_parts=anchor_parts,
+            )
+        except Exception as e:
+            log_fn(f"❌  Thumbnail {i} raised: {e}")
+            out.append({**p, "filename": filename, "render_error": str(e)})
+            continue
+        if not ok:
+            out.append({**p, "filename": filename, "render_error": "generator returned False"})
+            continue
+        out.append({**p, "filename": filename})
+    return out
