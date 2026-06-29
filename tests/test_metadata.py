@@ -54,3 +54,32 @@ def test_save_metadata_atomic_no_tmp_left(tmp_path, monkeypatch):
     metadata._save_metadata(run_dir, {"x": 1})
     assert (run_dir / "metadata.json").exists()
     assert not (run_dir / "metadata.json.tmp").exists()
+
+
+def test_vidiq_keywords_no_key_returns_empty(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "")
+    logs = []
+    assert metadata._vidiq_keywords("anything", logs.append) == []
+    assert any("vidIQ" in m for m in logs)
+
+
+def test_vidiq_keywords_call_failure_returns_empty(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    def bad(*a, **kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", bad)
+    logs = []
+    result = metadata._vidiq_keywords("anything", logs.append)
+    assert result == []
+    assert any("boom" in m or "vidIQ" in m for m in logs)
+
+
+def test_vidiq_keywords_parses_agent_json(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    fake_payload = '===KEYWORDS===\n[{"keyword":"vitamins","search_volume":9000}]\n'
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: fake_payload)
+    out = metadata._vidiq_keywords("vitamins", lambda _: None)
+    assert out == [{"keyword": "vitamins", "search_volume": 9000}]
