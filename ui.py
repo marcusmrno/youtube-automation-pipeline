@@ -21,6 +21,7 @@ from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, regenerate_im
 from profile import load_profile, list_profiles
 from agents import run_vet_agent
 from prompts import _build_agent_system_prompt, _extract
+import metadata as _metadata_mod
 
 _noop_log = lambda _: None
 
@@ -365,6 +366,93 @@ def runs_with_prompts():
 @app.route("/run_status/<path:run_slug>")
 def run_status_route(run_slug):
     return jsonify(run_status(run_slug))
+
+
+@app.route("/metadata/<path:run_slug>", methods=["GET"])
+def metadata_get(run_slug):
+    try:
+        data = _metadata_mod.load_metadata(run_slug)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if data is None:
+        return jsonify({"error": "not generated yet"}), 404
+    return jsonify(data)
+
+
+@app.route("/metadata/<path:run_slug>/generate", methods=["POST"])
+def metadata_generate(run_slug):
+    body = request.get_json(force=True, silent=True) or {}
+    regenerate = bool(body.get("regenerate", False))
+    profile_name = (body.get("profile") or "").strip()
+    if not profile_name:
+        available = list_profiles()
+        if len(available) == 1:
+            profile_name = available[0]
+        else:
+            return jsonify({"error": "specify 'profile' in body"}), 400
+    try:
+        profile = load_profile(profile_name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Reuse the existing SSE log queue if available, else stand up a private one
+    log_queue = _state.get("log_queue") or queue.Queue()
+    _state["log_queue"] = log_queue
+
+    def runner():
+        try:
+            _metadata_mod.generate_metadata(
+                run_slug, profile,
+                log_fn=lambda m: log_queue.put(m),
+                regenerate=regenerate,
+            )
+            log_queue.put("✅  Metadata generation complete")
+        except Exception as e:
+            log_queue.put(f"❌  Metadata generation failed: {e}")
+
+    threading.Thread(target=runner, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/metadata/<path:run_slug>/pick_title", methods=["POST"])
+def metadata_pick_title(run_slug):
+    body = request.get_json(force=True, silent=True) or {}
+    index = body.get("index")
+    if not isinstance(index, int):
+        return jsonify({"error": "body must include integer 'index'"}), 400
+    try:
+        return jsonify(_metadata_mod.pick_title(run_slug, index))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/metadata/<path:run_slug>/pick_thumbnail", methods=["POST"])
+def metadata_pick_thumb(run_slug):
+    body = request.get_json(force=True, silent=True) or {}
+    index = body.get("index")
+    if not isinstance(index, int):
+        return jsonify({"error": "body must include integer 'index'"}), 400
+    try:
+        return jsonify(_metadata_mod.pick_thumbnail(run_slug, index))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/metadata/<path:run_slug>/thumbnail/<int:index>", methods=["GET"])
+def metadata_thumbnail_file(run_slug, index):
+    data = _metadata_mod.load_metadata(run_slug)
+    if data is None:
+        return jsonify({"error": "not generated yet"}), 404
+    try:
+        slot = data["thumbnails"][index]
+    except (KeyError, IndexError):
+        return jsonify({"error": "index out of range"}), 404
+    if "render_error" in slot:
+        return jsonify({"error": "render failed for this slot"}), 404
+    path = OUTPUT_ROOT / run_slug / slot["filename"]
+    if not path.exists():
+        return jsonify({"error": "file missing"}), 404
+    return send_file(path, mimetype="image/png")
 
 
 @app.route("/runs_with_scripts")
