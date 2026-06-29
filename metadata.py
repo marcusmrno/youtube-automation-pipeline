@@ -7,6 +7,7 @@ completed run. See docs/superpowers/specs/2026-06-29-metadata-thumbnail-generato
 from __future__ import annotations
 
 import asyncio
+import datetime as _datetime
 import json as _json
 import json
 import os
@@ -19,7 +20,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from profile import Profile
 
-from pipeline import OUTPUT_ROOT, generate_image_google, _load_anchor_parts
+import anthropic
+
+from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, generate_image_google, _load_anchor_parts
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
@@ -285,6 +288,94 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> l
             continue
         out.append({**p, "filename": filename})
     return out
+
+
+def _read_run_inputs(run_slug: str) -> tuple[str, str, str]:
+    """Return (script, research, topic). Raises if script missing."""
+    run_dir = _run_dir(run_slug)
+    script_path = run_dir / "script.txt"
+    if not script_path.exists():
+        raise ValueError(f"Run '{run_slug}' not found or incomplete (missing script.txt)")
+    script = script_path.read_text()
+    research_path = run_dir / "research.txt"
+    research = research_path.read_text() if research_path.exists() else ""
+    topic = run_slug.replace("-", " ").title()
+    return script, research, topic
+
+
+def _sort_titles_by_score(scored: list[dict]) -> list[dict]:
+    return sorted(
+        scored,
+        key=lambda t: (t.get("score") is None, -(t.get("score") or 0)),
+    )
+
+
+def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) -> dict:
+    """Generate full metadata + thumbnails for a completed run.
+
+    Writes metadata.json, thumbnails/thumb-0N.png, and thumbnail.png.
+    Returns the saved dict.
+    """
+    run_dir = _run_dir(run_slug)
+    if not run_dir.exists():
+        raise ValueError(f"Run '{run_slug}' does not exist at {run_dir}")
+    if (run_dir / "metadata.json").exists() and not regenerate:
+        raise ValueError(
+            f"metadata.json already exists for '{run_slug}'. Pass regenerate=True to overwrite."
+        )
+
+    script, research, topic = _read_run_inputs(run_slug)
+    log_fn(f"📦  Generating metadata for run: {run_slug}")
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+    keywords = _vidiq_keywords(topic, log_fn)
+    titles_raw = _generate_titles(topic, script, research, keywords, profile, client, log_fn)
+    scored = _score_titles(titles_raw, log_fn)
+    titles_sorted = _sort_titles_by_score(scored)
+    titles_with_idx = [
+        {"index": i, "text": t["text"], "vidiq_score": t["score"], "score_breakdown": t["score_breakdown"]}
+        for i, t in enumerate(titles_sorted)
+    ]
+    top_title = titles_with_idx[0]["text"] if titles_with_idx else topic
+
+    desc_block = _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn)
+    thumb_prompts = _generate_thumbnail_prompts(script, topic, profile, client, log_fn)
+    rendered = _render_thumbnails(thumb_prompts, run_dir, profile, log_fn)
+    thumbs_with_idx = [
+        {"index": i, "filename": r["filename"], "prompt": r["prompt"], "hook_text": r["hook_text"],
+         **({"render_error": r["render_error"]} if "render_error" in r else {})}
+        for i, r in enumerate(rendered)
+    ]
+
+    data = {
+        "run_slug": run_slug,
+        "generated_at": _datetime.datetime.now(_datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "topic": topic,
+        "vidiq_keywords": keywords,
+        "titles": titles_with_idx,
+        "chosen_title_index": 0,
+        "description": desc_block["description"],
+        "hashtags": desc_block["hashtags"],
+        "thumbnails": thumbs_with_idx,
+        "chosen_thumbnail_index": 0,
+    }
+
+    # If chosen index 0 has render_error, find first non-errored
+    for i, t in enumerate(thumbs_with_idx):
+        if "render_error" not in t:
+            data["chosen_thumbnail_index"] = i
+            break
+
+    _save_metadata(run_dir, data)
+
+    # Copy chosen thumbnail to thumbnail.png
+    chosen = thumbs_with_idx[data["chosen_thumbnail_index"]]
+    if "render_error" not in chosen:
+        shutil.copyfile(run_dir / chosen["filename"], run_dir / "thumbnail.png")
+
+    log_fn(f"✅  Metadata written: {run_dir / 'metadata.json'}")
+    return data
 
 
 def pick_title(run_slug: str, index: int) -> dict:
