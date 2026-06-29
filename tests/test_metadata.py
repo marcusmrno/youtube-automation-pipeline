@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -409,3 +410,75 @@ def test_render_thumbnails_exception_raised(tmp_path, monkeypatch):
     assert "thumb-01.png" in on_disk
     assert "thumb-03.png" in on_disk
     assert "thumb-02.png" not in on_disk
+
+
+def _seed_run(tmp_path):
+    run = tmp_path / "abc"
+    run.mkdir()
+    (run / "thumbnails").mkdir()
+    (run / "thumbnails" / "thumb-01.png").write_bytes(b"ONE")
+    (run / "thumbnails" / "thumb-02.png").write_bytes(b"TWO")
+    (run / "thumbnails" / "thumb-03.png").write_bytes(b"THREE")
+    data = {
+        "run_slug": "abc",
+        "titles": [{"index": i, "text": f"t{i}"} for i in range(3)],
+        "chosen_title_index": 0,
+        "thumbnails": [
+            {"index": 0, "filename": "thumbnails/thumb-01.png"},
+            {"index": 1, "filename": "thumbnails/thumb-02.png"},
+            {"index": 2, "filename": "thumbnails/thumb-03.png"},
+        ],
+        "chosen_thumbnail_index": 0,
+    }
+    (run / "metadata.json").write_text(json.dumps(data))
+    return run
+
+
+def test_pick_title_updates_index(tmp_path, monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    _seed_run(tmp_path)
+    out = metadata.pick_title("abc", 2)
+    assert out["chosen_title_index"] == 2
+    reloaded = json.loads((tmp_path / "abc" / "metadata.json").read_text())
+    assert reloaded["chosen_title_index"] == 2
+
+
+def test_pick_title_out_of_range(tmp_path, monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    _seed_run(tmp_path)
+    with pytest.raises(ValueError) as exc:
+        metadata.pick_title("abc", 5)
+    assert "0..2" in str(exc.value) or "out of range" in str(exc.value).lower()
+
+
+def test_pick_title_no_metadata(tmp_path, monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    (tmp_path / "abc").mkdir()
+    with pytest.raises(ValueError):
+        metadata.pick_title("abc", 0)
+
+
+def test_pick_thumbnail_copies_file(tmp_path, monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    run = _seed_run(tmp_path)
+    metadata.pick_thumbnail("abc", 1)
+    chosen = (run / "thumbnail.png").read_bytes()
+    src = (run / "thumbnails" / "thumb-02.png").read_bytes()
+    assert chosen == src
+
+
+def test_pick_thumbnail_skips_errored_slot(tmp_path, monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    run = _seed_run(tmp_path)
+    data = json.loads((run / "metadata.json").read_text())
+    data["thumbnails"][1] = {**data["thumbnails"][1], "render_error": "boom"}
+    (run / "thumbnails" / "thumb-02.png").unlink()
+    (run / "metadata.json").write_text(json.dumps(data))
+    with pytest.raises(ValueError) as exc:
+        metadata.pick_thumbnail("abc", 1)
+    assert "render_error" in str(exc.value) or "not available" in str(exc.value).lower()

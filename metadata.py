@@ -11,6 +11,7 @@ import json as _json
 import json
 import os
 import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -284,3 +285,43 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> l
             continue
         out.append({**p, "filename": filename})
     return out
+
+
+def pick_title(run_slug: str, index: int) -> dict:
+    """Select a title by 0-based index. Rewrites metadata.json. Returns updated metadata dict.
+
+    Raises ValueError if metadata is missing or index is out of range.
+    """
+    data = load_metadata(run_slug)
+    if data is None:
+        raise ValueError(f"No metadata.json for run '{run_slug}' — generate first")
+    n = len(data.get("titles") or [])
+    if not (0 <= index < n):
+        raise ValueError(f"title index {index} out of range 0..{n - 1}")
+    data["chosen_title_index"] = index
+    _save_metadata(_run_dir(run_slug), data)
+    return data
+
+
+def pick_thumbnail(run_slug: str, index: int) -> dict:
+    """Select a thumbnail by 0-based index. Rewrites metadata.json and copies file to thumbnail.png.
+
+    Raises ValueError if metadata is missing, index is out of range, slot has render_error, or file is missing on disk.
+    """
+    data = load_metadata(run_slug)
+    if data is None:
+        raise ValueError(f"No metadata.json for run '{run_slug}' — generate first")
+    n = len(data.get("thumbnails") or [])
+    if not (0 <= index < n):
+        raise ValueError(f"thumbnail index {index} out of range 0..{n - 1}")
+    slot = data["thumbnails"][index]
+    if "render_error" in slot:
+        raise ValueError(f"thumbnail {index} is not available (render_error: {slot['render_error']})")
+    run_dir = _run_dir(run_slug)
+    src = run_dir / slot["filename"]
+    if not src.exists():
+        raise ValueError(f"thumbnail file missing on disk: {src}")
+    shutil.copyfile(src, run_dir / "thumbnail.png")
+    data["chosen_thumbnail_index"] = index
+    _save_metadata(run_dir, data)
+    return data
