@@ -11,6 +11,7 @@ import json as _json
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -147,3 +148,55 @@ def _generate_titles(topic, script, research, keywords, profile, client, log_fn)
         log_fn(f"⚠️  Title generator returned {len(titles)} titles (fewer than 5) — proceeding")
     log_fn(f"✅  Got {len(titles)} titles")
     return titles
+
+
+def _score_one_title(title: str, log_fn) -> dict:
+    """Call vidIQ to score a single title. Returns {'score': int, 'breakdown': dict}.
+
+    Raises on failure — caller (_score_titles) catches.
+    """
+    system = (
+        "You are a YouTube SEO assistant. Use the vidiq_score_title tool to "
+        "score the title. Return:\n"
+        "===SCORE===\n"
+        '{"score": <int 0-100>, "breakdown": <object from the tool>}\n'
+    )
+    user = f"Title: {title}\n\nScore this title. Return inside ===SCORE=== tags."
+    raw = _call_vidiq_agent(system, user, max_turns=6, log_fn=log_fn)
+    block = _extract("SCORE", raw)
+    if not block:
+        raise RuntimeError("vidIQ score response had no SCORE block")
+    parsed = _json.loads(block)
+    return {"score": int(parsed["score"]), "breakdown": parsed.get("breakdown", {})}
+
+
+def _score_titles(titles: list[str], log_fn) -> list[dict]:
+    """Score every title via vidIQ in parallel. Returns one entry per input title in input order.
+
+    Each entry: {"text": str, "score": int | None, "score_breakdown": dict}.
+    """
+    if not _VIDIQ_KEY:
+        log_fn("⚠️  vidIQ key not set — scores will be null")
+        return [{"text": t, "score": None, "score_breakdown": {}} for t in titles]
+
+    log_fn(f"📊  Scoring {len(titles)} titles via vidIQ in parallel...")
+    results: list[dict | None] = [None] * len(titles)
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {
+            ex.submit(_score_one_title, t, log_fn): i
+            for i, t in enumerate(titles)
+        }
+        for fut in futures:
+            i = futures[fut]
+            try:
+                payload = fut.result()
+                results[i] = {
+                    "text": titles[i],
+                    "score": payload["score"],
+                    "score_breakdown": payload["breakdown"],
+                }
+            except Exception as e:
+                log_fn(f"⚠️  Score failed for '{titles[i]}': {e}")
+                results[i] = {"text": titles[i], "score": None, "score_breakdown": {}}
+    log_fn("✅  Scoring complete")
+    return [r for r in results if r is not None]  # type narrow

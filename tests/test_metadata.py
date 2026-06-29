@@ -177,3 +177,41 @@ def test_generate_titles_logs_warning_on_short(monkeypatch):
     )
     assert titles == ["only one"]
     assert any("fewer than 5" in m.lower() or "1 title" in m.lower() for m in logs)
+
+
+def test_score_titles_no_vidiq_returns_null_scores(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "")
+    result = metadata._score_titles(["a", "b", "c"], lambda _: None)
+    assert [r["text"] for r in result] == ["a", "b", "c"]
+    assert all(r["score"] is None for r in result)
+    assert all(r["score_breakdown"] == {} for r in result)
+
+
+def test_score_titles_per_title_failure_is_null(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+
+    def score(title, log_fn):
+        if title == "fail":
+            raise RuntimeError("nope")
+        return {"score": 80, "breakdown": {"ctr": 7.0}}
+
+    monkeypatch.setattr(metadata, "_score_one_title", score)
+    result = metadata._score_titles(["ok", "fail", "ok2"], lambda _: None)
+    assert result[0] == {"text": "ok", "score": 80, "score_breakdown": {"ctr": 7.0}}
+    assert result[1]["text"] == "fail" and result[1]["score"] is None
+    assert result[2]["score"] == 80
+
+
+def test_score_titles_preserves_input_order(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    scores_by_title = {"x": 50, "y": 70, "z": 60}
+    monkeypatch.setattr(
+        metadata, "_score_one_title",
+        lambda t, log_fn: {"score": scores_by_title[t], "breakdown": {}},
+    )
+    result = metadata._score_titles(["x", "y", "z"], lambda _: None)
+    assert [r["text"] for r in result] == ["x", "y", "z"]
+    assert [r["score"] for r in result] == [50, 70, 60]
