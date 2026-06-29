@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from profile import Profile
 
 from pipeline import OUTPUT_ROOT
-from prompts import _extract, _build_metadata_titles_prompt
+from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
 _VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
@@ -200,3 +200,23 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
                 results[i] = {"text": titles[i], "score": None, "score_breakdown": {}}
     log_fn("✅  Scoring complete")
     return [r for r in results if r is not None]  # type narrow
+
+
+def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn) -> dict:
+    log_fn("📝  Generating description and hashtags...")
+    prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile)
+    r = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = r.content[0].text
+    desc = _extract("DESCRIPTION", text)
+    hashtags_raw = _extract("HASHTAGS", text)
+    if not desc:
+        raise ValueError("description generation: missing ===DESCRIPTION=== block")
+    if not hashtags_raw:
+        raise ValueError("description generation: missing ===HASHTAGS=== block")
+    hashtags = [tok for tok in hashtags_raw.split() if tok.startswith("#")][:5]
+    log_fn("✅  Description and hashtags ready")
+    return {"description": desc.strip(), "hashtags": hashtags}

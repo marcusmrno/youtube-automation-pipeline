@@ -215,3 +215,47 @@ def test_score_titles_preserves_input_order(monkeypatch):
     result = metadata._score_titles(["x", "y", "z"], lambda _: None)
     assert [r["text"] for r in result] == ["x", "y", "z"]
     assert [r["score"] for r in result] == [50, 70, 60]
+
+
+def test_description_hashtags_parses_blocks():
+    import metadata
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _FakeResponse(
+                    "===DESCRIPTION===\n"
+                    "First line of description.\n\n00:00 Hook\n00:35 Setup\n"
+                    "===HASHTAGS===\n"
+                    "#vitamins #nutrition #health #science #biology #extra\n"
+                )
+
+    out = metadata._generate_description_hashtags(
+        "Title here", "script body", [],
+        profile=MagicMock(channel={"niche": "n", "audience": "a", "tone": "t"}),
+        client=FakeClient,
+        log_fn=lambda _: None,
+    )
+    assert "First line of description" in out["description"]
+    assert out["hashtags"][:3] == ["#vitamins", "#nutrition", "#health"]
+    assert len(out["hashtags"]) == 5  # capped at 5
+
+
+def test_description_hashtags_missing_blocks_raises():
+    import metadata
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _FakeResponse("nothing useful here")
+
+    with pytest.raises(ValueError) as exc:
+        metadata._generate_description_hashtags(
+            "T", "s", [],
+            profile=MagicMock(channel={"niche": "n", "audience": "a", "tone": "t"}),
+            client=FakeClient,
+            log_fn=lambda _: None,
+        )
+    assert "description" in str(exc.value).lower() or "hashtag" in str(exc.value).lower()

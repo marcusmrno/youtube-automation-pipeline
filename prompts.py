@@ -627,3 +627,43 @@ Return ONLY this format:
 ===END===
 """
     return template
+
+
+def _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile) -> str:
+    c = profile.channel
+    kw_line = ", ".join(k.get("keyword", "") for k in keywords if k.get("keyword"))
+    kw_section = f"\nTop keywords to weave in naturally: {kw_line}\n" if kw_line else ""
+
+    template = f"""
+You are a YouTube metadata writer for a {c["niche"]} channel.
+
+TITLE (already chosen — do NOT change it):
+{top_title}
+
+SCRIPT:
+{script}
+{kw_section}
+Write a YouTube description AND a hashtag set.
+
+DESCRIPTION rules:
+- Start with a 1-2 sentence hook that previews the video without spoiling the payoff.
+- Add a blank line.
+- Then chapter timestamps derived from the script. Format each as "MM:SS Section title" on its own line. If the script has explicit timestamps or [SECTION] markers, use those; otherwise pick natural beats.
+- Close with one line inviting the viewer to subscribe (tone: {c["tone"]}).
+- Plain text only — no markdown, no emoji.
+
+HASHTAGS rules:
+- 5 hashtags, all lowercase, no spaces, no punctuation beyond `#`.
+- Single line, space-separated.
+- Mix one broad topic tag, two specific subject tags, one audience tag, one channel-vibe tag.
+
+Return ONLY this format:
+
+===DESCRIPTION===
+[description body here]
+
+===HASHTAGS===
+[#a #b #c #d #e]
+===END===
+"""
+    return template
