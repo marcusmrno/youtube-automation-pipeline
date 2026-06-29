@@ -376,3 +376,36 @@ def test_render_thumbnails_middle_fails(tmp_path, monkeypatch):
     assert "thumb-01.png" in on_disk
     assert "thumb-03.png" in on_disk
     assert "thumb-02.png" not in on_disk
+
+
+def test_render_thumbnails_exception_raised(tmp_path, monkeypatch):
+    import metadata
+
+    call_idx = {"n": 0}
+    def fake_gen(prompt, output_path, profile, log_fn, model=None, anchor_parts=None):
+        call_idx["n"] += 1
+        if call_idx["n"] == 2:
+            raise RuntimeError("kaboom")
+        output_path.write_bytes(b"PNGDATA")
+        return True
+
+    monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
+    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+
+    out = metadata._render_thumbnails(
+        [{"prompt": "p1", "hook_text": "A"},
+         {"prompt": "p2", "hook_text": "B"},
+         {"prompt": "p3", "hook_text": "C"}],
+        tmp_path,
+        profile=MagicMock(image_gen={"pro_model": "gemini-3-pro-image"}),
+        log_fn=lambda _: None,
+    )
+    assert len(out) == 3
+    assert "render_error" not in out[0]
+    assert "render_error" in out[1]
+    assert "kaboom" in out[1]["render_error"]
+    assert "render_error" not in out[2]
+    on_disk = sorted(p.name for p in (tmp_path / "thumbnails").iterdir())
+    assert "thumb-01.png" in on_disk
+    assert "thumb-03.png" in on_disk
+    assert "thumb-02.png" not in on_disk
