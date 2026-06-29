@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _datetime
-import json as _json
 import json
 import os
 import re
@@ -117,7 +116,7 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
         if not block:
             log_fn("⚠️  vidIQ keyword research returned no KEYWORDS block")
             return []
-        return _json.loads(block)
+        return json.loads(block)
     except Exception as e:
         log_fn(f"⚠️  vidIQ keyword research failed: {e}")
         return []
@@ -170,7 +169,7 @@ def _score_one_title(title: str, log_fn) -> dict:
     block = _extract("SCORE", raw)
     if not block:
         raise RuntimeError("vidIQ score response had no SCORE block")
-    parsed = _json.loads(block)
+    parsed = json.loads(block)
     return {"score": int(parsed["score"]), "breakdown": parsed.get("breakdown", {})}
 
 
