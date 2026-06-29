@@ -10,6 +10,7 @@ import asyncio
 import json as _json
 import json
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -115,3 +116,19 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     except Exception as e:
         log_fn(f"⚠️  vidIQ keyword research failed: {e}")
         return []
+
+
+def _parse_titles(raw: str) -> list[str]:
+    """Extract numbered titles from a ===TITLES=== block."""
+    block = _extract("TITLES", raw)
+    if not block:
+        return []
+    titles: list[str] = []
+    for line in block.splitlines():
+        m = re.match(r"^\s*\d+[\.\)]\s+(.+?)\s*$", line)
+        if not m:
+            continue
+        text = m.group(1).strip().strip('"').strip("'")
+        if text:
+            titles.append(text)
+    return titles

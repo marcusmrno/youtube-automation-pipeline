@@ -83,3 +83,50 @@ def test_vidiq_keywords_parses_agent_json(monkeypatch):
     monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: fake_payload)
     out = metadata._vidiq_keywords("vitamins", lambda _: None)
     assert out == [{"keyword": "vitamins", "search_volume": 9000}]
+
+
+def test_parse_titles_five_clean():
+    raw = (
+        "===TITLES===\n"
+        "1. First title here\n"
+        "2. Second title here\n"
+        "3. Third\n"
+        "4. Fourth one\n"
+        "5. Fifth and final\n"
+    )
+    import metadata
+    assert metadata._parse_titles(raw) == [
+        "First title here",
+        "Second title here",
+        "Third",
+        "Fourth one",
+        "Fifth and final",
+    ]
+
+
+def test_parse_titles_with_preamble_and_quotes():
+    raw = (
+        "Here are 5 titles:\n"
+        "===TITLES===\n"
+        '1. "Wrapped in quotes"\n'
+        "2. Plain\n"
+        "3. Another\n"
+        "4. Fourth\n"
+        "5. Fifth\n"
+        "===END===\n"
+    )
+    import metadata
+    titles = metadata._parse_titles(raw)
+    assert titles[0] == "Wrapped in quotes"
+    assert len(titles) == 5
+
+
+def test_parse_titles_short_returns_what_we_got():
+    raw = "===TITLES===\n1. only\n2. two\n"
+    import metadata
+    assert metadata._parse_titles(raw) == ["only", "two"]
+
+
+def test_parse_titles_missing_block_returns_empty():
+    import metadata
+    assert metadata._parse_titles("nothing here") == []

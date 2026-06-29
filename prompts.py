@@ -581,3 +581,49 @@ Tone: {c["tone"]}
 ---
 TOPIC: {topic}
 """
+
+
+def _build_metadata_titles_prompt(
+    topic: str,
+    script: str,
+    research: str,
+    keywords: list[dict],
+    profile: "Profile",
+) -> str:
+    c = profile.channel
+    kw_lines = "\n".join(f"- {k.get('keyword', '')}" for k in keywords if k.get("keyword"))
+    kw_section = f"\nTop vidIQ keywords for this topic (work the best 1-2 into at least 3 of the titles):\n{kw_lines}\n" if kw_lines else ""
+
+    template = f"""
+You are a YouTube title strategist for a {c["niche"]} channel targeting {c["audience"]}.
+
+Channel title format reference: {c["title_format"]}
+Tone: {c["tone"]}
+
+TOPIC: {topic}
+{kw_section}
+RESEARCH NOTES:
+{research[:2000]}
+
+SCRIPT HOOK (first 600 chars — use this to ground the curiosity gap):
+{script[:600]}
+
+Write 5 candidate YouTube titles for this video. Rules:
+- 50-65 characters each (Google clips longer titles in search).
+- Curiosity gap or counterintuitive framing — never a flat description.
+- No clickbait that the script can't actually deliver.
+- Title-case or sentence-case, whatever reads better — no all-caps.
+- No emoji. No quote marks around the title.
+- Make all 5 visibly different — different framings, not 5 paraphrases of one.
+
+Return ONLY this format:
+
+===TITLES===
+1. [title 1]
+2. [title 2]
+3. [title 3]
+4. [title 4]
+5. [title 5]
+===END===
+"""
+    return template
