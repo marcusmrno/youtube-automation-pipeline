@@ -259,3 +259,63 @@ def test_description_hashtags_missing_blocks_raises():
             log_fn=lambda _: None,
         )
     assert "description" in str(exc.value).lower() or "hashtag" in str(exc.value).lower()
+
+
+def test_thumbnail_prompts_three_clean():
+    import metadata
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _FakeResponse(
+                    "===THUMBNAIL_1===\n"
+                    "HOOK: DO NOTHING\n"
+                    "Orange cat holding giant pill...\n"
+                    "===THUMBNAIL_2===\n"
+                    "HOOK: WRONG\n"
+                    "White cat pointing at chart...\n"
+                    "===THUMBNAIL_3===\n"
+                    "HOOK: MYTH\n"
+                    "Orange cat next to glowing diagram...\n"
+                    "===END===\n"
+                )
+
+    out = metadata._generate_thumbnail_prompts(
+        "script body", "topic",
+        profile=MagicMock(
+            channel={"niche": "n", "audience": "a", "tone": "t"},
+            characters_block=lambda: "Orange Cat: ...; White Cat: ...",
+            image_style={"art_style_block": "ART STYLE BLOCK"},
+        ),
+        client=FakeClient,
+        log_fn=lambda _: None,
+    )
+    assert len(out) == 3
+    assert out[0]["hook_text"] == "DO NOTHING"
+    assert "giant pill" in out[0]["prompt"]
+
+
+def test_thumbnail_prompts_retry_then_fail():
+    import metadata
+
+    class FakeClient:
+        calls = 0
+        class messages:
+            @staticmethod
+            def create(**kw):
+                FakeClient.calls += 1
+                return _FakeResponse("not valid")
+
+    with pytest.raises(ValueError):
+        metadata._generate_thumbnail_prompts(
+            "s", "t",
+            profile=MagicMock(
+                channel={"niche": "n", "audience": "a", "tone": "t"},
+                characters_block=lambda: "x",
+                image_style={"art_style_block": "y"},
+            ),
+            client=FakeClient,
+            log_fn=lambda _: None,
+        )
+    assert FakeClient.calls == 2  # one initial call + one retry

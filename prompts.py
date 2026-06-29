@@ -667,3 +667,46 @@ Return ONLY this format:
 ===END===
 """
     return template
+
+
+def _build_metadata_thumbnail_prompt(script, topic, profile) -> str:
+    c = profile.channel
+    chars = profile.characters_block()
+    style = profile.image_style["art_style_block"]
+    template = f"""
+You are writing image prompts for 3 YouTube thumbnail variants for a {c["niche"]} video.
+
+TOPIC: {topic}
+
+CHARACTERS (embed the full description of whichever cat appears in each prompt):
+{chars}
+
+ART STYLE (append this block to every thumbnail prompt verbatim — do not paraphrase):
+{style}
+
+SCRIPT (use the opening to extract a 1-3 word visual hook):
+{script[:1500]}
+
+THUMBNAIL RULES (apply to all 3):
+1. 1920×1080 aspect ratio, composition optimized for visibility at small sizes.
+2. A clear visual hook (a single bold object, action, or contrast) occupying ~60% of the frame.
+3. One cat character active (pointing, holding, reacting to the hook object) — never idle, never staring at the viewer.
+4. A 1-3 word marker handwriting text overlay, max one phrase per image, all uppercase, baked into the image as if hand-drawn.
+5. Do NOT reference the title text — only the hook idea.
+
+Return EXACTLY this format. Each variant needs a HOOK line (the 1-3 word overlay) and a prompt body of 150-250 words.
+
+===THUMBNAIL_1===
+HOOK: [1-3 word overlay text in caps]
+[prompt body for variant 1]
+
+===THUMBNAIL_2===
+HOOK: [different 1-3 word overlay]
+[prompt body for variant 2]
+
+===THUMBNAIL_3===
+HOOK: [different 1-3 word overlay]
+[prompt body for variant 3]
+===END===
+"""
+    return template

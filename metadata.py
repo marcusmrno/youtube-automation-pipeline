@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from profile import Profile
 
 from pipeline import OUTPUT_ROOT
-from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt
+from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
 _VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
@@ -220,3 +220,39 @@ def _generate_description_hashtags(top_title, script, keywords, profile, client,
     hashtags = [tok for tok in hashtags_raw.split() if tok.startswith("#")][:5]
     log_fn("✅  Description and hashtags ready")
     return {"description": desc.strip(), "hashtags": hashtags}
+
+
+def _parse_thumbnail_prompts(raw: str) -> list[dict]:
+    out = []
+    for n in (1, 2, 3):
+        block = _extract(f"THUMBNAIL_{n}", raw)
+        if not block:
+            return []
+        lines = block.strip().splitlines()
+        hook = ""
+        if lines and lines[0].upper().startswith("HOOK:"):
+            hook = lines[0].split(":", 1)[1].strip()
+            body = "\n".join(lines[1:]).strip()
+        else:
+            body = block.strip()
+        if not body:
+            return []
+        out.append({"prompt": body, "hook_text": hook})
+    return out
+
+
+def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[dict]:
+    log_fn("🎨  Generating 3 thumbnail prompts...")
+    prompt = _build_metadata_thumbnail_prompt(script, topic, profile)
+    for attempt in (1, 2):
+        r = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        parsed = _parse_thumbnail_prompts(r.content[0].text)
+        if len(parsed) == 3:
+            log_fn("✅  3 thumbnail prompts ready")
+            return parsed
+        log_fn(f"⚠️  Thumbnail prompts malformed on attempt {attempt}")
+    raise ValueError("thumbnail prompt generation failed twice — aborting metadata run")
