@@ -1185,27 +1185,79 @@ if __name__ == "__main__":
     from profile import load_profile, list_profiles
 
     parser = argparse.ArgumentParser(description="YouTube Pipeline")
-    parser.add_argument("topic", nargs="+", help="Video topic")
-    parser.add_argument("--profile", default=None, help="Profile name (folder under profiles/)")
-    args = parser.parse_args()
+    sub = parser.add_subparsers(dest="cmd")
 
-    topic = " ".join(args.topic)
+    # Default command: run a topic (preserves existing behavior)
+    run_p = sub.add_parser("run", help="Run the full pipeline for a topic")
+    run_p.add_argument("topic", nargs="+")
+    run_p.add_argument("--profile", default=None)
 
-    available = list_profiles()
-    if not available:
-        print("No profiles found. Create profiles/<name>/profile.yaml first.")
-        sys.exit(1)
+    # Metadata subcommand
+    md = sub.add_parser("metadata", help="Generate or update metadata + thumbnails")
+    md.add_argument("run_slug")
+    md.add_argument("--profile", default=None)
+    md.add_argument("--regenerate", action="store_true")
+    md.add_argument("--pick-title", type=int, metavar="N", help="1-based index")
+    md.add_argument("--pick-thumb", type=int, metavar="N", help="1-based index")
+    md.add_argument("--show", action="store_true")
 
-    if args.profile:
-        profile_name = args.profile
-    elif len(available) == 1:
-        profile_name = available[0]
-        print(f"Using profile: {profile_name}")
-    else:
+    # Back-compat: if first arg isn't a known subcommand, treat as run
+    argv = sys.argv[1:]
+    if argv and argv[0] not in {"run", "metadata"}:
+        argv = ["run"] + argv
+
+    args = parser.parse_args(argv)
+
+    def _resolve_profile(name: str | None):
+        available = list_profiles()
+        if not available:
+            print("No profiles found. Create profiles/<name>/profile.yaml first.")
+            sys.exit(1)
+        if name:
+            return load_profile(name)
+        if len(available) == 1:
+            print(f"Using profile: {available[0]}")
+            return load_profile(available[0])
         print("Multiple profiles found. Specify one with --profile:")
         for p in available:
             print(f"  {p}")
         sys.exit(1)
 
-    profile = load_profile(profile_name)
+    if args.cmd == "metadata":
+        import metadata as md_mod
+
+        log_fn = lambda m: print(m)
+
+        if args.show:
+            data = md_mod.load_metadata(args.run_slug)
+            if data is None:
+                print(f"No metadata for run '{args.run_slug}'")
+                sys.exit(1)
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+            sys.exit(0)
+
+        if args.pick_title is not None:
+            data = md_mod.pick_title(args.run_slug, args.pick_title - 1)
+            print(f"✅ chosen_title_index = {data['chosen_title_index']} ('{data['titles'][data['chosen_title_index']]['text']}')")
+            sys.exit(0)
+
+        if args.pick_thumb is not None:
+            data = md_mod.pick_thumbnail(args.run_slug, args.pick_thumb - 1)
+            print(f"✅ chosen_thumbnail_index = {data['chosen_thumbnail_index']}")
+            sys.exit(0)
+
+        # Full generate
+        existing = md_mod.load_metadata(args.run_slug)
+        if existing is not None and not args.regenerate:
+            answer = input("metadata exists, overwrite? (y/N): ").strip().lower()
+            if answer != "y":
+                print("aborted")
+                sys.exit(0)
+        profile = _resolve_profile(args.profile)
+        md_mod.generate_metadata(args.run_slug, profile, log_fn, regenerate=True)
+        sys.exit(0)
+
+    # args.cmd == "run"
+    topic = " ".join(args.topic)
+    profile = _resolve_profile(args.profile)
     run_pipeline(topic, profile)
