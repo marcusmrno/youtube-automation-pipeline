@@ -24,6 +24,7 @@ from telegram.ext import (
 )
 
 import anthropic
+import metadata as _metadata_mod
 import pipeline
 from pipeline import (
     OUTPUT_ROOT,
@@ -448,6 +449,138 @@ async def cmd_runs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+def _resolve_run_slug(arg: str | None) -> str | None:
+    if arg and arg != "regenerate":
+        return arg.strip()
+    if not OUTPUT_ROOT.exists():
+        return None
+    dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
+    return dirs[0] if dirs else None
+
+
+def _resolve_profile_for_bot():
+    name = _state.get("profile_name")
+    available = list_profiles()
+    if name and name in available:
+        return load_profile(name)
+    if available:
+        return load_profile(available[0])
+    raise RuntimeError("No profiles available")
+
+
+async def _send_metadata_view(chat, data, run_slug):
+    titles = data.get("titles") or []
+    chosen_t = data.get("chosen_title_index", 0)
+    chosen_th = data.get("chosen_thumbnail_index", 0)
+
+    title_buttons = [
+        InlineKeyboardButton(
+            f"{'★' if i == chosen_t else ''}{i+1}",
+            callback_data=f"meta_title:{run_slug}:{i}",
+        )
+        for i in range(len(titles))
+    ]
+    score = titles[chosen_t].get("vidiq_score") if titles else "—"
+    top = titles[chosen_t]["text"] if titles else "(no titles)"
+    await chat.send_message(
+        f"*Title:* [{score}] {top}",
+        reply_markup=InlineKeyboardMarkup([title_buttons]),
+        parse_mode="Markdown",
+    )
+
+    desc = data.get("description") or ""
+    if desc:
+        await chat.send_message(f"```\n{desc}\n```", parse_mode="Markdown")
+
+    tags = " ".join(data.get("hashtags") or [])
+    if tags:
+        await chat.send_message(tags)
+
+    thumbs = data.get("thumbnails") or []
+    media: list[InputMediaPhoto] = []
+    for t in thumbs:
+        if "render_error" in t:
+            continue
+        path = OUTPUT_ROOT / run_slug / t["filename"]
+        if path.exists():
+            media.append(InputMediaPhoto(media=open(path, "rb"), caption=t.get("hook_text", "")))
+    if media:
+        await chat.send_media_group(media=media)
+
+    thumb_buttons = [
+        InlineKeyboardButton(
+            f"{'★' if i == chosen_th else ''}Thumb {i+1}",
+            callback_data=f"meta_thumb:{run_slug}:{i}",
+        )
+        for i, t in enumerate(thumbs) if "render_error" not in t
+    ]
+    if thumb_buttons:
+        await chat.send_message(
+            "Pick a thumbnail:",
+            reply_markup=InlineKeyboardMarkup([thumb_buttons]),
+        )
+
+
+@auth
+async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = context.args or []
+    regenerate = False
+    slug_arg = None
+    for a in args:
+        if a == "regenerate":
+            regenerate = True
+        else:
+            slug_arg = a
+
+    slug = _resolve_run_slug(slug_arg)
+    if not slug:
+        await update.message.reply_text("Usage: /metadata [<run-slug>] [regenerate]")
+        return
+
+    existing = _metadata_mod.load_metadata(slug)
+    if existing and not regenerate:
+        await update.message.reply_text(f"📦 Loading existing metadata for `{slug}`", parse_mode="Markdown")
+        await _send_metadata_view(update.effective_chat, existing, slug)
+        return
+
+    await update.message.reply_text(f"📦 Generating metadata for `{slug}`…", parse_mode="Markdown")
+    try:
+        profile = _resolve_profile_for_bot()
+    except Exception as e:
+        await update.message.reply_text(f"❌ {e}")
+        return
+
+    log_queue: queue.Queue = queue.Queue()
+
+    def runner():
+        try:
+            _metadata_mod.generate_metadata(slug, profile, log_fn=lambda m: log_queue.put(m), regenerate=True)
+            log_queue.put("__DONE__")
+        except Exception as e:
+            log_queue.put(f"__ERROR__:{e}")
+
+    threading.Thread(target=runner, daemon=True).start()
+
+    # Forward filtered progress lines
+    while True:
+        try:
+            msg = await asyncio.get_running_loop().run_in_executor(None, log_queue.get, True, 60)
+        except queue.Empty:
+            await update.message.reply_text("⏳ still working…")
+            continue
+        if msg == "__DONE__":
+            break
+        if msg.startswith("__ERROR__:"):
+            await update.message.reply_text("❌ " + msg[len("__ERROR__:"):])
+            return
+        if _should_relay(msg):
+            await update.message.reply_text(msg)
+
+    data = _metadata_mod.load_metadata(slug)
+    if data:
+        await _send_metadata_view(update.effective_chat, data, slug)
+
+
 @auth
 async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Resolve slug: explicit arg, or most recent run
@@ -665,9 +798,12 @@ async def _start_pipeline(
 @auth
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     data = query.data
     ae   = _state.get("approval_event")
+
+    # meta_title / meta_thumb answer with a toast message — skip the generic blank answer
+    if not (data.startswith("meta_title:") or data.startswith("meta_thumb:")):
+        await query.answer()
 
     if data.startswith("approach:"):
         choice = data.split(":", 1)[1]
@@ -695,6 +831,26 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.edit_message_text(f"✅ Profile set to `{name}`", parse_mode="Markdown")
         else:
             await query.edit_message_text(f"❌ Profile `{name}` no longer exists.", parse_mode="Markdown")
+        return
+
+    if data.startswith("meta_title:"):
+        _, slug, idx = data.split(":", 2)
+        try:
+            updated = _metadata_mod.pick_title(slug, int(idx))
+            await query.answer("Title set")
+            await _send_metadata_view(query.message.chat, updated, slug)
+        except ValueError as e:
+            await query.answer(f"Error: {e}", show_alert=True)
+        return
+
+    if data.startswith("meta_thumb:"):
+        _, slug, idx = data.split(":", 2)
+        try:
+            updated = _metadata_mod.pick_thumbnail(slug, int(idx))
+            await query.answer("Thumbnail set")
+            await _send_metadata_view(query.message.chat, updated, slug)
+        except ValueError as e:
+            await query.answer(f"Error: {e}", show_alert=True)
         return
 
     if data == "approve":
@@ -832,6 +988,7 @@ def main() -> None:
     app.add_handler(CommandHandler("run",      cmd_run))
     app.add_handler(CommandHandler("resume",   cmd_resume))
     app.add_handler(CommandHandler("download", cmd_download))
+    app.add_handler(CommandHandler("metadata", cmd_metadata))
     app.add_handler(CommandHandler("profile",  cmd_profile))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
