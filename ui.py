@@ -440,7 +440,10 @@ def metadata_pick_thumb(run_slug):
 
 @app.route("/metadata/<path:run_slug>/thumbnail/<int:index>", methods=["GET"])
 def metadata_thumbnail_file(run_slug, index):
-    data = _metadata_mod.load_metadata(run_slug)
+    try:
+        data = _metadata_mod.load_metadata(run_slug)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     if data is None:
         return jsonify({"error": "not generated yet"}), 404
     try:
