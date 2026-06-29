@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from profile import Profile
 
 from pipeline import OUTPUT_ROOT
-from prompts import _extract
+from prompts import _extract, _build_metadata_titles_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
 _VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
@@ -131,4 +131,19 @@ def _parse_titles(raw: str) -> list[str]:
         text = m.group(1).strip().strip('"').strip("'")
         if text:
             titles.append(text)
+    return titles
+
+
+def _generate_titles(topic, script, research, keywords, profile, client, log_fn) -> list[str]:
+    log_fn("✍️  Generating 5 title candidates...")
+    prompt = _build_metadata_titles_prompt(topic, script, research, keywords, profile)
+    r = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    titles = _parse_titles(r.content[0].text)
+    if len(titles) < 5:
+        log_fn(f"⚠️  Title generator returned {len(titles)} titles (fewer than 5) — proceeding")
+    log_fn(f"✅  Got {len(titles)} titles")
     return titles
