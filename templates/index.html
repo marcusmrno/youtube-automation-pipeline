@@ -2621,5 +2621,157 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeLightbox();
 });
 </script>
+
+<details id="metadata-section" style="margin-top:24px;">
+  <summary style="cursor:pointer; font-weight:600; padding:8px 0;">Metadata &amp; Thumbnail</summary>
+  <div id="metadata-empty" style="padding:8px 0;">
+    <button id="metadata-generate" type="button">Generate Metadata</button>
+    <span id="metadata-status" style="margin-left:8px;color:#666;"></span>
+  </div>
+  <div id="metadata-loaded" style="display:none; padding:8px 0;">
+    <h4>Titles (radio = chosen)</h4>
+    <ol id="metadata-titles"></ol>
+    <h4>Description <button id="copy-desc" type="button">Copy</button></h4>
+    <textarea id="metadata-description" rows="6" readonly style="width:100%;font-family:monospace;"></textarea>
+    <h4>Hashtags <button id="copy-hashtags" type="button">Copy</button></h4>
+    <input id="metadata-hashtags" type="text" readonly style="width:100%;font-family:monospace;" />
+    <h4>Thumbnails (click to choose)</h4>
+    <div id="metadata-thumbnails" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+    <button id="metadata-regenerate" type="button" style="margin-top:12px;">Regenerate</button>
+  </div>
+</details>
+
+<script>
+(function(){
+  // Adapt: the existing template uses #runPicker <select> for the active run slug.
+  // picker.value is the run slug string (empty string when none selected).
+  function getRunSlug() {
+    const picker = document.getElementById('runPicker');
+    return picker ? picker.value || null : null;
+  }
+
+  async function loadMetadata() {
+    const slug = getRunSlug();
+    if (!slug) return;
+    const r = await fetch(`/metadata/${encodeURIComponent(slug)}`);
+    if (r.status === 404) {
+      document.getElementById('metadata-empty').style.display = '';
+      document.getElementById('metadata-loaded').style.display = 'none';
+      return;
+    }
+    const data = await r.json();
+    render(data);
+  }
+
+  function render(data) {
+    document.getElementById('metadata-empty').style.display = 'none';
+    document.getElementById('metadata-loaded').style.display = '';
+
+    const list = document.getElementById('metadata-titles');
+    list.innerHTML = '';
+    (data.titles || []).forEach((t, i) => {
+      const li = document.createElement('li');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'metadata-title';
+      radio.value = String(i);
+      radio.checked = (i === data.chosen_title_index);
+      radio.addEventListener('change', () => pickTitle(i));
+      const score = (t.vidiq_score == null) ? '—' : t.vidiq_score;
+      li.append(radio, document.createTextNode(` [${score}] ${t.text}`));
+      list.appendChild(li);
+    });
+
+    document.getElementById('metadata-description').value = data.description || '';
+    document.getElementById('metadata-hashtags').value = (data.hashtags || []).join(' ');
+
+    const strip = document.getElementById('metadata-thumbnails');
+    strip.innerHTML = '';
+    (data.thumbnails || []).forEach((t, i) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'cursor:pointer;border:3px solid ' +
+        (i === data.chosen_thumbnail_index ? '#0a84ff' : 'transparent');
+      if (t.render_error) {
+        wrap.innerHTML = `<div style="width:240px;height:135px;background:#fee;display:flex;align-items:center;justify-content:center;">render failed</div>`;
+      } else {
+        const img = document.createElement('img');
+        img.src = `/metadata/${encodeURIComponent(data.run_slug)}/thumbnail/${i}`;
+        img.style.cssText = 'width:240px;height:auto;display:block;';
+        img.alt = t.hook_text || '';
+        wrap.appendChild(img);
+        wrap.addEventListener('click', () => pickThumb(i));
+      }
+      const cap = document.createElement('div');
+      cap.style.cssText = 'font-size:11px;text-align:center;';
+      cap.textContent = t.hook_text || `thumb ${i+1}`;
+      wrap.appendChild(cap);
+      strip.appendChild(wrap);
+    });
+  }
+
+  async function pickTitle(i) {
+    const slug = getRunSlug();
+    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_title`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({index: i}),
+    });
+    if (r.ok) render(await r.json());
+  }
+
+  async function pickThumb(i) {
+    const slug = getRunSlug();
+    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_thumbnail`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({index: i}),
+    });
+    if (r.ok) render(await r.json());
+  }
+
+  async function startGenerate(regenerate) {
+    const slug = getRunSlug();
+    const status = document.getElementById('metadata-status');
+    status.textContent = regenerate ? 'regenerating…' : 'generating…';
+    // Adapt: profile is tracked via #profileSelect <select> in this template.
+    const profile = document.getElementById('profileSelect')
+      ? document.getElementById('profileSelect').value : '';
+    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({regenerate, profile}),
+    });
+    if (!r.ok) { status.textContent = 'failed'; return; }
+    // Poll until metadata.json appears / updates
+    const poll = setInterval(async () => {
+      const got = await fetch(`/metadata/${encodeURIComponent(slug)}`);
+      if (got.ok) {
+        clearInterval(poll);
+        status.textContent = '';
+        render(await got.json());
+      }
+    }, 4000);
+  }
+
+  document.getElementById('metadata-generate').addEventListener('click', () => startGenerate(false));
+  document.getElementById('metadata-regenerate').addEventListener('click', () => startGenerate(true));
+
+  document.getElementById('copy-desc').addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('metadata-description').value);
+  });
+  document.getElementById('copy-hashtags').addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('metadata-hashtags').value);
+  });
+
+  // Load metadata whenever the run picker changes (same select that drives loadRunFiles).
+  const runPicker = document.getElementById('runPicker');
+  if (runPicker) runPicker.addEventListener('change', () => loadMetadata());
+
+  // Initial load when a run is already selected (e.g. page refresh with value retained)
+  if (getRunSlug()) loadMetadata();
+  // Heartbeat fallback: re-check every 30 s while section is open
+  setInterval(loadMetadata, 30000);
+})();
+</script>
 </body>
 </html>
