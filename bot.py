@@ -498,14 +498,21 @@ async def _send_metadata_view(chat, data, run_slug):
 
     thumbs = data.get("thumbnails") or []
     media: list[InputMediaPhoto] = []
+    handles = []
     for t in thumbs:
         if "render_error" in t:
             continue
         path = OUTPUT_ROOT / run_slug / t["filename"]
         if path.exists():
-            media.append(InputMediaPhoto(media=open(path, "rb"), caption=t.get("hook_text", "")))
+            fh = open(path, "rb")
+            handles.append(fh)
+            media.append(InputMediaPhoto(media=fh, caption=t.get("hook_text", "")))
     if media:
-        await chat.send_media_group(media=media)
+        try:
+            await chat.send_media_group(media=media)
+        finally:
+            for fh in handles:
+                fh.close()
 
     thumb_buttons = [
         InlineKeyboardButton(
