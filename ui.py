@@ -470,7 +470,8 @@ def metadata_thumbnail_file(run_slug, index):
     path = OUTPUT_ROOT / run_slug / slot["filename"]
     if not path.exists():
         return jsonify({"error": "file missing"}), 404
-    return send_file(path, mimetype="image/png")
+    mime = "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+    return send_file(path, mimetype=mime)
 
 
 @app.route("/runs_with_scripts")

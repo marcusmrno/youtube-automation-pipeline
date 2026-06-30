@@ -270,8 +270,12 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> l
 
     out: list[dict] = []
     for i, p in enumerate(prompts, start=1):
-        filename = f"thumbnails/thumb-{i:02d}.png"
-        img_path = run_dir / filename
+        stem = f"thumb-{i:02d}"
+        # Requested filename — generate_image_google may swap the extension to
+        # .jpg when Google AI returns a JPEG mime, so we read the real path back
+        # from disk after the call.
+        requested_filename = f"thumbnails/{stem}.png"
+        img_path = run_dir / requested_filename
         log_fn(f"🖼   Rendering thumbnail {i}/{len(prompts)}...")
         try:
             ok = generate_image_google(
@@ -280,12 +284,19 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> l
             )
         except Exception as e:
             log_fn(f"❌  Thumbnail {i} raised: {e}")
-            out.append({**p, "filename": filename, "render_error": str(e)})
+            out.append({**p, "filename": requested_filename, "render_error": str(e)})
             continue
         if not ok:
-            out.append({**p, "filename": filename, "render_error": "generator returned False"})
+            out.append({**p, "filename": requested_filename, "render_error": "generator returned False"})
             continue
-        out.append({**p, "filename": filename})
+        actual = next(
+            (q for q in (thumb_dir / f"{stem}.png", thumb_dir / f"{stem}.jpg", thumb_dir / f"{stem}.jpeg") if q.exists()),
+            None,
+        )
+        if actual is None:
+            out.append({**p, "filename": requested_filename, "render_error": "rendered file missing on disk"})
+            continue
+        out.append({**p, "filename": f"thumbnails/{actual.name}"})
     return out
 
 
