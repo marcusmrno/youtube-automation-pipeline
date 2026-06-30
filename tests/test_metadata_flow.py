@@ -160,3 +160,35 @@ def test_thumbnail_render_failure_marks_slot(tmp_path, monkeypatch):
     data = metadata.generate_metadata("abc", profile, lambda _: None)
     assert data["thumbnails"][1]["render_error"] == "boom"
     assert (run_dir / "thumbnail.png").exists()  # slot 0 succeeded, chosen by default
+
+
+def test_all_thumbnails_fail_no_chosen_file(tmp_path, monkeypatch):
+    import metadata
+    _stub_metadata_internals(monkeypatch, metadata)
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+
+    def fake_render_all_fail(prompts, run_dir, profile, log_fn):
+        (run_dir / "thumbnails").mkdir(exist_ok=True)
+        return [
+            {**p, "filename": f"thumbnails/thumb-{i:02d}.png", "render_error": "boom"}
+            for i, p in enumerate(prompts, 1)
+        ]
+
+    monkeypatch.setattr(metadata, "_render_thumbnails", fake_render_all_fail)
+    monkeypatch.setattr(metadata, "anthropic", MagicMock())
+
+    run_dir = _seed_run_with_script(tmp_path)
+    profile = MagicMock(
+        channel={"niche": "n", "audience": "a", "tone": "t", "title_format": "tf"},
+        characters_block=lambda: "c",
+        image_style={"art_style_block": "x"},
+        image_gen={"pro_model": "gemini-3-pro-image", "default_model": "gemini-3.1-flash-image"},
+    )
+    data = metadata.generate_metadata("abc", profile, lambda _: None)
+
+    # All three slots errored
+    assert all("render_error" in t for t in data["thumbnails"])
+    # chosen_thumbnail_index defaults to 0 (no non-errored slot was found)
+    assert data["chosen_thumbnail_index"] == 0
+    # thumbnail.png NOT written because chosen slot has render_error
+    assert not (run_dir / "thumbnail.png").exists()
