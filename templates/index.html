@@ -2624,6 +2624,12 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
 
 <details id="metadata-section" style="margin-top:24px;">
   <summary style="cursor:pointer; font-weight:600; padding:8px 0;">Metadata &amp; Thumbnail</summary>
+  <div style="padding:8px 0;">
+    <label for="metadataRunPicker" style="font-size:13px;margin-right:6px;">Run:</label>
+    <select id="metadataRunPicker" style="min-width:300px;">
+      <option value="">— select a run —</option>
+    </select>
+  </div>
   <div id="metadata-empty" style="padding:8px 0;">
     <button id="metadata-generate" type="button">Generate Metadata</button>
     <span id="metadata-status" style="margin-left:8px;color:#666;"></span>
@@ -2643,11 +2649,34 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
 
 <script>
 (function(){
-  // Adapt: the existing template uses #runPicker <select> for the active run slug.
-  // picker.value is the run slug string (empty string when none selected).
+  // Use this section's own picker so users don't have to navigate to another
+  // tab. Fall back to #runPicker (Files tab) if our picker is unset, since both
+  // resolve to a run-slug string under output/.
   function getRunSlug() {
-    const picker = document.getElementById('runPicker');
-    return picker ? picker.value || null : null;
+    const own = document.getElementById('metadataRunPicker');
+    if (own && own.value) return own.value;
+    const fallback = document.getElementById('runPicker');
+    return fallback && fallback.value ? fallback.value : null;
+  }
+
+  async function populateRunPicker() {
+    const picker = document.getElementById('metadataRunPicker');
+    if (!picker) return;
+    const current = picker.value;
+    try {
+      const res = await fetch('/runs_with_scripts');
+      const runs = await res.json();
+      picker.innerHTML = '<option value="">— select a run —</option>';
+      runs.forEach(slug => {
+        const opt = document.createElement('option');
+        opt.value = slug;
+        opt.textContent = slug;
+        picker.appendChild(opt);
+      });
+      if (current && runs.includes(current)) picker.value = current;
+    } catch (e) {
+      // Leave the placeholder option in place if the fetch fails.
+    }
   }
 
   async function loadMetadata() {
@@ -2732,6 +2761,10 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
   async function startGenerate(regenerate) {
     const slug = getRunSlug();
     const status = document.getElementById('metadata-status');
+    if (!slug) {
+      status.textContent = 'pick a run first';
+      return;
+    }
     status.textContent = regenerate ? 'regenerating…' : 'generating…';
     // Adapt: profile is tracked via #profileSelect <select> in this template.
     const profile = document.getElementById('profileSelect')
@@ -2763,9 +2796,17 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
     navigator.clipboard.writeText(document.getElementById('metadata-hashtags').value);
   });
 
-  // Load metadata whenever the run picker changes (same select that drives loadRunFiles).
-  const runPicker = document.getElementById('runPicker');
-  if (runPicker) runPicker.addEventListener('change', () => loadMetadata());
+  // Load metadata whenever either picker changes (our own or the Files-tab fallback).
+  const ownPicker = document.getElementById('metadataRunPicker');
+  if (ownPicker) ownPicker.addEventListener('change', () => loadMetadata());
+  const filesPicker = document.getElementById('runPicker');
+  if (filesPicker) filesPicker.addEventListener('change', () => loadMetadata());
+
+  // Populate our picker now, and again every time the section is opened.
+  populateRunPicker();
+  document.getElementById('metadata-section').addEventListener('toggle', (e) => {
+    if (e.target.open) populateRunPicker();
+  });
 
   // Initial load when a run is already selected (e.g. page refresh with value retained)
   if (getRunSlug()) loadMetadata();
