@@ -1707,6 +1707,7 @@ const STAGE_LABELS = {
   research: 'Research', script: 'Script',
   images:   'Images',   voice:  'Voice',
   qa:       'QA',       timeline: 'Timeline',
+  metadata: 'Metadata',
 };
 
 function ensureLogSection(stage) {
@@ -1806,7 +1807,7 @@ async function runPipeline() {
       document.getElementById('metadataRunPicker').focus();
       return;
     }
-    startGenerate(false);
+    await startMetadataRun(slug, false);
     return;
   }
 
@@ -1879,18 +1880,75 @@ function handleEvent(event) {
     addLogLine(currentStage, '📋 Script ready for review');
   }
 
+  else if (event.type === 'metadata_done') {
+    // Refresh the metadata results panel as soon as the JSON is on disk.
+    if (typeof loadMetadata === 'function') loadMetadata();
+  }
+
   else if (event.type === 'done') {
     if (eventSource) { eventSource.close(); eventSource = null; }
-    completeAllStages();
-    setRunFinished(true);
-    refreshRuns();
-    refreshScripts();
+    if (inputMode === 'metadata') {
+      // Don't touch pipeline stage chips for a metadata run.
+      if (currentStage) closeLogSection(currentStage);
+      setRunFinished(true);
+      if (typeof loadMetadata === 'function') loadMetadata();
+    } else {
+      completeAllStages();
+      setRunFinished(true);
+      refreshRuns();
+      refreshScripts();
+    }
   }
 
   else if (event.type === 'error') {
     addLogLine(currentStage, `❌ ${event.msg}`);
     setRunFinished(false);
   }
+}
+
+async function startMetadataRun(slug, regenerate) {
+  // Mirror the main pipeline UI prep so progress streams into the log area.
+  running = true;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  setGlobalStatus('running', regenerate ? 'Regenerating metadata…' : 'Generating metadata…');
+  resetStages();
+  clearLogSections();
+  document.getElementById('metadata-status').textContent = '';
+  // Force-open a Metadata log section now so the user sees activity immediately.
+  activateStage('metadata');
+
+  const profile = document.getElementById('profileSelect')
+    ? document.getElementById('profileSelect').value : '';
+  const res = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regenerate, profile }),
+  });
+
+  if (res.status === 409) {
+    addLogLine('metadata', '⚠️  Metadata already exists. Use Regenerate to overwrite.');
+    setRunFinished(false);
+    loadMetadata();
+    return;
+  }
+  if (!res.ok) {
+    let msg = 'Failed to start metadata generation';
+    try { const d = await res.json(); if (d && d.error) msg = d.error; } catch (_) {}
+    addLogLine('metadata', `❌ ${msg}`);
+    setRunFinished(false);
+    return;
+  }
+
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+  eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
+  eventSource.onerror = () => {
+    if (running) {
+      addLogLine('metadata', '⚠️  Stream disconnected');
+      setRunFinished(false);
+    }
+  };
 }
 
 async function stopPipeline() {
@@ -2788,40 +2846,19 @@ async function pickMetadataThumb(i) {
   if (r.ok) renderMetadata(await r.json());
 }
 
-async function startGenerate(regenerate) {
-  const slug = getMetadataSlug();
-  const status = document.getElementById('metadata-status');
-  if (!slug) { status.textContent = 'Pick a run first'; return; }
-  status.textContent = regenerate ? 'Regenerating…' : 'Generating…';
-  const profile = document.getElementById('profileSelect')
-    ? document.getElementById('profileSelect').value : '';
-  const r = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({regenerate, profile}),
-  });
-  if (r.status === 409) {
-    status.textContent = 'Already generated — press Regenerate to overwrite.';
-    loadMetadata();
-    return;
-  }
-  if (!r.ok) { status.textContent = 'Failed to start generation'; return; }
-  const poll = setInterval(async () => {
-    const got = await fetch(`/metadata/${encodeURIComponent(slug)}`);
-    if (got.ok) {
-      clearInterval(poll);
-      status.textContent = '';
-      renderMetadata(await got.json());
-    }
-  }, 4000);
-}
-
 // Wire up controls once DOM is ready.
 document.addEventListener('DOMContentLoaded', () => {
   const picker = document.getElementById('metadataRunPicker');
   if (picker) picker.addEventListener('change', () => loadMetadata());
   const regen = document.getElementById('metadata-regenerate');
-  if (regen) regen.addEventListener('click', () => startGenerate(true));
+  if (regen) regen.addEventListener('click', () => {
+    const slug = getMetadataSlug();
+    if (!slug) {
+      document.getElementById('metadata-status').textContent = 'Pick a run first';
+      return;
+    }
+    startMetadataRun(slug, true);
+  });
   const copyDesc = document.getElementById('copy-desc');
   if (copyDesc) copyDesc.addEventListener('click', () => {
     navigator.clipboard.writeText(document.getElementById('metadata-description').value);

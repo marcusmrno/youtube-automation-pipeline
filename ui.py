@@ -412,18 +412,26 @@ def metadata_generate(run_slug):
         if existing is not None:
             return jsonify({"error": "metadata already exists; pass regenerate=true to overwrite"}), 409
 
-    log_queue: queue.Queue = queue.Queue()
+    # Stream progress on the same /stream SSE endpoint the main pipeline uses.
+    # Structured events so the existing client log routing handles them.
+    lq = queue.Queue()
+    _state["log_queue"] = lq
+    _state["approval_queue"] = None
+    _state["stop_event"] = threading.Event()
 
     def runner():
         try:
             _metadata_mod.generate_metadata(
                 run_slug, profile,
-                log_fn=lambda m: log_queue.put(m),
+                log_fn=lambda m: lq.put({"type": "log", "stage": "metadata", "msg": m}),
                 regenerate=regenerate,
             )
-            log_queue.put("✅  Metadata generation complete")
+            lq.put({"type": "log", "stage": "metadata", "msg": "✅  Metadata generation complete"})
+            lq.put({"type": "metadata_done", "run_slug": run_slug})
         except Exception as e:
-            log_queue.put(f"❌  Metadata generation failed: {e}")
+            lq.put({"type": "log", "stage": "metadata", "msg": f"❌  Metadata generation failed: {e}"})
+        finally:
+            lq.put({"type": "done"})
 
     threading.Thread(target=runner, daemon=True).start()
     return jsonify({"status": "started"}), 202
