@@ -437,20 +437,6 @@ def metadata_generate(run_slug):
     return jsonify({"status": "started"}), 202
 
 
-@app.route("/metadata/<path:run_slug>/pick_title", methods=["POST"])
-def metadata_pick_title(run_slug):
-    if not _safe_slug(run_slug):
-        return jsonify({"error": "invalid run slug"}), 400
-    body = request.get_json(force=True, silent=True) or {}
-    index = body.get("index")
-    if not isinstance(index, int):
-        return jsonify({"error": "body must include integer 'index'"}), 400
-    try:
-        return jsonify(_metadata_mod.pick_title(run_slug, index))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-
 @app.route("/metadata/<path:run_slug>/pick_thumbnail", methods=["POST"])
 def metadata_pick_thumb(run_slug):
     if not _safe_slug(run_slug):

@@ -353,7 +353,6 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
         "topic": topic,
         "vidiq_keywords": keywords,
         "titles": titles_with_idx,
-        "chosen_title_index": 0,
         "description": desc_block["description"],
         "hashtags": desc_block["hashtags"],
         "thumbnails": thumbs_with_idx,
@@ -374,22 +373,6 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
         shutil.copyfile(run_dir / chosen["filename"], run_dir / "thumbnail.png")
 
     log_fn(f"✅  Metadata written: {run_dir / 'metadata.json'}")
-    return data
-
-
-def pick_title(run_slug: str, index: int) -> dict:
-    """Select a title by 0-based index. Rewrites metadata.json. Returns updated metadata dict.
-
-    Raises ValueError if metadata is missing or index is out of range.
-    """
-    data = load_metadata(run_slug)
-    if data is None:
-        raise ValueError(f"No metadata.json for run '{run_slug}' — generate first")
-    n = len(data.get("titles") or [])
-    if not (0 <= index < n):
-        raise ValueError(f"title index {index} out of range 0..{n - 1}")
-    data["chosen_title_index"] = index
-    _save_metadata(_run_dir(run_slug), data)
     return data
 
 

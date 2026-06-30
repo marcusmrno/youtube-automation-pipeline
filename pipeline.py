@@ -1197,7 +1197,6 @@ if __name__ == "__main__":
     md.add_argument("run_slug")
     md.add_argument("--profile", default=None)
     md.add_argument("--regenerate", action="store_true")
-    md.add_argument("--pick-title", type=int, metavar="N", help="1-based index")
     md.add_argument("--pick-thumb", type=int, metavar="N", help="1-based index")
     md.add_argument("--show", action="store_true")
 
@@ -1234,11 +1233,6 @@ if __name__ == "__main__":
                 print(f"No metadata for run '{args.run_slug}'")
                 sys.exit(1)
             print(json.dumps(data, indent=2, ensure_ascii=False))
-            sys.exit(0)
-
-        if args.pick_title is not None:
-            data = md_mod.pick_title(args.run_slug, args.pick_title - 1)
-            print(f"✅ chosen_title_index = {data['chosen_title_index']} ('{data['titles'][data['chosen_title_index']]['text']}')")
             sys.exit(0)
 
         if args.pick_thumb is not None:

@@ -470,25 +470,16 @@ def _resolve_profile_for_bot():
 
 async def _send_metadata_view(chat, data, run_slug):
     titles = data.get("titles") or []
-    chosen_t = data.get("chosen_title_index", 0)
-    if titles:
-        chosen_t = min(max(0, chosen_t), len(titles) - 1)
     chosen_th = data.get("chosen_thumbnail_index", 0)
 
-    title_buttons = [
-        InlineKeyboardButton(
-            f"{'★' if i == chosen_t else ''}{i+1}",
-            callback_data=f"meta_title:{run_slug}:{i}",
-        )
-        for i in range(len(titles))
-    ]
-    score = titles[chosen_t].get("vidiq_score") if titles else "—"
-    top = titles[chosen_t]["text"] if titles else "(no titles)"
-    await chat.send_message(
-        f"*Title:* [{score}] {top}",
-        reply_markup=InlineKeyboardMarkup([title_buttons]),
-        parse_mode="Markdown",
-    )
+    if titles:
+        lines = [
+            f"[{t.get('vidiq_score') if t.get('vidiq_score') is not None else '—'}] {t['text']}"
+            for t in titles
+        ]
+        await chat.send_message("*Titles (vidIQ score in brackets):*\n" + "\n".join(lines), parse_mode="Markdown")
+    else:
+        await chat.send_message("*Titles:* (none)", parse_mode="Markdown")
 
     desc = data.get("description") or ""
     if desc:
@@ -810,8 +801,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     data = query.data
     ae   = _state.get("approval_event")
 
-    # meta_title / meta_thumb answer with a toast message — skip the generic blank answer
-    if not (data.startswith("meta_title:") or data.startswith("meta_thumb:")):
+    # meta_thumb answers with a toast message — skip the generic blank answer
+    if not data.startswith("meta_thumb:"):
         await query.answer()
 
     if data.startswith("approach:"):
@@ -840,16 +831,6 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.edit_message_text(f"✅ Profile set to `{name}`", parse_mode="Markdown")
         else:
             await query.edit_message_text(f"❌ Profile `{name}` no longer exists.", parse_mode="Markdown")
-        return
-
-    if data.startswith("meta_title:"):
-        _, slug, idx = data.split(":", 2)
-        try:
-            updated = _metadata_mod.pick_title(slug, int(idx))
-            await query.answer("Title set")
-            await _send_metadata_view(query.message.chat, updated, slug)
-        except ValueError as e:
-            await query.answer(f"Error: {e}", show_alert=True)
         return
 
     if data.startswith("meta_thumb:"):

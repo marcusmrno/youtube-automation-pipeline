@@ -127,7 +127,6 @@ After a run completes, generate SEO metadata and thumbnails:
 ```bash
 python pipeline.py metadata <run-slug>               # generate 5 titles, description, hashtags, 3 thumbnails
 python pipeline.py metadata <run-slug> --regenerate  # overwrite existing metadata.json
-python pipeline.py metadata <run-slug> --pick-title N    # 1-based; pick which title is "chosen"
 python pipeline.py metadata <run-slug> --pick-thumb N    # 1-based; pick which thumbnail is "chosen"
 python pipeline.py metadata <run-slug> --show         # print current metadata.json
 ```

@@ -30,7 +30,7 @@ def test_load_metadata_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
     run_dir = tmp_path / "abc"
     run_dir.mkdir()
-    data = {"run_slug": "abc", "titles": [], "chosen_title_index": 0}
+    data = {"run_slug": "abc", "titles": []}
     metadata._save_metadata(run_dir, data)
     loaded = metadata.load_metadata("abc")
     assert loaded == data
@@ -422,7 +422,6 @@ def _seed_run(tmp_path):
     data = {
         "run_slug": "abc",
         "titles": [{"index": i, "text": f"t{i}"} for i in range(3)],
-        "chosen_title_index": 0,
         "thumbnails": [
             {"index": 0, "filename": "thumbnails/thumb-01.png"},
             {"index": 1, "filename": "thumbnails/thumb-02.png"},
@@ -432,33 +431,6 @@ def _seed_run(tmp_path):
     }
     (run / "metadata.json").write_text(json.dumps(data))
     return run
-
-
-def test_pick_title_updates_index(tmp_path, monkeypatch):
-    import metadata
-    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
-    _seed_run(tmp_path)
-    out = metadata.pick_title("abc", 2)
-    assert out["chosen_title_index"] == 2
-    reloaded = json.loads((tmp_path / "abc" / "metadata.json").read_text())
-    assert reloaded["chosen_title_index"] == 2
-
-
-def test_pick_title_out_of_range(tmp_path, monkeypatch):
-    import metadata
-    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
-    _seed_run(tmp_path)
-    with pytest.raises(ValueError) as exc:
-        metadata.pick_title("abc", 5)
-    assert "0..2" in str(exc.value) or "out of range" in str(exc.value).lower()
-
-
-def test_pick_title_no_metadata(tmp_path, monkeypatch):
-    import metadata
-    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
-    (tmp_path / "abc").mkdir()
-    with pytest.raises(ValueError):
-        metadata.pick_title("abc", 0)
 
 
 def test_pick_thumbnail_copies_file(tmp_path, monkeypatch):

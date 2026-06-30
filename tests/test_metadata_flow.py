@@ -76,8 +76,8 @@ def test_full_flow_writes_all_artifacts(tmp_path, monkeypatch):
     assert (run_dir / "metadata.json").exists()
     assert (run_dir / "thumbnail.png").exists()
     assert (run_dir / "thumbnails" / "thumb-01.png").exists()
-    assert data["chosen_title_index"] == 0
     assert data["chosen_thumbnail_index"] == 0
+    assert "chosen_title_index" not in data
     # Sorted by score desc — T1 has score 100, should be first
     assert data["titles"][0]["text"] == "T1"
 
