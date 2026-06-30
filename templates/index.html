@@ -1127,6 +1127,7 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
         <div class="mode-toggle" id="modeToggle">
           <button class="mode-btn active" id="modeTopicBtn" onclick="setMode('topic')">Topic</button>
           <button class="mode-btn" id="modeResumeBtn" onclick="setMode('resume')">Resume</button>
+          <button class="mode-btn" id="modeMetadataBtn" onclick="setMode('metadata')">Metadata</button>
           <button class="mode-btn" id="modePalmierBtn" onclick="setMode('palmier')">⬡ Palmier</button>
         </div>
 
@@ -1158,6 +1159,21 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
             <div id="resumeStatusChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;"></div>
             <p id="resumeStatusNote" style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);line-height:1.6;margin:0"></p>
           </div>
+        </div>
+
+        <!-- Metadata mode -->
+        <div id="modeMetadataPanel" style="display:none">
+          <label class="input-label">Run</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <select class="topic-input" id="metadataRunPicker" style="height:auto;padding:9px 14px;flex:1">
+              <option value="">— select a run —</option>
+            </select>
+            <button class="btn btn-ghost" style="flex-shrink:0;padding:9px 12px" onclick="populateRunPicker()" title="Refresh">↻</button>
+          </div>
+          <p style="font-family:var(--mono);font-size:0.62rem;color:var(--dim);line-height:1.6;margin:0 0 4px">
+            Generates 5 titles, description, hashtags, and 3 thumbnails for the selected run. Results appear below — pick title and thumbnail to set the chosen ones.
+          </p>
+          <span class="sidebar-status" id="metadata-status" style="display:block;font-family:var(--mono);font-size:0.62rem;color:var(--muted);margin-top:4px;min-height:14px"></span>
         </div>
 
         <!-- Palmier mode -->
@@ -1200,6 +1216,24 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
         <div class="log-empty" id="logEmpty">
           <span>No run yet</span>
           <span style="color:var(--dim);font-size:0.6rem;">Enter a topic and press Run Pipeline</span>
+        </div>
+      </div>
+
+      <!-- Metadata results panel (shown only when inputMode === 'metadata') -->
+      <div id="metadata-results" style="display:none;margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;">
+        <div id="metadata-empty" style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+          No metadata generated yet for the selected run. Press <strong>Generate Metadata</strong> to start.
+        </div>
+        <div id="metadata-loaded" style="display:none;">
+          <h4 style="margin:0 0 6px;font-size:0.78rem;">Titles (radio = chosen)</h4>
+          <ol id="metadata-titles" style="margin:0 0 12px 18px;padding:0;font-family:var(--mono);font-size:0.72rem;line-height:1.7;"></ol>
+          <h4 style="margin:0 0 6px;font-size:0.78rem;">Description <button id="copy-desc" type="button" class="btn-sm btn-sm-ghost" style="margin-left:6px;font-size:0.6rem;">Copy</button></h4>
+          <textarea id="metadata-description" rows="6" readonly style="width:100%;font-family:var(--mono);font-size:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px;color:var(--text);"></textarea>
+          <h4 style="margin:10px 0 6px;font-size:0.78rem;">Hashtags <button id="copy-hashtags" type="button" class="btn-sm btn-sm-ghost" style="margin-left:6px;font-size:0.6rem;">Copy</button></h4>
+          <input id="metadata-hashtags" type="text" readonly style="width:100%;font-family:var(--mono);font-size:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px;color:var(--text);" />
+          <h4 style="margin:12px 0 6px;font-size:0.78rem;">Thumbnails (click to choose)</h4>
+          <div id="metadata-thumbnails" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+          <button id="metadata-regenerate" type="button" class="btn btn-ghost" style="margin-top:14px;width:100%;">Regenerate</button>
         </div>
       </div>
 
@@ -1409,13 +1443,19 @@ function setMode(mode) {
   inputMode = mode;
   document.getElementById('modeTopicBtn').classList.toggle('active', mode === 'topic');
   document.getElementById('modeResumeBtn').classList.toggle('active', mode === 'resume');
+  document.getElementById('modeMetadataBtn').classList.toggle('active', mode === 'metadata');
   document.getElementById('modePalmierBtn').classList.toggle('active', mode === 'palmier');
-  document.getElementById('modeTopicPanel').style.display   = mode === 'topic'   ? '' : 'none';
-  document.getElementById('modeResumePanel').style.display  = mode === 'resume'  ? '' : 'none';
-  document.getElementById('modePalmierPanel').style.display = mode === 'palmier' ? '' : 'none';
+  document.getElementById('modeTopicPanel').style.display    = mode === 'topic'    ? '' : 'none';
+  document.getElementById('modeResumePanel').style.display   = mode === 'resume'   ? '' : 'none';
+  document.getElementById('modeMetadataPanel').style.display = mode === 'metadata' ? '' : 'none';
+  document.getElementById('modePalmierPanel').style.display  = mode === 'palmier'  ? '' : 'none';
+  // Metadata results panel sits below the log area — only show when in metadata mode.
+  const metaResults = document.getElementById('metadata-results');
+  if (metaResults) metaResults.style.display = mode === 'metadata' ? '' : 'none';
   if (mode === 'resume') refreshResumePicker();
   if (mode === 'palmier') initPalmierMode();
-  const labels = { topic: 'Run Pipeline', resume: 'Resume Pipeline', palmier: 'Send to Palmier' };
+  if (mode === 'metadata') { populateRunPicker(); loadMetadata(); }
+  const labels = { topic: 'Run Pipeline', resume: 'Resume Pipeline', metadata: 'Generate Metadata', palmier: 'Send to Palmier' };
   document.getElementById('runBtn').textContent = labels[mode] || 'Run Pipeline';
 }
 
@@ -1758,6 +1798,17 @@ function addLogLine(stage, msg) {
 
 async function runPipeline() {
   let endpoint, payload;
+
+  if (inputMode === 'metadata') {
+    const slug = document.getElementById('metadataRunPicker').value;
+    if (!slug) {
+      document.getElementById('metadata-status').textContent = 'Pick a run first';
+      document.getElementById('metadataRunPicker').focus();
+      return;
+    }
+    startGenerate(false);
+    return;
+  }
 
   if (inputMode === 'palmier') {
     const run_slug = document.getElementById('palmierPicker').value;
@@ -2622,197 +2673,164 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
 });
 </script>
 
-<details id="metadata-section" style="margin-top:24px;">
-  <summary style="cursor:pointer; font-weight:600; padding:8px 0;">Metadata &amp; Thumbnail</summary>
-  <div style="padding:8px 0;">
-    <label for="metadataRunPicker" style="font-size:13px;margin-right:6px;">Run:</label>
-    <select id="metadataRunPicker" style="min-width:300px;">
-      <option value="">— select a run —</option>
-    </select>
-  </div>
-  <div id="metadata-empty" style="padding:8px 0;">
-    <button id="metadata-generate" type="button">Generate Metadata</button>
-    <span id="metadata-status" style="margin-left:8px;color:#666;"></span>
-  </div>
-  <div id="metadata-loaded" style="display:none; padding:8px 0;">
-    <h4>Titles (radio = chosen)</h4>
-    <ol id="metadata-titles"></ol>
-    <h4>Description <button id="copy-desc" type="button">Copy</button></h4>
-    <textarea id="metadata-description" rows="6" readonly style="width:100%;font-family:monospace;"></textarea>
-    <h4>Hashtags <button id="copy-hashtags" type="button">Copy</button></h4>
-    <input id="metadata-hashtags" type="text" readonly style="width:100%;font-family:monospace;" />
-    <h4>Thumbnails (click to choose)</h4>
-    <div id="metadata-thumbnails" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-    <button id="metadata-regenerate" type="button" style="margin-top:12px;">Regenerate</button>
-  </div>
-</details>
-
 <script>
-(function(){
-  // Use this section's own picker so users don't have to navigate to another
-  // tab. Fall back to #runPicker (Files tab) if our picker is unset, since both
-  // resolve to a run-slug string under output/.
-  function getRunSlug() {
-    const own = document.getElementById('metadataRunPicker');
-    if (own && own.value) return own.value;
-    const fallback = document.getElementById('runPicker');
-    return fallback && fallback.value ? fallback.value : null;
-  }
+// ── Metadata mode ──────────────────────────────────────────────────────────
+// Hoisted to module scope so setMode() and runPipeline() can call into it.
 
-  async function populateRunPicker() {
-    const picker = document.getElementById('metadataRunPicker');
-    if (!picker) return;
-    const current = picker.value;
-    try {
-      const res = await fetch('/runs_with_scripts');
-      const runs = await res.json();
-      picker.innerHTML = '<option value="">— select a run —</option>';
-      runs.forEach(slug => {
-        const opt = document.createElement('option');
-        opt.value = slug;
-        opt.textContent = slug;
-        picker.appendChild(opt);
-      });
-      if (current && runs.includes(current)) picker.value = current;
-    } catch (e) {
-      // Leave the placeholder option in place if the fetch fails.
+function getMetadataSlug() {
+  const picker = document.getElementById('metadataRunPicker');
+  return picker && picker.value ? picker.value : null;
+}
+
+async function populateRunPicker() {
+  const picker = document.getElementById('metadataRunPicker');
+  if (!picker) return;
+  const current = picker.value;
+  try {
+    const res = await fetch('/runs_with_scripts');
+    const runs = await res.json();
+    picker.innerHTML = '<option value="">— select a run —</option>';
+    runs.forEach(slug => {
+      const opt = document.createElement('option');
+      opt.value = slug;
+      opt.textContent = slug;
+      picker.appendChild(opt);
+    });
+    if (current && runs.includes(current)) picker.value = current;
+  } catch (e) {
+    // Leave placeholder if the fetch fails.
+  }
+}
+
+async function loadMetadata() {
+  const slug = getMetadataSlug();
+  if (!slug) {
+    document.getElementById('metadata-empty').style.display = '';
+    document.getElementById('metadata-loaded').style.display = 'none';
+    return;
+  }
+  const r = await fetch(`/metadata/${encodeURIComponent(slug)}`);
+  if (r.status === 404) {
+    document.getElementById('metadata-empty').style.display = '';
+    document.getElementById('metadata-loaded').style.display = 'none';
+    return;
+  }
+  if (!r.ok) return;
+  renderMetadata(await r.json());
+}
+
+function renderMetadata(data) {
+  document.getElementById('metadata-empty').style.display = 'none';
+  document.getElementById('metadata-loaded').style.display = '';
+
+  const list = document.getElementById('metadata-titles');
+  list.innerHTML = '';
+  (data.titles || []).forEach((t, i) => {
+    const li = document.createElement('li');
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'metadata-title';
+    radio.value = String(i);
+    radio.checked = (i === data.chosen_title_index);
+    radio.addEventListener('change', () => pickMetadataTitle(i));
+    const score = (t.vidiq_score == null) ? '—' : t.vidiq_score;
+    li.append(radio, document.createTextNode(` [${score}] ${t.text}`));
+    list.appendChild(li);
+  });
+
+  document.getElementById('metadata-description').value = data.description || '';
+  document.getElementById('metadata-hashtags').value = (data.hashtags || []).join(' ');
+
+  const strip = document.getElementById('metadata-thumbnails');
+  strip.innerHTML = '';
+  (data.thumbnails || []).forEach((t, i) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'cursor:pointer;border:3px solid ' +
+      (i === data.chosen_thumbnail_index ? 'var(--blue,#0a84ff)' : 'transparent') +
+      ';border-radius:8px;overflow:hidden;';
+    if (t.render_error) {
+      wrap.innerHTML = `<div style="width:200px;height:113px;background:rgba(255,0,0,0.08);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:0.65rem;color:var(--muted);">render failed</div>`;
+    } else {
+      const img = document.createElement('img');
+      img.src = `/metadata/${encodeURIComponent(data.run_slug)}/thumbnail/${i}`;
+      img.style.cssText = 'width:200px;height:auto;display:block;';
+      img.alt = t.hook_text || '';
+      wrap.appendChild(img);
+      wrap.addEventListener('click', () => pickMetadataThumb(i));
     }
-  }
+    const cap = document.createElement('div');
+    cap.style.cssText = 'font-family:var(--mono);font-size:0.6rem;color:var(--muted);text-align:center;padding:3px 0;';
+    cap.textContent = t.hook_text || `thumb ${i+1}`;
+    wrap.appendChild(cap);
+    strip.appendChild(wrap);
+  });
+}
 
-  async function loadMetadata() {
-    const slug = getRunSlug();
-    if (!slug) return;
-    const r = await fetch(`/metadata/${encodeURIComponent(slug)}`);
-    if (r.status === 404) {
-      document.getElementById('metadata-empty').style.display = '';
-      document.getElementById('metadata-loaded').style.display = 'none';
-      return;
+async function pickMetadataTitle(i) {
+  const slug = getMetadataSlug();
+  if (!slug) return;
+  const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_title`, {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({index: i}),
+  });
+  if (r.ok) renderMetadata(await r.json());
+}
+
+async function pickMetadataThumb(i) {
+  const slug = getMetadataSlug();
+  if (!slug) return;
+  const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_thumbnail`, {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({index: i}),
+  });
+  if (r.ok) renderMetadata(await r.json());
+}
+
+async function startGenerate(regenerate) {
+  const slug = getMetadataSlug();
+  const status = document.getElementById('metadata-status');
+  if (!slug) { status.textContent = 'Pick a run first'; return; }
+  status.textContent = regenerate ? 'Regenerating…' : 'Generating…';
+  const profile = document.getElementById('profileSelect')
+    ? document.getElementById('profileSelect').value : '';
+  const r = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({regenerate, profile}),
+  });
+  if (r.status === 409) {
+    status.textContent = 'Already generated — press Regenerate to overwrite.';
+    loadMetadata();
+    return;
+  }
+  if (!r.ok) { status.textContent = 'Failed to start generation'; return; }
+  const poll = setInterval(async () => {
+    const got = await fetch(`/metadata/${encodeURIComponent(slug)}`);
+    if (got.ok) {
+      clearInterval(poll);
+      status.textContent = '';
+      renderMetadata(await got.json());
     }
-    const data = await r.json();
-    render(data);
-  }
+  }, 4000);
+}
 
-  function render(data) {
-    document.getElementById('metadata-empty').style.display = 'none';
-    document.getElementById('metadata-loaded').style.display = '';
-
-    const list = document.getElementById('metadata-titles');
-    list.innerHTML = '';
-    (data.titles || []).forEach((t, i) => {
-      const li = document.createElement('li');
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'metadata-title';
-      radio.value = String(i);
-      radio.checked = (i === data.chosen_title_index);
-      radio.addEventListener('change', () => pickTitle(i));
-      const score = (t.vidiq_score == null) ? '—' : t.vidiq_score;
-      li.append(radio, document.createTextNode(` [${score}] ${t.text}`));
-      list.appendChild(li);
-    });
-
-    document.getElementById('metadata-description').value = data.description || '';
-    document.getElementById('metadata-hashtags').value = (data.hashtags || []).join(' ');
-
-    const strip = document.getElementById('metadata-thumbnails');
-    strip.innerHTML = '';
-    (data.thumbnails || []).forEach((t, i) => {
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'cursor:pointer;border:3px solid ' +
-        (i === data.chosen_thumbnail_index ? '#0a84ff' : 'transparent');
-      if (t.render_error) {
-        wrap.innerHTML = `<div style="width:240px;height:135px;background:#fee;display:flex;align-items:center;justify-content:center;">render failed</div>`;
-      } else {
-        const img = document.createElement('img');
-        img.src = `/metadata/${encodeURIComponent(data.run_slug)}/thumbnail/${i}`;
-        img.style.cssText = 'width:240px;height:auto;display:block;';
-        img.alt = t.hook_text || '';
-        wrap.appendChild(img);
-        wrap.addEventListener('click', () => pickThumb(i));
-      }
-      const cap = document.createElement('div');
-      cap.style.cssText = 'font-size:11px;text-align:center;';
-      cap.textContent = t.hook_text || `thumb ${i+1}`;
-      wrap.appendChild(cap);
-      strip.appendChild(wrap);
-    });
-  }
-
-  async function pickTitle(i) {
-    const slug = getRunSlug();
-    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_title`, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({index: i}),
-    });
-    if (r.ok) render(await r.json());
-  }
-
-  async function pickThumb(i) {
-    const slug = getRunSlug();
-    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/pick_thumbnail`, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({index: i}),
-    });
-    if (r.ok) render(await r.json());
-  }
-
-  async function startGenerate(regenerate) {
-    const slug = getRunSlug();
-    const status = document.getElementById('metadata-status');
-    if (!slug) {
-      status.textContent = 'pick a run first';
-      return;
-    }
-    status.textContent = regenerate ? 'regenerating…' : 'generating…';
-    // Adapt: profile is tracked via #profileSelect <select> in this template.
-    const profile = document.getElementById('profileSelect')
-      ? document.getElementById('profileSelect').value : '';
-    const r = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({regenerate, profile}),
-    });
-    if (!r.ok) { status.textContent = 'failed'; return; }
-    // Poll until metadata.json appears / updates
-    const poll = setInterval(async () => {
-      const got = await fetch(`/metadata/${encodeURIComponent(slug)}`);
-      if (got.ok) {
-        clearInterval(poll);
-        status.textContent = '';
-        render(await got.json());
-      }
-    }, 4000);
-  }
-
-  document.getElementById('metadata-generate').addEventListener('click', () => startGenerate(false));
-  document.getElementById('metadata-regenerate').addEventListener('click', () => startGenerate(true));
-
-  document.getElementById('copy-desc').addEventListener('click', () => {
+// Wire up controls once DOM is ready.
+document.addEventListener('DOMContentLoaded', () => {
+  const picker = document.getElementById('metadataRunPicker');
+  if (picker) picker.addEventListener('change', () => loadMetadata());
+  const regen = document.getElementById('metadata-regenerate');
+  if (regen) regen.addEventListener('click', () => startGenerate(true));
+  const copyDesc = document.getElementById('copy-desc');
+  if (copyDesc) copyDesc.addEventListener('click', () => {
     navigator.clipboard.writeText(document.getElementById('metadata-description').value);
   });
-  document.getElementById('copy-hashtags').addEventListener('click', () => {
+  const copyTags = document.getElementById('copy-hashtags');
+  if (copyTags) copyTags.addEventListener('click', () => {
     navigator.clipboard.writeText(document.getElementById('metadata-hashtags').value);
   });
-
-  // Load metadata whenever either picker changes (our own or the Files-tab fallback).
-  const ownPicker = document.getElementById('metadataRunPicker');
-  if (ownPicker) ownPicker.addEventListener('change', () => loadMetadata());
-  const filesPicker = document.getElementById('runPicker');
-  if (filesPicker) filesPicker.addEventListener('change', () => loadMetadata());
-
-  // Populate our picker now, and again every time the section is opened.
-  populateRunPicker();
-  document.getElementById('metadata-section').addEventListener('toggle', (e) => {
-    if (e.target.open) populateRunPicker();
-  });
-
-  // Initial load when a run is already selected (e.g. page refresh with value retained)
-  if (getRunSlug()) loadMetadata();
-  // Heartbeat fallback: re-check every 30 s while section is open
-  setInterval(loadMetadata, 30000);
-})();
+});
 </script>
 </body>
 </html>
