@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 import anthropic
 
-from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, generate_image_google, _load_anchor_parts
+from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL, generate_image_google, _load_anchor_parts
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
 
 _VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
@@ -73,7 +73,7 @@ def _call_vidiq_agent(system_prompt: str, user_prompt: str, max_turns: int, log_
         },
         permission_mode="bypassPermissions",
         max_turns=max_turns,
-        model="claude-haiku-4-5-20251001",
+        model=HAIKU_MODEL,
     )
     options.system_prompt = system_prompt
 
@@ -142,7 +142,7 @@ def _generate_titles(topic, script, research, keywords, profile, client, log_fn)
     log_fn("✍️  Generating 5 title candidates...")
     prompt = _build_metadata_titles_prompt(topic, script, research, keywords, profile)
     r = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=HAIKU_MODEL,
         max_tokens=1000,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -209,7 +209,7 @@ def _generate_description_hashtags(top_title, script, keywords, profile, client,
     log_fn("📝  Generating description and hashtags...")
     prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile)
     r = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=HAIKU_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -249,7 +249,7 @@ def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[
     prompt = _build_metadata_thumbnail_prompt(script, topic, profile)
     for attempt in (1, 2):
         r = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=HAIKU_MODEL,
             max_tokens=2500,
             messages=[{"role": "user", "content": prompt}],
         )

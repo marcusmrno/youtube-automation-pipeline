@@ -471,6 +471,8 @@ def _resolve_profile_for_bot():
 async def _send_metadata_view(chat, data, run_slug):
     titles = data.get("titles") or []
     chosen_t = data.get("chosen_title_index", 0)
+    if titles:
+        chosen_t = min(max(0, chosen_t), len(titles) - 1)
     chosen_th = data.get("chosen_thumbnail_index", 0)
 
     title_buttons = [

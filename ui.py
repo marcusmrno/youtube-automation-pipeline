@@ -25,6 +25,11 @@ import metadata as _metadata_mod
 
 _noop_log = lambda _: None
 
+_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]*$')
+
+def _safe_slug(run_slug: str) -> bool:
+    return bool(_SLUG_RE.fullmatch(run_slug))
+
 app = Flask(__name__)
 OUTPUT_ROOT = PROJECT_ROOT / "output"
 
@@ -370,6 +375,8 @@ def run_status_route(run_slug):
 
 @app.route("/metadata/<path:run_slug>", methods=["GET"])
 def metadata_get(run_slug):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     try:
         data = _metadata_mod.load_metadata(run_slug)
     except ValueError as e:
@@ -381,6 +388,8 @@ def metadata_get(run_slug):
 
 @app.route("/metadata/<path:run_slug>/generate", methods=["POST"])
 def metadata_generate(run_slug):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     regenerate = bool(body.get("regenerate", False))
     profile_name = (body.get("profile") or "").strip()
@@ -395,9 +404,15 @@ def metadata_generate(run_slug):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-    # Reuse the existing SSE log queue if available, else stand up a private one
-    log_queue = _state.get("log_queue") or queue.Queue()
-    _state["log_queue"] = log_queue
+    if not regenerate:
+        try:
+            existing = _metadata_mod.load_metadata(run_slug)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        if existing is not None:
+            return jsonify({"error": "metadata already exists; pass regenerate=true to overwrite"}), 409
+
+    log_queue: queue.Queue = queue.Queue()
 
     def runner():
         try:
@@ -416,6 +431,8 @@ def metadata_generate(run_slug):
 
 @app.route("/metadata/<path:run_slug>/pick_title", methods=["POST"])
 def metadata_pick_title(run_slug):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     index = body.get("index")
     if not isinstance(index, int):
@@ -428,6 +445,8 @@ def metadata_pick_title(run_slug):
 
 @app.route("/metadata/<path:run_slug>/pick_thumbnail", methods=["POST"])
 def metadata_pick_thumb(run_slug):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     index = body.get("index")
     if not isinstance(index, int):
@@ -440,6 +459,8 @@ def metadata_pick_thumb(run_slug):
 
 @app.route("/metadata/<path:run_slug>/thumbnail/<int:index>", methods=["GET"])
 def metadata_thumbnail_file(run_slug, index):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     try:
         data = _metadata_mod.load_metadata(run_slug)
     except ValueError as e:
