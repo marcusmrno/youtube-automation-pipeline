@@ -15,7 +15,6 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
 | **Web UI** | Flask + vanilla JS — real-time SSE log streaming, image gallery, lightbox, script review modal |
 | **Bot interface** | python-telegram-bot — full pipeline control via Telegram with inline keyboard interactions |
-| **Timeline assembly** | Palmier Pro via MCP (Model Context Protocol) — programmatic clip placement and keyframe animation |
 
 ---
 
@@ -24,7 +23,7 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 ```
 topic → clarifying questions → approach selection → research → script
       → [approval gate] → TTS narration → image prompts → images + voiceover
-      → (manual) send to Palmier timeline → (optional) flicker pass, metadata + thumbnails
+      → (optional) flicker pass, metadata + thumbnails
 ```
 
 | Stage | Detail |
@@ -38,7 +37,6 @@ topic → clarifying questions → approach selection → research → script
 | **Image prompts** | One detailed prompt per ~3–4 seconds of narration (`NNN \| MM:SS-MM:SS \| [description]`), vetted in a two-stage Haiku-detect / Sonnet-rewrite pass, then written with embedded character and style rules |
 | **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
 | **Voiceover** | ElevenLabs generates chunked audio in parallel with image generation |
-| **Timeline (manual)** | Not run automatically — from the web UI's ⬡ Palmier button (or bot), all images + voiceover are imported into Palmier Pro and placed on the timeline via MCP |
 | **Flicker pass (optional, manual)** | If the profile enables `image_gen.flicker`, each image gets stretched b/c variants generated alongside it; `apply_flicker.py` then layers alternating b/c segments over the placed clips in the live Palmier project for a hand-drawn flicker effect |
 | **Metadata & thumbnails (optional, manual)** | `python pipeline.py metadata <slug>` (or the UI/bot equivalent) generates titles, description, hashtags, and thumbnail options after a run completes |
 
@@ -71,7 +69,6 @@ ELEVENLABS_VOICE_ID=...
 VIDIQ_API_KEY=...           # optional — enables agent research + vetting; falls back to standard Claude research
 TELEGRAM_BOT_TOKEN=...      # optional — for bot.py
 TELEGRAM_USER_ID=...        # optional — your Telegram user ID
-PALMIER_MCP_URL=http://127.0.0.1:19789/mcp   # optional — for timeline assembly
 ```
 
 A profile's `voice.voice_id` can also reference an arbitrary env var with `${VAR_NAME}` syntax, resolved at load time — not limited to the fixed list above.
@@ -99,8 +96,7 @@ python ui.py
 - Lightbox shows the matching script section for each image's timestamp; image prompt available as a collapsible dropdown
 - Mark images for regeneration while browsing, then regen all flagged at once
 
-**Palmier & metadata:**
-- ⬡ Palmier button (or `POST /send_to_palmier`) imports all images + voiceover and places them on the Palmier timeline — this is a manual step, not run automatically at the end of a pipeline run
+**Metadata:**
 - "Metadata & Thumbnail" section (or `POST /metadata/<slug>/generate`) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
 
 ### Telegram bot
@@ -150,7 +146,7 @@ Also available as `/metadata` in the Telegram bot, and as a "Metadata & Thumbnai
 
 There are two independent flicker mechanisms:
 
-- **Built into the pipeline** — if a profile sets `image_gen.flicker.enabled: true`, `pipeline.py` generates horizontally/vertically stretched `NNNb.png`/`NNNc.png` variants alongside every image, and `assemble_palmier_timeline` interleaves them with the original when the timeline is sent to Palmier.
+- **Built into the pipeline** — if a profile sets `image_gen.flicker.enabled: true`, `pipeline.py` generates horizontally/vertically stretched `NNNb.png`/`NNNc.png` variants alongside every image.
 - **`apply_flicker.py`** — a standalone script, unrelated to `pipeline.py`'s internal logic, that adds a flicker overlay track to whatever is *already open* in a live Palmier project by reusing `NNN`/`NNNb`/`NNNc` media already imported there:
 
 ```bash
@@ -307,7 +303,7 @@ youtube-pipeline/
 ├── metadata.py           # titles/description/hashtags/thumbnail generation, metadata.json
 ├── profile.py            # Profile dataclass + YAML loader
 ├── apply_flicker.py      # standalone CLI — adds/undoes a flicker overlay in a live Palmier project
-├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, Palmier, metadata)
+├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, metadata)
 ├── bot.py                # Telegram bot interface
 ├── create_profile.py     # interactive profile creator CLI
 ├── profile_creator/      # profile creation subpackage
