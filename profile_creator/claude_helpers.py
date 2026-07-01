@@ -61,7 +61,6 @@ image_style:
     # There are no required sections — write whatever rules this style needs.
     ...
 
-  sky_rotation: "color1 → color2 → ..."   # optional — omit or leave blank for no sky
   max_anchors: 6
 
 voice:
@@ -75,7 +74,6 @@ voice:
 
 image_gen:
   default_model: "gemini-3.1-flash-image"
-  regen_model: "gemini-3.1-flash-image"
   pro_model: "gemini-3-pro-image"
   flicker:
     enabled: false    # set true to generate b/c flicker frames per image (0.4% stretch)

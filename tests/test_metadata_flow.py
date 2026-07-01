@@ -20,7 +20,7 @@ def _seed_run_with_script(tmp_path, slug="abc", script="SCRIPT BODY"):
 
 
 def _stub_metadata_internals(monkeypatch, metadata):
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "")  # turn off vidIQ
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "")  # turn off vidIQ
     monkeypatch.setattr(metadata, "_vidiq_keywords", lambda topic, log_fn: [{"keyword": "kw"}])
     monkeypatch.setattr(
         metadata, "_generate_titles",
@@ -80,6 +80,7 @@ def test_full_flow_writes_all_artifacts(tmp_path, monkeypatch):
     assert "chosen_title_index" not in data
     # Sorted by score desc — T1 has score 100, should be first
     assert data["titles"][0]["text"] == "T1"
+    assert data["tags"] == ["Abc", "kw"]  # topic (title-cased slug), then stubbed vidIQ keyword
 
 
 def test_existing_metadata_blocks_without_regenerate(tmp_path, monkeypatch):

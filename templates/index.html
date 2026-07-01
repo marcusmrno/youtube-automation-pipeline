@@ -358,6 +358,7 @@ html, body {
 
 /* ── Empty log placeholder ── */
 .log-empty {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -409,7 +410,7 @@ html, body {
   font-weight: 600;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
@@ -640,7 +641,7 @@ html, body {
   display: flex;
   gap: 4px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   padding: 3px;
   margin-bottom: 12px;
@@ -1128,7 +1129,6 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
           <button class="mode-btn active" id="modeTopicBtn" onclick="setMode('topic')">Topic</button>
           <button class="mode-btn" id="modeResumeBtn" onclick="setMode('resume')">Resume</button>
           <button class="mode-btn" id="modeMetadataBtn" onclick="setMode('metadata')">Metadata</button>
-          <button class="mode-btn" id="modePalmierBtn" onclick="setMode('palmier')">⬡ Palmier</button>
         </div>
 
         <!-- Topic mode -->
@@ -1174,35 +1174,6 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
             Generates 5 titles, description, hashtags, and 3 thumbnails for the selected run. Results appear below — pick title and thumbnail to set the chosen ones.
           </p>
           <span class="sidebar-status" id="metadata-status" style="display:block;font-family:var(--mono);font-size:0.62rem;color:var(--muted);margin-top:4px;min-height:14px"></span>
-        </div>
-
-        <!-- Palmier mode -->
-        <div id="modePalmierPanel" style="display:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-            <div id="palmierDot" style="width:8px;height:8px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:all 0.3s;"></div>
-            <span id="palmierStatusLabel" style="font-family:var(--mono);font-size:0.65rem;color:var(--muted);">Checking Palmier…</span>
-          </div>
-          <label class="input-label" style="margin-bottom:4px;">MCP Server URL</label>
-          <div style="display:flex;gap:6px;margin-bottom:10px;">
-            <input
-              id="palmierMcpUrl"
-              type="text"
-              class="topic-input"
-              style="height:auto;padding:7px 12px;font-family:var(--mono);font-size:0.72rem;"
-              placeholder="http://127.0.0.1:19789/mcp"
-            >
-            <button class="btn btn-ghost" style="flex-shrink:0;padding:7px 12px;font-size:0.72rem;" onclick="savePalmierUrl()" id="palmierUrlSaveBtn">Save</button>
-          </div>
-          <span id="palmierUrlStatus" style="font-family:var(--mono);font-size:0.62rem;color:var(--muted);display:block;margin-bottom:8px;min-height:14px;"></span>
-          <label class="input-label">Select Project</label>
-          <div style="display:flex;gap:6px;margin-bottom:10px;">
-            <select class="topic-input" id="palmierPicker" style="height:auto;padding:9px 14px;flex:1">
-              <option value="">— select a completed run —</option>
-            </select>
-            <button class="btn btn-ghost" style="flex-shrink:0;padding:9px 12px" onclick="refreshPalmierPicker()" title="Refresh">↻</button>
-          </div>
-          <div id="palmierProjectInfo" style="display:none;font-family:var(--mono);font-size:0.65rem;color:var(--muted);line-height:1.8;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;margin-bottom:2px;">
-          </div>
         </div>
 
         <div class="btn-row">
@@ -1444,110 +1415,16 @@ function setMode(mode) {
   document.getElementById('modeTopicBtn').classList.toggle('active', mode === 'topic');
   document.getElementById('modeResumeBtn').classList.toggle('active', mode === 'resume');
   document.getElementById('modeMetadataBtn').classList.toggle('active', mode === 'metadata');
-  document.getElementById('modePalmierBtn').classList.toggle('active', mode === 'palmier');
   document.getElementById('modeTopicPanel').style.display    = mode === 'topic'    ? '' : 'none';
   document.getElementById('modeResumePanel').style.display   = mode === 'resume'   ? '' : 'none';
   document.getElementById('modeMetadataPanel').style.display = mode === 'metadata' ? '' : 'none';
-  document.getElementById('modePalmierPanel').style.display  = mode === 'palmier'  ? '' : 'none';
   // Metadata results panel sits below the log area — only show when in metadata mode.
   const metaResults = document.getElementById('metadata-results');
   if (metaResults) metaResults.style.display = mode === 'metadata' ? '' : 'none';
   if (mode === 'resume') refreshResumePicker();
-  if (mode === 'palmier') initPalmierMode();
   if (mode === 'metadata') { populateRunPicker(); loadMetadata(); }
-  const labels = { topic: 'Run Pipeline', resume: 'Resume Pipeline', metadata: 'Generate Metadata', palmier: 'Send to Palmier' };
+  const labels = { topic: 'Run Pipeline', resume: 'Resume Pipeline', metadata: 'Generate Metadata' };
   document.getElementById('runBtn').textContent = labels[mode] || 'Run Pipeline';
-}
-
-// ── Palmier mode ──────────────────────────────────────────────────────────
-
-async function loadPalmierUrl() {
-  const res  = await fetch('/palmier_url');
-  const data = await res.json();
-  document.getElementById('palmierMcpUrl').value = data.url || '';
-}
-
-async function savePalmierUrl() {
-  const url    = document.getElementById('palmierMcpUrl').value.trim();
-  const status = document.getElementById('palmierUrlStatus');
-  const btn    = document.getElementById('palmierUrlSaveBtn');
-  if (!url) { status.textContent = 'URL cannot be empty'; status.style.color = 'var(--red)'; return; }
-  btn.disabled = true;
-  btn.textContent = '…';
-  const res  = await fetch('/palmier_url', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  const data = await res.json();
-  btn.disabled = false;
-  btn.textContent = 'Save';
-  if (data.ok) {
-    status.textContent = '✓ Saved — reconnecting…';
-    status.style.color = 'var(--green)';
-    // Re-check connection with new URL
-    await checkPalmierStatus();
-    setTimeout(() => { status.textContent = ''; }, 3000);
-  } else {
-    status.textContent = `Error: ${data.error}`;
-    status.style.color = 'var(--red)';
-  }
-}
-
-async function checkPalmierStatus() {
-  const res  = await fetch('/palmier_status');
-  const data = await res.json();
-  const dot   = document.getElementById('palmierDot');
-  const label = document.getElementById('palmierStatusLabel');
-  if (data.available) {
-    dot.style.background  = 'var(--green)';
-    dot.style.boxShadow   = '0 0 6px var(--green)';
-    label.style.color     = 'var(--green)';
-    label.textContent     = 'Palmier Pro connected';
-  } else {
-    dot.style.background = 'var(--red)';
-    dot.style.boxShadow  = '0 0 6px var(--red)';
-    label.style.color    = 'var(--red)';
-    label.textContent    = 'Palmier Pro not detected — open the app first';
-  }
-}
-
-async function initPalmierMode() {
-  refreshPalmierPicker();
-  loadPalmierUrl();
-  checkPalmierStatus();
-}
-
-async function refreshPalmierPicker() {
-  const res  = await fetch('/runs_with_images');
-  const runs = await res.json();
-  const picker = document.getElementById('palmierPicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select a completed run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) picker.value = current;
-  picker.onchange = () => loadPalmierProjectInfo(picker.value);
-}
-
-async function loadPalmierProjectInfo(run) {
-  const info = document.getElementById('palmierProjectInfo');
-  if (!run) { info.style.display = 'none'; return; }
-  const [imagesRes, audioRes] = await Promise.all([
-    fetch(`/images/${encodeURIComponent(run)}`).then(r => r.json()),
-    fetch(`/runs_with_audio`).then(r => r.json()),
-  ]);
-  const imgCount  = imagesRes.filter(n => !n.endsWith('_bob')).length;
-  const hasAudio  = audioRes.includes(run);
-  info.style.display = '';
-  info.innerHTML = `
-    🖼  <strong style="color:var(--text)">${imgCount}</strong> images &nbsp;·&nbsp;
-    🎙  Audio: <strong style="color:${hasAudio ? 'var(--green)' : 'var(--amber)'}">${hasAudio ? 'ready' : 'missing'}</strong><br>
-    <span style="color:var(--dim)">Clips will be imported and placed with boil animation keyframes.</span>
-  `;
 }
 
 async function refreshResumePicker() {
@@ -1623,8 +1500,7 @@ const STAGE_KEYWORDS = {
   images:   ['generating image', 'images generated', 'fal.ai', 'sending request'],
   voice:    ['generating voiceover', 'voiceover generated', 'voiceover failed', '🎙'],
   qa:       ['qa reviewing', 'starting qa', 'regenerating', 'qa complete', '🔍', '🔄'],
-  timeline: ['fcpxml', 'pipeline complete', 'pipeline finished', '🎬', '╔', '╚',
-             'assembling timeline', 'palmier', 'importing', 'placing clips', 'keyframes', 'voiceover on timeline'],
+  timeline: ['fcpxml', 'pipeline complete', 'pipeline finished', '🎬', '╔', '╚'],
 };
 
 let currentStage = null;
@@ -1811,12 +1687,7 @@ async function runPipeline() {
     return;
   }
 
-  if (inputMode === 'palmier') {
-    const run_slug = document.getElementById('palmierPicker').value;
-    if (!run_slug) { document.getElementById('palmierPicker').focus(); return; }
-    endpoint = '/send_to_palmier';
-    payload  = { run_slug };
-  } else if (inputMode === 'resume') {
+  if (inputMode === 'resume') {
     const run_slug = document.getElementById('resumePicker').value;
     if (!run_slug) { document.getElementById('resumePicker').focus(); return; }
     endpoint = '/resume';

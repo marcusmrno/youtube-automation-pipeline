@@ -53,8 +53,6 @@ image_style:
     No smooth digital lines. All text is bold handwritten uppercase in black marker.
     16:9 landscape composition.
 
-  sky_rotation: "pale yellow, soft coral, sky blue, mint green, lavender"
-
   anchor_priority:
     - anchor-01
     - anchor-02
@@ -93,7 +91,6 @@ voice:
 # ── Image generation ──────────────────────────────────────────────────────────
 image_gen:
   default_model: "gemini-3.1-flash-image"
-  regen_model: "gemini-3.1-flash-image"
   pro_model: "gemini-3-pro-image"
   flicker:
     enabled: false      # set to true to generate b/c flicker frames per image

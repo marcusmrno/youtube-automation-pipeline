@@ -20,7 +20,7 @@ from create_profile import next_version_name
 PROFILES_ROOT = Path(__file__).parent.parent / "profiles"
 ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()
 
-STYLE_SENSITIVE_KEYS = {"art_style_block", "sky_rotation"}
+STYLE_SENSITIVE_KEYS = {"art_style_block"}
 
 
 def _style_changed(old_yaml: dict, new_yaml: dict) -> bool:

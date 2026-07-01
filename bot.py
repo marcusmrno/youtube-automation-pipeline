@@ -29,16 +29,15 @@ import pipeline
 from pipeline import (
     OUTPUT_ROOT,
     ANTHROPIC_KEY,
-    CLAUDE_MODEL,
     run_pipeline,
     resume_pipeline,
+    revise_script,
     run_status,
     slugify,
     generate_clarifying_questions,
     generate_approach_pitches,
 )
 from profile import load_profile, list_profiles
-from prompts import _build_agent_system_prompt, _extract
 
 load_dotenv()
 
@@ -922,29 +921,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    # Build system prompt from profile
     _available = list_profiles()
     _profile_name = _state["profile_name"] or (_available[0] if _available else None)
     _profile = load_profile(_profile_name) if _profile_name else None
-    _topic = slug or "video"
-    _sys = _build_agent_system_prompt(_topic, _profile) if _profile else ""
 
-    prompt = (
-        f"{_sys}\n\n---\n"
-        "You are revising a YouTube video script based on feedback. Apply the feedback precisely.\n"
-        "Keep everything not mentioned in the feedback exactly as-is.\n"
-        "Return only the revised script — no preamble, no explanation.\n\n"
-        f"FEEDBACK:\n{feedback}\n\nCURRENT SCRIPT:\n{script}\n\n===SCRIPT===\n"
-    )
     try:
         # This blocks the event loop for ~10-20s — acceptable for a personal single-user bot
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=8000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text    = response.content[0].text
-        revised = _extract("SCRIPT", text) or text.strip()
+        revised = revise_script(script, feedback, slug or "video", _profile, client)
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True

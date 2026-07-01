@@ -6,6 +6,7 @@ Usage: python pipeline.py "your topic here"
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from prompts import (
     _build_image_prompt_instructions,
     _build_image_prompt_vet_instructions,
     _build_image_prompt_rewrite_instructions,
+    _build_agent_system_prompt,
     _extract,
 )
 
@@ -44,7 +46,6 @@ EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
 EL_VOICE_ID     = (os.getenv("ELEVENLABS_VOICE_ID") or "").strip()
 VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
-PALMIER_MCP_URL = (os.getenv("PALMIER_MCP_URL") or "http://127.0.0.1:19789/mcp").strip()
 
 CLAUDE_MODEL  = "claude-sonnet-4-6"
 HAIKU_MODEL   = "claude-haiku-4-5-20251001"
@@ -60,13 +61,9 @@ GOOGLE_MODEL_OPTIONS = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_genai_client = None
-
+@functools.cache
 def _get_genai_client() -> "genai.Client":
-    global _genai_client
-    if _genai_client is None:
-        _genai_client = genai.Client(api_key=GOOGLE_KEY)
-    return _genai_client
+    return genai.Client(api_key=GOOGLE_KEY)
 
 
 def log(msg: str, progress_callback=None):
@@ -188,6 +185,34 @@ def generate_script(topic: str, research: str, profile: "Profile",
     script = _extract("SCRIPT", r.content[0].text)
     log_fn("✅  Script written")
     return script
+
+
+def revise_script(script: str, feedback: str, topic: str, profile: "Profile | None",
+                  client: anthropic.Anthropic) -> str:
+    """Revise a script based on feedback via Sonnet. Returns the revised script."""
+    system_ctx = _build_agent_system_prompt(topic or "video", profile) if profile else ""
+    prompt = f"""{system_ctx}
+
+---
+You are revising a YouTube video script based on feedback. Apply the feedback precisely.
+Keep everything that isn't mentioned in the feedback exactly as-is.
+Return only the revised script — no preamble, no explanation.
+
+FEEDBACK:
+{feedback}
+
+CURRENT SCRIPT:
+{script}
+
+===SCRIPT===
+"""
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=8000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = response.content[0].text
+    return _extract("SCRIPT", text) or text.strip()
 
 
 def parse_image_prompts(raw: str) -> list[dict]:
@@ -369,8 +394,8 @@ def _vet_image_prompts(
 
 # ── Phase 2: Image Generation ─────────────────────────────────────────────────
 
-def _standardize_image(path: Path) -> None:
-    """Center-crop to 16:9 and resize to 1920×1080 in place."""
+def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
+    """Center-crop to 16:9 and resize to `size` in place."""
     img = Image.open(path).convert("RGB")
     w, h = img.size
     target_w = min(w, int(h * 16 / 9))
@@ -378,7 +403,7 @@ def _standardize_image(path: Path) -> None:
     left = (w - target_w) // 2
     top  = (h - target_h) // 2
     img  = img.crop((left, top, left + target_w, top + target_h))
-    img  = img.resize((1920, 1080), Image.LANCZOS)
+    img  = img.resize(size, Image.LANCZOS)
     img.save(path)
 
 
@@ -426,9 +451,26 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
     return None
 
 
-def _load_anchor_parts(profile: "Profile") -> list:
-    """Pre-load anchor images as genai Parts. Call once per run, not per image."""
-    anchors_dir  = profile.anchors_dir
+IMAGE_PREAMBLE = (
+    "Reference images are provided in this order:\n"
+    "  anchor-01: Full cast reference sheet — all characters side by side, exact proportions and scale.\n"
+    "  anchor-02: Multi-angle reference sheet — each character shown front, 3/4, side, and back. Match these character designs exactly in every scene.\n"
+    "  anchor-03: Example content scene — shows background, props, and art style in a real frame.\n"
+    "  anchor-04 onward: Additional style and scene references — follow the art style shown precisely.\n\n"
+    "STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines with visible marker streaks. "
+    "Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
+)
+
+ANCHOR_PREAMBLE = (
+    "Reference images define the art style and characters — match them precisely.\n\n"
+    "STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines "
+    "with visible marker streaks. Off-white warm paper background. No gradients. No drop shadows. "
+    "No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
+)
+
+
+def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
+    """Pre-load anchor images from a directory as genai Parts."""
     anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
     seen = set()
     reference_files = []
@@ -436,15 +478,22 @@ def _load_anchor_parts(profile: "Profile") -> list:
         if f.stem not in seen:
             seen.add(f.stem)
             reference_files.append(f)
-    reference_files = reference_files[:profile.image_style.get("max_anchors", 14)]
+    reference_files = reference_files[:max_anchors]
     return [
         genai_types.Part.from_bytes(data=ref.read_bytes(), mime_type=_image_mime(ref))
         for ref in reference_files
     ]
 
 
+def _load_anchor_parts(profile: "Profile") -> list:
+    """Pre-load anchor images as genai Parts. Call once per run, not per image."""
+    return _load_anchors_from_dir(profile.anchors_dir, profile.image_style.get("max_anchors", 14))
+
+
 def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
-                          model: str = None, anchor_parts: list | None = None) -> bool:
+                          model: str = None, anchor_parts: list | None = None,
+                          preamble: str = IMAGE_PREAMBLE,
+                          standardize_size: tuple[int, int] = (1920, 1080)) -> bool:
     """Generate image via Google AI with style anchors as references."""
     if model is None:
         model = profile.image_gen["default_model"]
@@ -452,16 +501,7 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
     if anchor_parts is None:
         anchor_parts = _load_anchor_parts(profile)
 
-    contents = [
-        f"Reference images are provided in this order:\n"
-        f"  anchor-01: Full cast reference sheet — all characters side by side, exact proportions and scale.\n"
-        f"  anchor-02: Multi-angle reference sheet — each character shown front, 3/4, side, and back. Match these character designs exactly in every scene.\n"
-        f"  anchor-03: Example content scene — shows background, props, and art style in a real frame.\n"
-        f"  anchor-04 onward: Additional style and scene references — follow the art style shown precisely.\n\n"
-        f"STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines with visible marker streaks. "
-        f"Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
-        f"{prompt}",
-    ]
+    contents = [f"{preamble}{prompt}"]
     contents.extend(anchor_parts)
 
     client = _get_genai_client()
@@ -482,7 +522,7 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
                     final_path.write_bytes(part.inline_data.data)
                     if final_path != output_path and output_path.exists():
                         output_path.unlink()
-                    _standardize_image(final_path)
+                    _standardize_image(final_path, standardize_size)
                     return True
             log_fn(f"  ⚠️  Google AI returned no image in response")
             time.sleep(3)
@@ -531,11 +571,8 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         log(msg, progress_callback)
 
     model = None
-    if profile is not None:
-        key_map = {"nano-banana-2": "regen_model", "3-pro": "pro_model"}
-        profile_key = key_map.get(model_key)
-        if profile_key:
-            model = profile.image_gen.get(profile_key)
+    if profile is not None and model_key == "3-pro":
+        model = profile.image_gen.get("pro_model")
     if model is None:
         model = GOOGLE_MODEL_OPTIONS.get(model_key)
     if not model:
@@ -744,55 +781,6 @@ def get_audio_duration(audio_path: Path) -> float:
     return audio_path.stat().st_size / 24000.0
 
 
-# ── Palmier MCP ───────────────────────────────────────────────────────────────
-
-def _palmier_call(tool: str, arguments: dict) -> dict:
-    """Call a Palmier MCP tool via JSON-RPC."""
-    payload = {
-        "jsonrpc": "2.0", "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": arguments},
-    }
-    r = requests.post(PALMIER_MCP_URL, json=payload, timeout=60)
-    r.raise_for_status()
-    data = r.json()
-    if "error" in data:
-        raise RuntimeError(f"Palmier [{tool}]: {data['error']}")
-    result = data.get("result", {})
-    if result.get("isError"):
-        for item in result.get("content", []):
-            if item.get("type") == "text":
-                raise RuntimeError(f"Palmier [{tool}]: {item['text']}")
-        raise RuntimeError(f"Palmier [{tool}]: unknown error")
-    for item in result.get("content", []):
-        if item.get("type") == "text":
-            try:
-                return json.loads(item["text"])
-            except (json.JSONDecodeError, ValueError):
-                return {"text": item["text"]}
-    return result
-
-
-def _extract_asset_id(result: dict, tool: str) -> str:
-    for key in ("assetId", "id", "asset_id", "mediaRef"):
-        if key in result:
-            return result[key]
-    # Palmier returns plain-text confirmation — parse the UUID from it
-    text = result.get("text", "")
-    m = re.search(r"id:\s*([0-9A-Fa-f\-]{36})", text)
-    if m:
-        return m.group(1)
-    raise RuntimeError(f"Palmier [{tool}]: could not find asset ID in response: {result}")
-
-
-def _palmier_available() -> bool:
-    try:
-        r = requests.post(PALMIER_MCP_URL, json={"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}, timeout=5)
-        return r.ok
-    except Exception:
-        return False
-
-
 def _ts_to_seconds(ts: str) -> float | None:
     try:
         parts = [int(x) for x in ts.strip().split(":")]
@@ -806,119 +794,12 @@ def _ts_to_seconds(ts: str) -> float | None:
 
 
 
-def assemble_palmier_timeline(
-    prompts: list[dict],
-    image_results: dict,
-    audio_path: Path | None,
-    out_dir: Path,
-    log_fn,
-    profile: "Profile | None" = None,
-) -> None:
-    """Import all pipeline assets into Palmier and assemble the timeline."""
-    log_fn("🎬  Assembling timeline in Palmier...")
-
-    timeline_info = _palmier_call("get_timeline", {})
-    project_fps   = timeline_info.get("fps", 30)
-
-    valid_nums = [p["num"] for p in prompts if p["num"] in image_results]
-    if not valid_nums:
-        log_fn("⚠️  No images to place — skipping Palmier assembly")
-        return
-
-    total_duration  = get_audio_duration(audio_path) if audio_path else None
-    base_dur_s      = (total_duration / len(valid_nums)) if total_duration else 2.5
-    base_dur_frames = max(1, round(base_dur_s * project_fps))
-
-    if total_duration:
-        log_fn(f"  ⏱  Audio duration: {total_duration:.1f}s — equal distribution across {len(valid_nums)} images")
-
-    prompt_by_num = {p["num"]: p for p in prompts}
-
-    images_dir  = out_dir / "images"
-    flicker_dir = images_dir / "flicker"
-    flicker_cfg = (profile.image_gen.get("flicker", {}) if profile else {})
-    use_flicker   = flicker_cfg.get("enabled", False)
-
-    log_fn(f"  Importing {len(valid_nums)} images into Palmier{'  (flicker enabled)' if use_flicker else ''}...")
-    media_refs = {}   # num -> {"a": id, "b": id, "c": id}
-    for num in valid_nums:
-        r = _palmier_call("import_media", {
-            "source": {"path": str(image_results[num].resolve())},
-            "name": num,
-        })
-        refs = {"a": _extract_asset_id(r, "import_media")}
-        if use_flicker:
-            for variant in ("b", "c"):
-                vpath = _find_image(flicker_dir, f"{num}{variant}")
-                if vpath:
-                    rv = _palmier_call("import_media", {
-                        "source": {"path": str(vpath.resolve())},
-                        "name": f"{num}{variant}",
-                    })
-                    refs[variant] = _extract_asset_id(rv, "import_media")
-        media_refs[num] = refs
-
-    audio_ref = None
-    if audio_path and audio_path.exists():
-        log_fn("  Importing voiceover...")
-        r = _palmier_call("import_media", {
-            "source": {"path": str(audio_path.resolve())},
-            "name": "voiceover",
-        })
-        audio_ref = _extract_asset_id(r, "import_media")
-
-    log_fn("  Placing clips on timeline...")
-    entries     = []
-    start_frame = 0
-
-    # Flicker cycle: b(1) c(1) alternating
-    FLICKER_CYCLE = [("b", 1), ("c", 1)]
-
-    for num in valid_nums:
-        clip_dur_s      = base_dur_s
-        clip_dur_frames = max(1, round(clip_dur_s * project_fps))
-        refs            = media_refs[num]
-
-        if use_flicker and "b" in refs and "c" in refs:
-            cycle_len  = sum(f for _, f in FLICKER_CYCLE)
-            remaining  = clip_dur_frames
-            frame_pos  = start_frame
-            while remaining > 0:
-                for variant, frames in FLICKER_CYCLE:
-                    take = min(frames, remaining)
-                    if take <= 0:
-                        break
-                    entries.append({
-                        "mediaRef":       refs[variant],
-                        "startFrame":     frame_pos,
-                        "durationFrames": take,
-                    })
-                    frame_pos += take
-                    remaining -= take
-        else:
-            entries.append({
-                "mediaRef":       refs["a"],
-                "startFrame":     start_frame,
-                "durationFrames": clip_dur_frames,
-            })
-
-        start_frame += clip_dur_frames
-
-    _palmier_call("add_clips", {"entries": entries})
-
-    if audio_ref:
-        log_fn("  Placing voiceover on timeline...")
-        _palmier_call("add_clips", {"entries": [{"mediaRef": audio_ref, "startFrame": 0, "durationFrames": start_frame}]})
-
-    log_fn("✅  Palmier timeline assembled")
-
-
 # ── Shared production phase ───────────────────────────────────────────────────
 
 def _run_production(topic: str, prompts: list[dict], tts_script: str,
                     profile: "Profile", out_dir: Path, client: anthropic.Anthropic,
                     log_fn, stop_event=None, skip_existing_images=False) -> dict:
-    """Phases 2-4: images + voiceover + Palmier."""
+    """Phases 2-4: images + voiceover."""
     audio_path = None
 
     def voiceover_thread():
@@ -947,7 +828,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
     if stop_event and stop_event.is_set():
         return {"status": "cancelled", "out_dir": str(out_dir)}
 
-    log_fn("ℹ️  Review images and audio, then use ⬡ Palmier in the UI to send to Palmier Pro.")
+    log_fn("ℹ️  Review images and audio.")
 
     summary = {
         "status":  "complete",
@@ -956,16 +837,8 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
         "images":  len(image_results),
         "audio":   str(audio_path) if audio_path else "failed",
     }
-    log_fn(f"""
-╔══════════════════════════════════════════╗
-║           Pipeline Complete ✅           ║
-╠══════════════════════════════════════════╣
-║  Images generated : {summary['images']:<21}║
-║  Audio            : {'✅' if audio_path else '❌':<21}║
-║  Output folder    :                      ║
-║  {str(out_dir)[-40:]:<40}  ║
-╚══════════════════════════════════════════╝
-""")
+    log_fn(f"✅  Pipeline complete — {summary['images']} images, "
+           f"audio {'✅' if audio_path else '❌'} — {out_dir}")
     return summary
 
 

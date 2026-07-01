@@ -144,10 +144,6 @@ Return your response in this exact format — no other text:
 ===SCRIPT===
 [full script here]
 """
-
-    override = profile.dir / "overrides" / "script_prompt.txt"
-    if override.exists():
-        return override.read_text()
     return template
 
 
@@ -239,10 +235,6 @@ Return only this, no other text:
 ===TTS_SCRIPT===
 [clean narration here]
 """
-
-    override = profile.dir / "overrides" / "tts_prompt.txt"
-    if override.exists():
-        return override.read_text()
     return template
 
 
@@ -326,10 +318,6 @@ Return only:
 ===IMAGE_PROMPTS===
 [prompts here]
 """
-
-    override = profile.dir / "overrides" / "image_prompt_instructions.txt"
-    if override.exists():
-        return override.read_text()
     return template
 
 

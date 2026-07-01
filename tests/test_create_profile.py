@@ -7,7 +7,6 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from create_profile import next_version_name
-from profile_creator.image_gen import generate_anchor
 from profile_creator.claude_helpers import extract_fenced_block
 from profile_creator.anchors import run_full_anchors
 
@@ -61,7 +60,7 @@ def test_run_full_anchors_skips_existing(tmp_path):
         {"label": "anchor-03", "tier": "full", "purpose": "test slot 3"},
     ]
 
-    with patch("profile_creator.anchors.generate_anchor", return_value=True) as mock_gen:
+    with patch("profile_creator.anchors._generate_anchor", return_value=True) as mock_gen:
         result = run_full_anchors(profile_yaml, anchors_dir, prompts, plan)
 
     # anchor-03 already exists, should not be generated
@@ -97,7 +96,6 @@ characters:
   behavior: alternate
 image_style:
   art_style_block: flat
-  sky_rotation: blue
   max_anchors: 2
 voice:
   voice_id: ${ELEVENLABS_VOICE_ID}
@@ -109,7 +107,6 @@ voice:
   tone_description: test
 image_gen:
   default_model: gemini-3.1-flash-image
-  regen_model: gemini-3.1-flash-image
   pro_model: gemini-3-pro-image"""
 
     with patch("profile_creator.new.anthropic.Anthropic"), \
@@ -156,7 +153,6 @@ characters:
   behavior: alternate
 image_style:
   art_style_block: flat
-  sky_rotation: blue
   max_anchors: 2
 voice:
   voice_id: ${ELEVENLABS_VOICE_ID}
@@ -168,7 +164,6 @@ voice:
   tone_description: test
 image_gen:
   default_model: gemini-3.1-flash-image
-  regen_model: gemini-3.1-flash-image
   pro_model: gemini-3-pro-image""")
     (src_dir / "style-sheet.md").write_text("# Style")
 
@@ -186,14 +181,3 @@ image_gen:
     assert v2_dir.exists()
     assert (v2_dir / "profile.yaml").exists()
     assert (v2_dir / "style-sheet.md").exists()
-
-
-def test_generate_anchor_returns_false_on_exception(tmp_path):
-    profile_yaml = {
-        "image_gen": {"default_model": "gemini-3.1-flash-image"},
-        "image_style": {"max_anchors": 14},
-    }
-    with patch("profile_creator.image_gen.genai") as mock_genai:
-        mock_genai.Client.return_value.models.generate_content.side_effect = Exception("API error")
-        result = generate_anchor("test prompt", tmp_path / "anchor-01.png", profile_yaml, tmp_path)
-    assert result is False

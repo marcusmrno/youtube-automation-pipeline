@@ -10,7 +10,7 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 |-------|-----------|
 | **Orchestration** | Python — async pipeline with checkpoint-based resumability |
 | **LLM** | Anthropic Claude (Sonnet + Haiku) — research, script writing, script planning, TTS enhancement, revision |
-| **AI Agents** | Claude-powered agents via vidIQ API — script generation, SEO vetting, keyword research |
+| **AI Agents** | Claude Agent SDK, connected to vidIQ's MCP server as a tool source — script generation, SEO vetting, keyword research |
 | **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~300 images per video with style anchor references |
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
 | **Web UI** | Flask + vanilla JS — real-time SSE log streaming, image gallery, lightbox, script review modal |
@@ -23,7 +23,8 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 
 ```
 topic → clarifying questions → approach selection → research → script
-      → [approval gate] → TTS narration → image prompts → images + voiceover → Palmier timeline
+      → [approval gate] → TTS narration → image prompts → images + voiceover
+      → (manual) send to Palmier timeline → (optional) flicker pass, metadata + thumbnails
 ```
 
 | Stage | Detail |
@@ -34,10 +35,12 @@ topic → clarifying questions → approach selection → research → script
 | **Vet** | Second agent pass fact-checks, closes SEO gaps, and enforces word count targets |
 | **Approval gate** | Pipeline pauses for human review — script can be edited, revised with feedback, or rejected before any paid generation |
 | **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
-| **Image prompts** | One detailed prompt per ~3–4 seconds of narration (`NNN \| MM:SS-MM:SS \| [description]`) with embedded character and style rules |
+| **Image prompts** | One detailed prompt per ~3–4 seconds of narration (`NNN \| MM:SS-MM:SS \| [description]`), vetted in a two-stage Haiku-detect / Sonnet-rewrite pass, then written with embedded character and style rules |
 | **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
 | **Voiceover** | ElevenLabs generates chunked audio in parallel with image generation |
-| **Timeline** | All assets are imported into Palmier Pro and placed programmatically via MCP |
+| **Timeline (manual)** | Not run automatically — from the web UI's ⬡ Palmier button (or bot), all images + voiceover are imported into Palmier Pro and placed on the timeline via MCP |
+| **Flicker pass (optional, manual)** | If the profile enables `image_gen.flicker`, each image gets stretched b/c variants generated alongside it; `apply_flicker.py` then layers alternating b/c segments over the placed clips in the live Palmier project for a hand-drawn flicker effect |
+| **Metadata & thumbnails (optional, manual)** | `python pipeline.py metadata <slug>` (or the UI/bot equivalent) generates titles, description, hashtags, and thumbnail options after a run completes |
 
 ---
 
@@ -71,6 +74,8 @@ TELEGRAM_USER_ID=...        # optional — your Telegram user ID
 PALMIER_MCP_URL=http://127.0.0.1:19789/mcp   # optional — for timeline assembly
 ```
 
+A profile's `voice.voice_id` can also reference an arbitrary env var with `${VAR_NAME}` syntax, resolved at load time — not limited to the fixed list above.
+
 ---
 
 ## Running the pipeline
@@ -94,6 +99,10 @@ python ui.py
 - Lightbox shows the matching script section for each image's timestamp; image prompt available as a collapsible dropdown
 - Mark images for regeneration while browsing, then regen all flagged at once
 
+**Palmier & metadata:**
+- ⬡ Palmier button (or `POST /send_to_palmier`) imports all images + voiceover and places them on the Palmier timeline — this is a manual step, not run automatically at the end of a pipeline run
+- "Metadata & Thumbnail" section (or `POST /metadata/<slug>/generate`) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
+
 ### Telegram bot
 
 ```bash
@@ -105,8 +114,12 @@ python ui.py
 | `/run <topic>` | Starts the planning flow — clarifying questions → approach pitches → pipeline |
 | `/resume [slug]` | Resume an incomplete run |
 | `/runs` | List recent runs with status |
+| `/status` | Show status of the current/last run |
 | `/download [slug]` | Download run assets as a zip (splits at 50 MB) |
+| `/metadata [slug] [regenerate]` | Generate or show SEO metadata + thumbnails |
+| `/profile` | List/switch channel profiles |
 | `/stop` | Cancel the current run |
+| `/help` | Show command help (alias of `/start`) |
 
 **Bot planning flow:**
 1. `/run why do we dream` → bot sends clarifying questions with suggested defaults
@@ -133,21 +146,42 @@ python pipeline.py metadata <run-slug> --show         # print current metadata.j
 
 Also available as `/metadata` in the Telegram bot, and as a "Metadata & Thumbnail" section in the Flask web UI.
 
+### Flicker effect
+
+There are two independent flicker mechanisms:
+
+- **Built into the pipeline** — if a profile sets `image_gen.flicker.enabled: true`, `pipeline.py` generates horizontally/vertically stretched `NNNb.png`/`NNNc.png` variants alongside every image, and `assemble_palmier_timeline` interleaves them with the original when the timeline is sent to Palmier.
+- **`apply_flicker.py`** — a standalone script, unrelated to `pipeline.py`'s internal logic, that adds a flicker overlay track to whatever is *already open* in a live Palmier project by reusing `NNN`/`NNNb`/`NNNc` media already imported there:
+
+```bash
+python apply_flicker.py --interval 6           # add alternating b/c flicker layer
+python apply_flicker.py --interval 6 --dry-run # preview without writing
+python apply_flicker.py --undo                 # remove the flicker layer (uses .flicker_snapshot.json)
+```
+
 ---
 
 ## Output structure
 
 ```
 output/why-humans-sleep/
-├── research.txt          # verified facts and hook angles
-├── script.txt            # full script with timestamps and VISUAL lines
-├── tts_script.txt        # clean narration with ElevenLabs audio tags
-├── image_prompts.txt     # NNN | MM:SS-MM:SS | [prompt] per image
+├── profile.txt            # name of the profile used for this run
+├── research.txt           # verified facts and hook angles
+├── script.txt             # full script with timestamps and VISUAL lines
+├── tts_script.txt         # clean narration with ElevenLabs audio tags
+├── image_prompts.txt      # NNN | MM:SS-MM:SS | [prompt] per image
+├── metadata.json          # titles, description, hashtags, thumbnail choice (after `metadata` step)
 ├── images/
-│   ├── 001.jpg
+│   ├── 001.png
+│   ├── flicker/           # NNNb.png / NNNc.png stretch variants — only if profile.image_gen.flicker is enabled
 │   └── ...
-└── audio/
-    └── voiceover.mp3
+├── audio/
+│   └── voiceover.mp3
+└── thumbnails/
+    ├── thumb-01.png        # rendered thumbnail candidates (after `metadata` step)
+    ├── thumb-02.png
+    ├── thumb-03.png
+    └── thumbnail.png       # copy of the chosen thumbnail
 ```
 
 ---
@@ -269,13 +303,17 @@ Versioning follows `my-channel` → `my-channel-v2` → `my-channel-v3` automati
 youtube-pipeline/
 ├── pipeline.py           # core orchestrator — all stage logic and resumability
 ├── prompts.py            # LLM prompt builders — pure functions, no API calls
-├── agents.py             # vidIQ Claude agent runners (script + vet)
+├── agents.py             # Claude Agent SDK runners connected to vidIQ's MCP server (script + vet)
+├── metadata.py           # titles/description/hashtags/thumbnail generation, metadata.json
 ├── profile.py            # Profile dataclass + YAML loader
-├── ui.py                 # Flask web UI + SSE streaming endpoints
+├── apply_flicker.py      # standalone CLI — adds/undoes a flicker overlay in a live Palmier project
+├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, Palmier, metadata)
 ├── bot.py                # Telegram bot interface
 ├── create_profile.py     # interactive profile creator CLI
 ├── profile_creator/      # profile creation subpackage
 ├── profiles/example/     # fully annotated profile schema — copy to get started
 ├── templates/index.html  # web UI (vanilla JS, SSE, gallery, lightbox)
+├── tests/                # pytest suite (pipeline parsing/vetting, metadata, profile, create_profile)
+├── docs/                 # design docs for past features
 └── output/               # generated assets per run (gitignored)
 ```

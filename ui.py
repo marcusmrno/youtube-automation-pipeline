@@ -14,13 +14,11 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
 from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, regenerate_images,
-                      assemble_palmier_timeline, _palmier_available,
-                      parse_image_prompts, get_audio_duration, GOOGLE_MODEL_OPTIONS,
-                      run_status, ANTHROPIC_KEY, CLAUDE_MODEL, VIDIQ_KEY,
+                      parse_image_prompts, revise_script,
+                      run_status, ANTHROPIC_KEY, VIDIQ_KEY,
                       generate_clarifying_questions, generate_approach_pitches)
 from profile import load_profile, list_profiles
 from agents import run_vet_agent
-from prompts import _build_agent_system_prompt, _extract
 import metadata as _metadata_mod
 
 _noop_log = lambda _: None
@@ -226,114 +224,6 @@ def resume():
     return jsonify({"ok": True})
 
 
-
-
-@app.route("/palmier_url", methods=["GET"])
-def get_palmier_url():
-    return jsonify({"url": pipeline.PALMIER_MCP_URL})
-
-
-@app.route("/palmier_url", methods=["POST"])
-def set_palmier_url():
-    data = request.get_json(force=True)
-    url  = (data.get("url") or "").strip()
-    if not url:
-        return jsonify({"ok": False, "error": "Empty URL"})
-    pipeline.PALMIER_MCP_URL = url
-    # Persist to .env
-    env_path = PROJECT_ROOT / ".env"
-    lines = env_path.read_text().splitlines() if env_path.exists() else []
-    updated = False
-    for i, line in enumerate(lines):
-        if line.startswith("PALMIER_MCP_URL="):
-            lines[i] = f"PALMIER_MCP_URL={url}"
-            updated = True
-            break
-    if not updated:
-        lines.append(f"PALMIER_MCP_URL={url}")
-    env_path.write_text("\n".join(lines) + "\n")
-    return jsonify({"ok": True})
-
-
-@app.route("/palmier_status")
-def palmier_status():
-    available = _palmier_available()
-    return jsonify({"available": available})
-
-
-@app.route("/send_to_palmier", methods=["POST"])
-def send_to_palmier():
-    data     = request.get_json(force=True)
-    run_slug = (data.get("run_slug") or "").strip()
-    if not run_slug:
-        return jsonify({"ok": False, "error": "No run_slug provided"})
-
-    profile_file = OUTPUT_ROOT / run_slug / "profile.txt"
-    send_profile = None
-    if profile_file.exists():
-        try:
-            send_profile = load_profile(profile_file.read_text().strip())
-        except Exception:
-            pass
-
-    out_dir = OUTPUT_ROOT / run_slug
-    if not out_dir.exists():
-        return jsonify({"ok": False, "error": "Run folder not found"})
-
-    prompts_file = out_dir / "image_prompts.txt"
-    if not prompts_file.exists():
-        return jsonify({"ok": False, "error": "image_prompts.txt not found — run must be complete"})
-
-    from pipeline import _find_image
-    prompts = parse_image_prompts(prompts_file.read_text())
-    image_results = {
-        p["num"]: _find_image(out_dir / "images", p["num"])
-        for p in prompts
-        if _find_image(out_dir / "images", p["num"])
-    }
-    if not image_results:
-        return jsonify({"ok": False, "error": "No images found in this run"})
-
-    audio_path = out_dir / "audio" / "voiceover.mp3"
-    if not audio_path.exists():
-        audio_path = None
-
-    lq = queue.Queue()
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = None
-    _state["approval_queue"] = None
-
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": "timeline", "msg": msg})
-
-    def worker():
-        try:
-            assemble_palmier_timeline(prompts, image_results, audio_path, out_dir, progress_cb, profile=send_profile)
-        except Exception as e:
-            lq.put({"type": "log", "stage": "timeline", "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "done"})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True, "images": len(image_results), "has_audio": audio_path is not None})
-
-
-@app.route("/runs_with_images")
-def runs_with_images():
-    if not OUTPUT_ROOT.exists():
-        return jsonify([])
-    result = []
-    for d in OUTPUT_ROOT.iterdir():
-        if not d.is_dir():
-            continue
-        img_dir = d / "images"
-        if img_dir.exists() and any(
-            p.suffix.lower() in (".png", ".jpg", ".jpeg")
-            for p in img_dir.iterdir()
-            if not p.stem.endswith("_bob")
-        ):
-            result.append(d.name)
-    return jsonify(sorted(result, reverse=True))
 
 
 @app.route("/stop", methods=["POST"])
@@ -643,30 +533,8 @@ def revise():
         profile_name = available[0] if available else None
     profile = load_profile(profile_name) if profile_name else None
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    system_ctx = _build_agent_system_prompt(topic or "video", profile) if profile else ""
-    prompt = f"""{system_ctx}
-
----
-You are revising a YouTube video script based on feedback. Apply the feedback precisely.
-Keep everything that isn't mentioned in the feedback exactly as-is.
-Return only the revised script — no preamble, no explanation.
-
-FEEDBACK:
-{feedback}
-
-CURRENT SCRIPT:
-{script}
-
-===SCRIPT===
-"""
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=8000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    text    = response.content[0].text
-    revised = _extract("SCRIPT", text) or text.strip()
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    revised = revise_script(script, feedback, topic, profile, client)
 
     if VIDIQ_KEY and revised and profile:
         logs   = []
@@ -687,7 +555,6 @@ def list_images(run_name: str):
     imgs = sorted(
         p.stem for p in img_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg")
-        and not p.stem.endswith("_bob")
     )
     return jsonify(imgs)
 

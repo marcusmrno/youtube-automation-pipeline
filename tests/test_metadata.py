@@ -59,7 +59,7 @@ def test_save_metadata_atomic_no_tmp_left(tmp_path, monkeypatch):
 
 def test_vidiq_keywords_no_key_returns_empty(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "")
     logs = []
     assert metadata._vidiq_keywords("anything", logs.append) == []
     assert any("vidIQ" in m for m in logs)
@@ -67,7 +67,7 @@ def test_vidiq_keywords_no_key_returns_empty(monkeypatch):
 
 def test_vidiq_keywords_call_failure_returns_empty(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
     def bad(*a, **kw):
         raise RuntimeError("boom")
     monkeypatch.setattr(metadata, "_call_vidiq_agent", bad)
@@ -79,11 +79,27 @@ def test_vidiq_keywords_call_failure_returns_empty(monkeypatch):
 
 def test_vidiq_keywords_parses_agent_json(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
     fake_payload = '===KEYWORDS===\n[{"keyword":"vitamins","search_volume":9000}]\n'
     monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: fake_payload)
     out = metadata._vidiq_keywords("vitamins", lambda _: None)
     assert out == [{"keyword": "vitamins", "search_volume": 9000}]
+
+
+def test_build_video_tags_dedup_and_topic_first():
+    import metadata
+    tags = metadata._build_video_tags(
+        "Vitamin D", [{"keyword": "vitamin d"}, {"keyword": "sunlight"}, {"keyword": "Vitamin D"}],
+    )
+    assert tags == ["Vitamin D", "sunlight"]  # case-insensitive dedup, topic kept first
+
+
+def test_build_video_tags_caps_at_500_chars():
+    import metadata
+    keywords = [{"keyword": f"keyword number {i}"} for i in range(50)]
+    tags = metadata._build_video_tags("topic", keywords)
+    assert len(", ".join(tags)) <= 500
+    assert len(tags) < 51  # got truncated, not all 51 candidates fit
 
 
 def test_parse_titles_five_clean():
@@ -182,7 +198,7 @@ def test_generate_titles_logs_warning_on_short(monkeypatch):
 
 def test_score_titles_no_vidiq_returns_null_scores(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "")
     result = metadata._score_titles(["a", "b", "c"], lambda _: None)
     assert [r["text"] for r in result] == ["a", "b", "c"]
     assert all(r["score"] is None for r in result)
@@ -191,7 +207,7 @@ def test_score_titles_no_vidiq_returns_null_scores(monkeypatch):
 
 def test_score_titles_per_title_failure_is_null(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
 
     def score(title, log_fn):
         if title == "fail":
@@ -207,7 +223,7 @@ def test_score_titles_per_title_failure_is_null(monkeypatch):
 
 def test_score_titles_preserves_input_order(monkeypatch):
     import metadata
-    monkeypatch.setattr(metadata, "_VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
     scores_by_title = {"x": 50, "y": 70, "z": 60}
     monkeypatch.setattr(
         metadata, "_score_one_title",

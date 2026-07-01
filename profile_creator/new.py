@@ -62,11 +62,11 @@ def run_create(seed_image: str | None = None) -> None:
             print(f"✗ Seed image not found: {seed_image}")
             sys.exit(1)
         anchors_dir.mkdir(parents=True, exist_ok=True)
-        from .image_gen import _standardize_image
+        from pipeline import _standardize_image
         import shutil
         dest = anchors_dir / ("anchor-00" + seed_path.suffix)
         shutil.copy2(seed_path, dest)
-        _standardize_image(dest)
+        _standardize_image(dest, (1280, 720))
         print(f"✓  Seed image installed as {dest.name}")
 
     # Clarification loop

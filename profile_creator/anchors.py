@@ -5,7 +5,21 @@ import re
 import anthropic
 from pathlib import Path
 
-from .image_gen import generate_anchor
+from pipeline import (
+    generate_image_google, _load_anchors_from_dir, ANCHOR_PREAMBLE,
+)
+
+
+def _generate_anchor(prompt: str, output_path: Path, profile_yaml: dict, anchors_dir: Path) -> bool:
+    max_anchors = profile_yaml["image_style"].get("max_anchors", 14)
+    anchor_parts = _load_anchors_from_dir(anchors_dir, max_anchors)
+    return generate_image_google(
+        prompt, output_path, profile=None, log_fn=print,
+        model=profile_yaml["image_gen"]["default_model"],
+        anchor_parts=anchor_parts,
+        preamble=ANCHOR_PREAMBLE,
+        standardize_size=(1280, 720),
+    )
 
 ANCHOR_SYSTEM = """You write image generation prompts for YouTube channel anchor images.
 Each prompt must:
@@ -276,7 +290,7 @@ def run_verification_anchors(
         prompt = prompts[idx] if idx < len(prompts) else f"flat 2D scene for {slot['label']}"
         out_path = anchors_dir / f"{slot['label']}.png"
         print(f"  ⏳  Generating {slot['label']} ({slot['purpose'][:60]}...)")
-        ok = generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
+        ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
         if not ok:
             failed.append(slot["label"])
 
@@ -319,7 +333,7 @@ def run_full_anchors(
         prompt   = prompts[idx] if idx < len(prompts) else f"flat 2D scene for {label}"
         out_path = anchors_dir / f"{label}.png"
         print(f"  ⏳  Generating {label} — {slot['purpose'][:60]}...")
-        ok = generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
+        ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
         if ok:
             ok_list.append(label)
         else:

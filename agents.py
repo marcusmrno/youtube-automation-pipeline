@@ -24,37 +24,32 @@ if TYPE_CHECKING:
 load_dotenv()
 
 VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
-_VIDIQ_KEY    = (os.getenv("VIDIQ_API_KEY") or "").strip()
+VIDIQ_KEY     = (os.getenv("VIDIQ_API_KEY") or "").strip()
 
 
 VET_MODEL = "claude-haiku-4-5-20251001"
 
 
-def _vidiq_options(max_turns: int, model: str | None = None) -> ClaudeAgentOptions:
-    return ClaudeAgentOptions(
+async def run_vidiq_agent(
+    system_prompt: str,
+    user_prompt: str,
+    max_turns: int,
+    log_fn,
+    model: str | None = None,
+) -> str:
+    """Core vidIQ agent loop — streams messages and returns the concatenated text."""
+    options = ClaudeAgentOptions(
         mcp_servers={
             "vidiq": {
                 "type": "http",
                 "url": VIDIQ_MCP_URL,
-                "headers": {"Authorization": f"Bearer {_VIDIQ_KEY}"},
+                "headers": {"Authorization": f"Bearer {VIDIQ_KEY}"},
             }
         },
         permission_mode="bypassPermissions",
         max_turns=max_turns,
         model=model,
     )
-
-
-async def _run_agent(
-    system_prompt: str,
-    user_prompt: str,
-    max_turns: int,
-    extract_tag: str,
-    log_fn,
-    model: str | None = None,
-) -> str:
-    """Core agent loop — streams messages and returns extracted tagged section."""
-    options = _vidiq_options(max_turns, model=model)
     options.system_prompt = system_prompt
 
     full_text = ""
@@ -67,20 +62,21 @@ async def _run_agent(
         elif isinstance(message, ResultMessage):
             if message.result:
                 full_text += message.result
-
-    return _extract(extract_tag, full_text)
+    return full_text
 
 
 async def _run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:
     system_prompt = _build_agent_system_prompt(topic, profile)
     user_prompt   = f"Topic: {topic}\n\n{_build_agent_script_prompt(profile, approach_context)}"
-    return await _run_agent(system_prompt, user_prompt, max_turns=30, extract_tag="SCRIPT", log_fn=log_fn)
+    raw = await run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn)
+    return _extract("SCRIPT", raw)
 
 
 async def _run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
     system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
     user_prompt   = f"Topic: {topic}\n\n{_build_vet_prompt(profile)}"
-    return await _run_agent(system_prompt, user_prompt, max_turns=20, extract_tag="SCRIPT", log_fn=log_fn, model=VET_MODEL)
+    raw = await run_vidiq_agent(system_prompt, user_prompt, max_turns=20, log_fn=log_fn, model=VET_MODEL)
+    return _extract("SCRIPT", raw)
 
 
 def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:

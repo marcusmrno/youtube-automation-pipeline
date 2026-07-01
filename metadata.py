@@ -22,10 +22,8 @@ if TYPE_CHECKING:
 import anthropic
 
 from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL, generate_image_google, _load_anchor_parts
+from agents import run_vidiq_agent, VIDIQ_KEY
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
-
-_VIDIQ_KEY = (os.getenv("VIDIQ_API_KEY") or "").strip()
-_VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
 
 
 def _run_dir(run_slug: str) -> Path:
@@ -55,44 +53,8 @@ def _save_metadata(run_dir: Path, data: dict) -> None:
 
 
 def _call_vidiq_agent(system_prompt: str, user_prompt: str, max_turns: int, log_fn) -> str:
-    """Run a one-off vidIQ agent and return its full text output.
-
-    Mirrors agents._run_agent but isolated here so the vet/script agent
-    code path stays untouched.
-    """
-    from claude_agent_sdk import query as agent_query, ClaudeAgentOptions
-    from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
-
-    options = ClaudeAgentOptions(
-        mcp_servers={
-            "vidiq": {
-                "type": "http",
-                "url": _VIDIQ_MCP_URL,
-                "headers": {"Authorization": f"Bearer {_VIDIQ_KEY}"},
-            }
-        },
-        permission_mode="bypassPermissions",
-        max_turns=max_turns,
-        model=HAIKU_MODEL,
-    )
-    options.system_prompt = system_prompt
-
-    full_text = ""
-
-    async def _runner() -> str:
-        nonlocal full_text
-        async for message in agent_query(prompt=user_prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock) and block.text.strip():
-                        log_fn(f"  {block.text[:120].strip()}")
-                        full_text += block.text
-            elif isinstance(message, ResultMessage):
-                if message.result:
-                    full_text += message.result
-        return full_text
-
-    return asyncio.run(_runner())
+    """Run a one-off vidIQ agent (Haiku) and return its full text output."""
+    return asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns, log_fn, model=HAIKU_MODEL))
 
 
 def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
@@ -100,16 +62,17 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
 
     Returns [] if VIDIQ_API_KEY is unset or any error occurs.
     """
-    if not _VIDIQ_KEY:
+    if not VIDIQ_KEY:
         log_fn("⚠️  vidIQ key not set — skipping keyword research")
         return []
     system = (
         "You are a YouTube SEO assistant. Use the vidiq_keyword_research tool to "
-        "find the 5 strongest keywords for the topic. Return them in this exact format:\n"
+        "find the 15 strongest keywords for the topic (mix broad and long-tail). "
+        "Return them in this exact format:\n"
         "===KEYWORDS===\n"
         "[json array of objects, each at minimum has a 'keyword' string]\n"
     )
-    user = f"Topic: {topic}\n\nReturn 5 keywords as a JSON array, wrapped in ===KEYWORDS=== tags."
+    user = f"Topic: {topic}\n\nReturn 15 keywords as a JSON array, wrapped in ===KEYWORDS=== tags."
     try:
         raw = _call_vidiq_agent(system, user, max_turns=10, log_fn=log_fn)
         block = _extract("KEYWORDS", raw)
@@ -120,6 +83,28 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     except Exception as e:
         log_fn(f"⚠️  vidIQ keyword research failed: {e}")
         return []
+
+
+def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
+    """Build the YouTube tags-box list from topic + vidIQ keywords.
+
+    Deduped case-insensitively, capped at YouTube's 500-char tags-field limit
+    (tags are joined with ", " there, so that separator counts too).
+    """
+    seen: set[str] = set()
+    tags: list[str] = []
+    total = 0
+    for raw in (topic, *(k.get("keyword", "") for k in keywords)):
+        tag = raw.strip()
+        key = tag.lower()
+        if not tag or key in seen:
+            continue
+        total += len(tag) + (2 if tags else 0)
+        if total > 500:
+            break
+        seen.add(key)
+        tags.append(tag)
+    return tags
 
 
 def _parse_titles(raw: str) -> list[str]:
@@ -178,7 +163,7 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
 
     Each entry: {"text": str, "score": int | None, "score_breakdown": dict}.
     """
-    if not _VIDIQ_KEY:
+    if not VIDIQ_KEY:
         log_fn("⚠️  vidIQ key not set — scores will be null")
         return [{"text": t, "score": None, "score_breakdown": {}} for t in titles]
 
@@ -340,6 +325,7 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     keywords = _vidiq_keywords(topic, log_fn)
+    tags = _build_video_tags(topic, keywords)
     titles_raw = _generate_titles(topic, script, research, keywords, profile, client, log_fn)
     scored = _score_titles(titles_raw, log_fn)
     titles_sorted = _sort_titles_by_score(scored)
@@ -363,6 +349,7 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
         "generated_at": _datetime.datetime.now(_datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "topic": topic,
         "vidiq_keywords": keywords,
+        "tags": tags,
         "titles": titles_with_idx,
         "description": desc_block["description"],
         "hashtags": desc_block["hashtags"],
