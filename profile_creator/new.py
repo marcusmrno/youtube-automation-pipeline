@@ -1,6 +1,7 @@
 """New profile creation flow."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 import yaml
@@ -10,9 +11,9 @@ import anthropic
 
 from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from profile import PROFILES_ROOT
 
-PROFILES_ROOT = Path(__file__).parent.parent / "profiles"
-ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 
 def _read_brain_dump() -> str:
@@ -102,10 +103,6 @@ def run_create(seed_image: str | None = None) -> None:
     # Full anchor set
     print(f"\n⏳  Generating remaining anchors...")
     result = run_full_anchors(profile_yaml, anchors_dir, prompts, plan)
-
-    (profile_dir / "profile.yaml").write_text(
-        yaml.dump(profile_yaml, default_flow_style=False, allow_unicode=True)
-    )
 
     print("\n" + "─" * 60)
     print(f"✓  Profile '{profile_name}' created at {profile_dir}")

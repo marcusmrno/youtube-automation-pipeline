@@ -28,6 +28,17 @@ _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]*$')
 def _safe_slug(run_slug: str) -> bool:
     return bool(_SLUG_RE.fullmatch(run_slug))
 
+
+def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
+    """Requested profile name, else the run's saved profile.txt, else the first available."""
+    if requested:
+        return requested
+    saved = OUTPUT_ROOT / run_slug / "profile.txt"
+    if saved.exists():
+        return saved.read_text().strip()
+    available = list_profiles()
+    return available[0] if available else None
+
 app = Flask(__name__)
 OUTPUT_ROOT = PROJECT_ROOT / "output"
 
@@ -113,7 +124,7 @@ def run():
         lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
 
     def approval_cb(script_text: str) -> bool:
-        lq.put({"type": "review", "script": script_text})
+        lq.put({"type": "review", "script": script_text, "run_slug": pipeline.slugify(topic)})
         return aq.get()
 
     def worker():
@@ -158,13 +169,12 @@ def stream():
 def approve():
     data        = request.get_json(force=True)
     script_text = data.get("script", "")
+    run_slug    = (data.get("run_slug") or "").strip()
     aq = _state.get("approval_queue")
     if aq:
         # Persist any edits the user made in the review panel
-        runs = sorted(OUTPUT_ROOT.glob("*/script.txt"),
-                      key=lambda p: p.stat().st_mtime, reverse=True)
-        if runs and script_text.strip():
-            runs[0].write_text(script_text)
+        if run_slug and _safe_slug(run_slug) and script_text.strip():
+            (OUTPUT_ROOT / run_slug / "script.txt").write_text(script_text)
         aq.put(True)
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "No pipeline waiting for approval"})
@@ -189,18 +199,15 @@ def resume():
 
     if not run_slug:
         return jsonify({"ok": False, "error": "No run_slug provided"})
+    if not _safe_slug(run_slug):
+        return jsonify({"ok": False, "error": "invalid run_slug"})
 
-    available = list_profiles()
-    if not available:
-        return jsonify({"ok": False, "error": "No profiles found. Create profiles/<name>/profile.yaml first."})
-
-    if not profile_name:
-        profile_name = available[0]
-
-    try:
-        profile = load_profile(profile_name)
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)})
+    profile = None
+    if profile_name:
+        try:
+            profile = load_profile(profile_name)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     lq = queue.Queue()
     se = threading.Event()
@@ -260,6 +267,8 @@ def runs_with_prompts():
 
 @app.route("/run_status/<path:run_slug>")
 def run_status_route(run_slug):
+    if not _safe_slug(run_slug):
+        return jsonify({"error": "invalid run slug"}), 400
     return jsonify(run_status(run_slug))
 
 
@@ -375,6 +384,8 @@ def runs_with_scripts():
 
 @app.route("/prompts/<run_name>")
 def get_prompts(run_name: str):
+    if not _safe_slug(run_name):
+        return jsonify({"error": "invalid run slug"}), 400
     path = OUTPUT_ROOT / run_name / "image_prompts.txt"
     if not path.exists():
         return jsonify({})
@@ -400,6 +411,8 @@ def runs_with_audio():
 
 @app.route("/audio/<run_name>")
 def serve_audio(run_name: str):
+    if not _safe_slug(run_name):
+        return "", 400
     audio_path = OUTPUT_ROOT / run_name / "audio" / "voiceover.mp3"
     if not audio_path.exists():
         return "", 404
@@ -408,6 +421,8 @@ def serve_audio(run_name: str):
 
 @app.route("/run_files/<run_name>")
 def run_files(run_name: str):
+    if not _safe_slug(run_name):
+        return jsonify({"error": "invalid run slug"}), 400
     run_dir = OUTPUT_ROOT / run_name
     if not run_dir.exists():
         return jsonify([])
@@ -418,6 +433,8 @@ def run_files(run_name: str):
 
 @app.route("/script/<run_name>")
 def get_script(run_name: str):
+    if not _safe_slug(run_name):
+        return jsonify({"ok": False, "error": "invalid run slug"}), 400
     path = OUTPUT_ROOT / run_name / "script.txt"
     if not path.exists():
         return jsonify({"ok": False, "error": "script.txt not found"})
@@ -426,6 +443,8 @@ def get_script(run_name: str):
 
 @app.route("/save_script/<run_name>", methods=["POST"])
 def save_script(run_name: str):
+    if not _safe_slug(run_name):
+        return jsonify({"ok": False, "error": "invalid run slug"}), 400
     data = request.get_json(force=True)
     text = data.get("text", "")
     path = OUTPUT_ROOT / run_name / "script.txt"
@@ -486,6 +505,8 @@ def regenerate_audio():
     run_slug = (data.get("run_slug") or "").strip()
     if not run_slug:
         return jsonify({"ok": False, "error": "No run_slug provided"})
+    if not _safe_slug(run_slug):
+        return jsonify({"ok": False, "error": "invalid run_slug"})
 
     run_dir  = OUTPUT_ROOT / run_slug
     tts_path = run_dir / "tts_script.txt"
@@ -501,7 +522,9 @@ def regenerate_audio():
     def progress_cb(msg: str):
         lq.put({"type": "log", "stage": "voice", "msg": msg})
 
-    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
+    profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
+    if not profile_name:
+        return jsonify({"ok": False, "error": "No profiles found."})
     profile = load_profile(profile_name)
 
     def worker():
@@ -537,8 +560,7 @@ def revise():
     revised = revise_script(script, feedback, topic, profile, client)
 
     if VIDIQ_KEY and revised and profile:
-        logs   = []
-        vetted = run_vet_agent(topic or "video", revised, profile, lambda msg: logs.append(msg))
+        vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
         if vetted:
             revised = vetted
 
@@ -549,6 +571,8 @@ def revise():
 
 @app.route("/images/<run_name>")
 def list_images(run_name: str):
+    if not _safe_slug(run_name):
+        return jsonify({"error": "invalid run slug"}), 400
     img_dir = OUTPUT_ROOT / run_name / "images"
     if not img_dir.exists():
         return jsonify([])
@@ -561,6 +585,8 @@ def list_images(run_name: str):
 
 @app.route("/image/<run_name>/<num>")
 def serve_image(run_name: str, num: str):
+    if not _safe_slug(run_name) or not num.isdigit():
+        return "", 400
     img_dir = OUTPUT_ROOT / run_name / "images"
     for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg")):
         img_path = img_dir / f"{num}{ext}"
@@ -579,13 +605,12 @@ def regen():
 
     if not run_slug or not image_nums:
         return jsonify({"ok": False, "error": "Missing run_slug or image_nums"})
+    if not _safe_slug(run_slug):
+        return jsonify({"ok": False, "error": "invalid run_slug"})
 
-    available = list_profiles()
-    if not available:
-        return jsonify({"ok": False, "error": "No profiles found."})
-
+    profile_name = _resolve_run_profile_name(run_slug, profile_name)
     if not profile_name:
-        profile_name = available[0]
+        return jsonify({"ok": False, "error": "No profiles found."})
 
     try:
         profile = load_profile(profile_name)

@@ -1307,7 +1307,6 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
     <span class="gallery-run-label" id="galleryRunLabel"></span>
     <span class="gallery-sel-count" id="gallerySelCount">0 selected</span>
     <select class="gallery-model-select" id="galleryModelSelect">
-      <option value="2.5-flash">2.5 Flash</option>
       <option value="nano-banana-2" selected>Nano-banana-2</option>
       <option value="3-pro">3 Pro</option>
     </select>
@@ -1427,19 +1426,29 @@ function setMode(mode) {
   document.getElementById('runBtn').textContent = labels[mode] || 'Run Pipeline';
 }
 
-async function refreshResumePicker() {
-  const res  = await fetch('/runs_with_prompts');
-  const runs = await res.json();
-  const picker = document.getElementById('resumePicker');
+async function fillPicker(url, id, placeholder) {
+  const picker = document.getElementById(id);
+  if (!picker) return [];
   const current = picker.value;
-  picker.innerHTML = '<option value="">— select a stopped run —</option>';
+  let runs = [];
+  try {
+    runs = await (await fetch(url)).json();
+  } catch (e) {
+    return runs;
+  }
+  picker.innerHTML = `<option value="">${placeholder}</option>`;
   runs.forEach(r => {
     const opt = document.createElement('option');
     opt.value = r; opt.textContent = r;
     picker.appendChild(opt);
   });
   if (current && runs.includes(current)) picker.value = current;
-  else loadResumeStatus('');
+  return runs;
+}
+
+async function refreshResumePicker() {
+  await fillPicker('/runs_with_prompts', 'resumePicker', '— select a stopped run —');
+  if (!document.getElementById('resumePicker').value) loadResumeStatus('');
 }
 
 async function loadResumeStatus(run) {
@@ -1490,36 +1499,15 @@ async function loadResumeStatus(run) {
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-const STAGES = ['research', 'script', 'images', 'voice', 'qa', 'timeline'];
-const STAGE_ORDER = { research: 0, script: 1, images: 2, voice: 3, qa: 4, timeline: 5 };
-
-// Keywords that map log messages to stages
-const STAGE_KEYWORDS = {
-  research: ['researching', 'research complete', 'starting pipeline', 'output directory', 'style anchor', 'api keys', 'missing api'],
-  script:   ['writing script', 'script written', 'image prompts parsed', 'script ready', '📝'],
-  images:   ['generating image', 'images generated', 'fal.ai', 'sending request'],
-  voice:    ['generating voiceover', 'voiceover generated', 'voiceover failed', '🎙'],
-  qa:       ['qa reviewing', 'starting qa', 'regenerating', 'qa complete', '🔍', '🔄'],
-  timeline: ['fcpxml', 'pipeline complete', 'pipeline finished', '🎬', '╔', '╚'],
-};
+const STAGES = ['research', 'script', 'images', 'voice', 'timeline'];
+const STAGE_ORDER = { research: 0, script: 1, images: 2, voice: 3, timeline: 4 };
 
 let currentStage = null;
-let stageStartTimes = {};
 let logSections = {}; // stage -> DOM element
 let running = false;
 let eventSource = null;
 
 // ── Stage tracker ─────────────────────────────────────────────────────────
-
-function detectStage(msg) {
-  const lower = msg.toLowerCase();
-  for (const [stage, keywords] of Object.entries(STAGE_KEYWORDS)) {
-    for (const kw of keywords) {
-      if (lower.includes(kw.toLowerCase())) return stage;
-    }
-  }
-  return null;
-}
 
 function activateStage(stage) {
   if (!stage || stage === currentStage) return;
@@ -1547,8 +1535,6 @@ function activateStage(stage) {
   // Ensure log section exists and is open
   ensureLogSection(stage);
   openLogSection(stage);
-
-  stageStartTimes[stage] = Date.now();
 }
 
 function completeAllStages() {
@@ -1574,7 +1560,6 @@ function resetStages() {
     }
   });
   currentStage = null;
-  stageStartTimes = {};
 }
 
 // ── Log sections ──────────────────────────────────────────────────────────
@@ -1582,8 +1567,7 @@ function resetStages() {
 const STAGE_LABELS = {
   research: 'Research', script: 'Script',
   images:   'Images',   voice:  'Voice',
-  qa:       'QA',       timeline: 'Timeline',
-  metadata: 'Metadata',
+  timeline: 'Timeline', metadata: 'Metadata',
 };
 
 function ensureLogSection(stage) {
@@ -1722,13 +1706,7 @@ async function runPipeline() {
   }
 
   // Open SSE stream
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource('/stream');
-
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    handleEvent(event);
-  };
+  openStream(handleEvent);
   eventSource.onerror = () => {
     if (running) {
       addLogLine(currentStage, '⚠️  Stream disconnected');
@@ -1737,16 +1715,24 @@ async function runPipeline() {
   };
 }
 
+function openStream(onMessage) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+  eventSource.onmessage = (e) => onMessage(JSON.parse(e.data));
+  return eventSource;
+}
+
 function handleEvent(event) {
   if (event.type === 'ping') return;
 
   if (event.type === 'log') {
-    const stage = event.stage || detectStage(event.msg) || currentStage;
+    const stage = event.stage || currentStage;
     if (stage) activateStage(stage);
     addLogLine(stage, event.msg);
   }
 
   else if (event.type === 'review') {
+    _activeReviewSlug = event.run_slug || null;
     showReviewPanel(event.script);
     addLogLine(currentStage, '📋 Script ready for review');
   }
@@ -1811,9 +1797,7 @@ async function startMetadataRun(slug, regenerate) {
     return;
   }
 
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource('/stream');
-  eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
+  openStream(handleEvent);
   eventSource.onerror = () => {
     if (running) {
       addLogLine('metadata', '⚠️  Stream disconnected');
@@ -1869,7 +1853,7 @@ async function approveScript() {
   await fetch('/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script }),
+    body: JSON.stringify({ script, run_slug: _activeReviewSlug }),
   });
   addLogLine('script', '✅ Script approved — starting production…');
 }
@@ -1879,8 +1863,8 @@ async function reviseScript() {
   const feedback = document.getElementById('reviewFeedback').value.trim();
   if (!feedback) { document.getElementById('reviewFeedback').focus(); return; }
 
-  const topic = document.getElementById('topicInput').value.trim()
-             || document.getElementById('slugInput').value.trim();
+  const topic   = document.getElementById('topicInput').value.trim();
+  const profile = document.getElementById('profileSelect').value;
 
   const btn = document.getElementById('reviseBtn');
   btn.disabled = true;
@@ -1889,7 +1873,7 @@ async function reviseScript() {
   const res  = await fetch('/revise', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script, feedback, topic }),
+    body: JSON.stringify({ script, feedback, topic, profile }),
   });
   const data = await res.json();
 
@@ -1916,6 +1900,8 @@ async function rejectScript() {
 let _planningTopic = '';
 let _planningAnswers = '';
 let _selectedApproach = '';
+let _approachPitchesText = '';
+let _activeReviewSlug = null;
 
 let _parsedQuestions = [];
 
@@ -2031,6 +2017,7 @@ async function showApproachPitches() {
     const data = await res.json();
     if (data.ok) {
       aContent.textContent = data.pitches;
+      _approachPitchesText = data.pitches;
 
       const btnContainer = document.getElementById('approachSelectionBtns');
       btnContainer.innerHTML = `
@@ -2071,7 +2058,7 @@ async function continuePipelineExecution() {
   const payload = {
     topic,
     profile,
-    approach_context: _planningAnswers
+    approach_context: `${_planningAnswers}\n\nApproach pitches:\n${_approachPitchesText}\n\nUser chose ${_selectedApproach}.`
   };
 
   running = true;
@@ -2093,13 +2080,7 @@ async function continuePipelineExecution() {
     return;
   }
 
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource('/stream');
-
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    handleEvent(event);
-  };
+  openStream(handleEvent);
   eventSource.onerror = () => {
     if (running) {
       addLogLine(null, '❌ Connection lost');
@@ -2123,17 +2104,7 @@ function switchTab(name) {
 }
 
 async function refreshScripts() {
-  const res = await fetch('/runs_with_scripts');
-  const runs = await res.json();
-  const picker = document.getElementById('scriptPicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) picker.value = current;
+  await fillPicker('/runs_with_scripts', 'scriptPicker', '— select run —');
 }
 
 async function loadScriptIntoViewer(run) {
@@ -2154,6 +2125,7 @@ async function loadScriptIntoViewer(run) {
 function loadIntoReviewPanel() {
   const text = document.getElementById('scriptViewer').value;
   if (!text.trim()) return;
+  _activeReviewSlug = document.getElementById('scriptPicker').value || null;
   showReviewPanel(text);
 }
 
@@ -2171,17 +2143,7 @@ async function saveScriptEdits() {
 }
 
 async function refreshRuns() {
-  const res = await fetch('/runs');
-  const runs = await res.json();
-  const picker = document.getElementById('runPicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) picker.value = current;
+  await fillPicker('/runs', 'runPicker', '— select run —');
 }
 
 async function loadRunFiles(run) {
@@ -2200,11 +2162,6 @@ let gallerySelected        = new Set();
 let galleryNums            = [];
 let galleryPrompts         = {};
 let galleryScriptSections = { sections: [], visualSectionMap: {} };
-
-function _tsToSeconds(ts) {
-  const [m, s] = ts.split(':').map(Number);
-  return m * 60 + s;
-}
 
 function parseScriptSections(text) {
   // Returns { sections: [{title, lines}], visualSectionMap: {promptNum(1-based index) -> sectionIndex} }
@@ -2253,17 +2210,7 @@ function findScriptSection(imageNum) {
 let lightboxIdx     = 0;
 
 async function refreshImagePicker() {
-  const res  = await fetch('/runs');
-  const runs = await res.json();
-  const picker = document.getElementById('imagePicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) picker.value = current;
+  await fillPicker('/runs', 'imagePicker', '— select run —');
 }
 
 async function openGallery() {
@@ -2312,7 +2259,7 @@ function makeImgCard(num) {
   card.id = `img-card-${num}`;
   card.dataset.num = num;
 
-  const src = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
+  const src = `/image/${encodeURIComponent(galleryRun)}/${num}`;
   card.innerHTML = `
     <img class="img-card-thumb" src="${src}" alt="${num}" loading="lazy">
     <button class="img-card-regen" onclick="regenOne(event, '${num}')">Regen</button>
@@ -2363,7 +2310,7 @@ function renderLightbox() {
   const num     = galleryNums[lightboxIdx];
   const total   = galleryNums.length;
   const meta    = galleryPrompts[num] || {};
-  const src     = `/image/${encodeURIComponent(galleryRun)}/${num}?t=${Date.now()}`;
+  const src     = `/image/${encodeURIComponent(galleryRun)}/${num}`;
 
   const section = findScriptSection(num);
   document.getElementById('lightboxNum').textContent        = `Image ${num}`;
@@ -2438,10 +2385,7 @@ async function triggerRegen(nums, model) {
   }
 
   // Listen on the stream for completion
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource('/stream');
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
+  openStream((event) => {
     if (event.type === 'log') {
       setGalleryStatus(event.msg);
       addLogLine('images', event.msg);
@@ -2462,27 +2406,14 @@ async function triggerRegen(nums, model) {
       updateSelCount();
       setGalleryStatus(`✅ Done — ${event.nums.length} image(s) regenerated`);
     }
-  };
+  });
 }
 
 // ── Voice player ─────────────────────────────────────────────────────────
 
 async function refreshVoicePicker() {
-  const res  = await fetch('/runs_with_audio');
-  const runs = await res.json();
-  const picker = document.getElementById('voicePicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) {
-    picker.value = current;
-  } else {
-    loadVoiceover('');
-  }
+  await fillPicker('/runs_with_audio', 'voicePicker', '— select run —');
+  if (!document.getElementById('voicePicker').value) loadVoiceover('');
 }
 
 function loadVoiceover(run) {
@@ -2506,17 +2437,7 @@ function loadVoiceover(run) {
 }
 
 async function refreshAudioRegenPicker() {
-  const res  = await fetch('/runs');
-  const runs = await res.json();
-  const picker = document.getElementById('audioRegenPicker');
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— select run —</option>';
-  runs.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r; opt.textContent = r;
-    picker.appendChild(opt);
-  });
-  if (current && runs.includes(current)) picker.value = current;
+  await fillPicker('/runs', 'audioRegenPicker', '— select run —');
 }
 
 async function regenAudio() {
@@ -2543,10 +2464,7 @@ async function regenAudio() {
   }
 
   // Listen on SSE stream for completion
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource('/stream');
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
+  openStream((event) => {
     if (event.type === 'log') {
       status.textContent = event.msg;
       addLogLine('voice', event.msg);
@@ -2560,7 +2478,7 @@ async function regenAudio() {
       const picker = document.getElementById('voicePicker');
       if (picker.value === event.run_slug) loadVoiceover(event.run_slug);
     }
-  };
+  });
 }
 
 // ── Profiles ──────────────────────────────────────────────────────────────
@@ -2612,23 +2530,7 @@ function getMetadataSlug() {
 }
 
 async function populateRunPicker() {
-  const picker = document.getElementById('metadataRunPicker');
-  if (!picker) return;
-  const current = picker.value;
-  try {
-    const res = await fetch('/runs_with_scripts');
-    const runs = await res.json();
-    picker.innerHTML = '<option value="">— select a run —</option>';
-    runs.forEach(slug => {
-      const opt = document.createElement('option');
-      opt.value = slug;
-      opt.textContent = slug;
-      picker.appendChild(opt);
-    });
-    if (current && runs.includes(current)) picker.value = current;
-  } catch (e) {
-    // Leave placeholder if the fetch fails.
-  }
+  await fillPicker('/runs_with_scripts', 'metadataRunPicker', '— select a run —');
 }
 
 async function loadMetadata() {

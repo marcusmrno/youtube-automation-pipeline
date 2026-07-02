@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Test script → image_prompts generation without generating any images.
+Preview script → image_prompts generation without generating any images.
 
 Usage:
-    python test_prompts.py <script.txt> [--profile <profile_name>] [--out <output_dir>]
+    python preview_prompts.py <script.txt> [--profile <profile_name>] [--out <output_dir>]
 
 Examples:
-    python test_prompts.py ../old-outputs/every-essential-vitamin-explained/script.txt
-    python test_prompts.py my_script.txt --profile cat-educational-v2
-    python test_prompts.py my_script.txt --out /tmp/test_run
+    python preview_prompts.py ../old-outputs/every-essential-vitamin-explained/script.txt
+    python preview_prompts.py my_script.txt --profile cat-educational-v2
+    python preview_prompts.py my_script.txt --out /tmp/test_run
 """
 
 import argparse

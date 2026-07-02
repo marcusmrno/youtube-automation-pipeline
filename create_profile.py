@@ -10,19 +10,15 @@ import os
 import re
 import sys
 import argparse
-from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from profile import PROFILES_ROOT
 
-PROJECT_ROOT  = Path(__file__).parent
-PROFILES_ROOT = PROJECT_ROOT / "profiles"
+load_dotenv()
 
 ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 GOOGLE_KEY    = (os.getenv("GOOGLE_API_KEY") or "").strip()
-
-CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def check_env() -> None:
@@ -35,14 +31,6 @@ def check_env() -> None:
         print(f"✗ Missing required env vars: {', '.join(missing)}")
         print("  Check your .env file.")
         sys.exit(1)
-
-
-def next_version_name(base: str) -> str:
-    """Given 'my-channel' return 'my-channel-v2'; given 'my-channel-v2' return 'my-channel-v3'."""
-    m = re.match(r"^(.+)-v(\d+)$", base)
-    if m:
-        return f"{m.group(1)}-v{int(m.group(2)) + 1}"
-    return f"{base}-v2"
 
 
 def main() -> None:

@@ -1,11 +1,11 @@
 """Profile revision flow — creates a versioned copy of an existing profile."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sys
 import yaml
-from pathlib import Path
 
 import anthropic
 
@@ -15,12 +15,19 @@ from .claude_helpers import (
     generate_profile_content,
 )
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
-from create_profile import next_version_name
+from profile import PROFILES_ROOT
 
-PROFILES_ROOT = Path(__file__).parent.parent / "profiles"
-ANTHROPIC_KEY = __import__("os").getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 STYLE_SENSITIVE_KEYS = {"art_style_block"}
+
+
+def next_version_name(base: str) -> str:
+    """Given 'my-channel' return 'my-channel-v2'; given 'my-channel-v2' return 'my-channel-v3'."""
+    m = re.match(r"^(.+)-v(\d+)$", base)
+    if m:
+        return f"{m.group(1)}-v{int(m.group(2)) + 1}"
+    return f"{base}-v2"
 
 
 def _style_changed(old_yaml: dict, new_yaml: dict) -> bool:
@@ -118,10 +125,6 @@ def run_revise(profile_name: str) -> None:
             shutil.copytree(src_anchors, anchors_dir, dirs_exist_ok=True)
             print(f"  Copied anchors from '{profile_name}'")
         result = {"ok": [], "failed": []}
-
-    (v2_dir / "profile.yaml").write_text(
-        yaml.dump(new_yaml, default_flow_style=False, allow_unicode=True)
-    )
 
     print("\n" + "-" * 60)
     print(f"  Profile '{v2_name}' created at {v2_dir}")

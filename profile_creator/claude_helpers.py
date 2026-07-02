@@ -6,9 +6,11 @@ from pathlib import Path
 
 import anthropic
 
+MODEL = "claude-sonnet-4-6"
+
 # Load the cat-educational profile as a concrete example for the system prompt
-_EXAMPLE_PROFILE_PATH = Path(__file__).parent / "profiles" / "cat-educational" / "profile.yaml"
-_EXAMPLE_STYLE_PATH   = Path(__file__).parent / "profiles" / "cat-educational" / "style-sheet.md"
+_EXAMPLE_PROFILE_PATH = Path(__file__).parent.parent / "profiles" / "cat-educational-v2" / "profile.yaml"
+_EXAMPLE_STYLE_PATH   = Path(__file__).parent.parent / "profiles" / "cat-educational-v2" / "style-sheet.md"
 
 SYSTEM_PROMPT_NEW = f"""You are a YouTube channel profile designer. Your job is to take a user's channel concept and produce a complete channel profile.
 
@@ -159,7 +161,7 @@ def clarification_loop(
     """Run multi-turn clarification until Claude outputs PROFILE_READY and user confirms summary."""
     while True:
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL,
             max_tokens=1024,
             system=system,
             messages=messages,
@@ -178,7 +180,7 @@ def clarification_loop(
                 ),
             })
             summary_response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model=MODEL,
                 max_tokens=1024,
                 system=system,
                 messages=messages,
@@ -221,7 +223,7 @@ def generate_profile_content(
     """
     messages.append({"role": "user", "content": "Generate the profile now."})
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=MODEL,
         max_tokens=8192,
         system=system,
         messages=messages,

@@ -76,16 +76,27 @@ Format as:
     return template
 
 
+def _word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
+    """wpm-derived word counts for a profile's script config.
+
+    Returns (target_words, min_words, max_words, hook_words, cta_words, section_min, section_max).
+    """
+    section_lo, section_hi = (int(x) for x in s["section_duration_s"].split("-"))
+    return (
+        s["target_mins"] * s["wpm"],
+        s["min_mins"] * s["wpm"],
+        s["max_mins"] * s["wpm"],
+        round(s["hook_duration_s"] / 60 * s["wpm"]),
+        round(s["cta_duration_s"] / 60 * s["wpm"]),
+        round(section_lo / 60 * s["wpm"]),
+        round(section_hi / 60 * s["wpm"]),
+    )
+
+
 def _build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words = s["target_mins"] * s["wpm"]
-    min_words    = s["min_mins"] * s["wpm"]
-    max_words    = s["max_mins"] * s["wpm"]
-    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
-    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
-    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
-    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+    target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = _word_budget(s)
 
     approach_section = ""
     if approach_context.strip():
@@ -416,12 +427,7 @@ One per line. Return ONLY the prompt lines. No explanation.
 def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words = s["target_mins"] * s["wpm"]
-    min_words    = s["min_mins"] * s["wpm"]
-    hook_words   = round(s["hook_duration_s"] / 60 * s["wpm"])
-    cta_words    = round(s["cta_duration_s"] / 60 * s["wpm"])
-    section_min  = round(int(s["section_duration_s"].split("-")[0]) / 60 * s["wpm"])
-    section_max  = round(int(s["section_duration_s"].split("-")[1]) / 60 * s["wpm"])
+    target_words, min_words, _, hook_words, cta_words, section_min, section_max = _word_budget(s)
 
     char_names = " / ".join(ch["name"] for ch in profile.characters)
     char_block = profile.characters_block()
@@ -516,8 +522,7 @@ Return the finished script in this exact format — nothing after it:
 
 def _build_vet_prompt(profile: "Profile") -> str:
     s = profile.script
-    target_words = s["target_mins"] * s["wpm"]
-    min_words    = s["min_mins"] * s["wpm"]
+    target_words, min_words, *_ = _word_budget(s)
 
     return f"""
 You are vetting a YouTube video script for accuracy, SEO strength, and hook power.

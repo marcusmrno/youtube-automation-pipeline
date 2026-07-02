@@ -8,6 +8,7 @@ from pathlib import Path
 from pipeline import (
     generate_image_google, _load_anchors_from_dir, ANCHOR_PREAMBLE,
 )
+from .claude_helpers import MODEL
 
 
 def _generate_anchor(prompt: str, output_path: Path, profile_yaml: dict, anchors_dir: Path) -> bool:
@@ -217,8 +218,8 @@ def generate_anchor_prompts(
     profile_yaml: dict,
     style_sheet: str,
     plan: list[dict],
-) -> list[str]:
-    """Ask Claude to write one targeted prompt per anchor slot. Returns list of prompt strings.
+) -> dict[str, str]:
+    """Ask Claude to write one targeted prompt per anchor slot. Returns {label: prompt}.
 
     Respects image_style.max_anchors — verification slots fill the budget first,
     then full-tier slots fill the remainder in order.
@@ -259,35 +260,37 @@ anchor-02: [full prompt]
 """
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=MODEL,
         max_tokens=8192,
         system=ANCHOR_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
     raw = response.content[0].text
 
-    prompts = []
+    prompts = {}
     for line in raw.splitlines():
-        m = re.match(r"anchor-\d+:\s*(.+)", line.strip())
+        m = re.match(r"(anchor-\d+):\s*(.+)", line.strip())
         if m:
-            prompts.append(m.group(1).strip())
+            prompts[m.group(1)] = m.group(2).strip()
+    missing = [slot["label"] for slot in plan if slot["label"] not in prompts]
+    if missing:
+        print(f"  ⚠️  Model didn't return prompts for: {', '.join(missing)} — will use generic fallback")
     return prompts, plan
 
 
 def run_verification_anchors(
     profile_yaml: dict,
     anchors_dir: Path,
-    prompts: list[str],
+    prompts: dict[str, str],
     plan: list[dict],
-) -> bool:
+) -> None:
     """Generate all verification-tier anchors. Pause for user approval before continuing."""
     anchors_dir.mkdir(parents=True, exist_ok=True)
     verification_slots = [s for s in plan if s["tier"] == "verification"]
     failed = []
 
     for slot in verification_slots:
-        idx = int(re.search(r"\d+", slot["label"]).group()) - 1
-        prompt = prompts[idx] if idx < len(prompts) else f"flat 2D scene for {slot['label']}"
+        prompt = prompts.get(slot["label"], f"flat 2D scene for {slot['label']}")
         out_path = anchors_dir / f"{slot['label']}.png"
         print(f"  ⏳  Generating {slot['label']} ({slot['purpose'][:60]}...)")
         ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
@@ -304,15 +307,13 @@ def run_verification_anchors(
     print()
     print("Open them and check the character designs and style look right.")
     input("Press Enter to generate remaining anchors, or Ctrl+C to abort: ")
-    return True
 
 
 def run_full_anchors(
     profile_yaml: dict,
     anchors_dir: Path,
-    prompts: list[str],
+    prompts: dict[str, str],
     plan: list[dict],
-    start_from: int = None,
 ) -> dict:
     """Generate all full-tier anchors, skipping any that already exist."""
     anchors_dir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +323,6 @@ def run_full_anchors(
 
     for slot in full_slots:
         label = slot["label"]
-        idx   = int(re.search(r"\d+", label).group()) - 1
 
         existing = list(anchors_dir.glob(f"{label}.*"))
         if existing:
@@ -330,7 +330,7 @@ def run_full_anchors(
             ok_list.append(label)
             continue
 
-        prompt   = prompts[idx] if idx < len(prompts) else f"flat 2D scene for {label}"
+        prompt   = prompts.get(label, f"flat 2D scene for {label}")
         out_path = anchors_dir / f"{label}.png"
         print(f"  ⏳  Generating {label} — {slot['purpose'][:60]}...")
         ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)

@@ -65,23 +65,15 @@ async def run_vidiq_agent(
     return full_text
 
 
-async def _run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:
+def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:
     system_prompt = _build_agent_system_prompt(topic, profile)
     user_prompt   = f"Topic: {topic}\n\n{_build_agent_script_prompt(profile, approach_context)}"
-    raw = await run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn)
+    raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn))
     return _extract("SCRIPT", raw)
-
-
-async def _run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
-    system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
-    user_prompt   = f"Topic: {topic}\n\n{_build_vet_prompt(profile)}"
-    raw = await run_vidiq_agent(system_prompt, user_prompt, max_turns=20, log_fn=log_fn, model=VET_MODEL)
-    return _extract("SCRIPT", raw)
-
-
-def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:
-    return asyncio.run(_run_script_agent(topic, profile, log_fn, approach_context))
 
 
 def run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
-    return asyncio.run(_run_vet_agent(topic, script, profile, log_fn))
+    system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
+    user_prompt   = f"Topic: {topic}\n\n{_build_vet_prompt(profile)}"
+    raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=20, log_fn=log_fn, model=VET_MODEL))
+    return _extract("SCRIPT", raw)

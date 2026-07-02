@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 import anthropic
 
-from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL, generate_image_google, _load_anchor_parts
+from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL, generate_image_google, _load_anchor_parts, _find_image
 from agents import run_vidiq_agent, VIDIQ_KEY
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
 
@@ -138,56 +138,50 @@ def _generate_titles(topic, script, research, keywords, profile, client, log_fn)
     return titles
 
 
-def _score_one_title(title: str, log_fn) -> dict:
-    """Call vidIQ to score a single title. Returns {'score': int, 'breakdown': dict}.
-
-    Raises on failure — caller (_score_titles) catches.
-    """
-    system = (
-        "You are a YouTube SEO assistant. Use the vidiq_score_title tool to "
-        "score the title. Return:\n"
-        "===SCORE===\n"
-        '{"score": <int 0-100>, "breakdown": <object from the tool>}\n'
-    )
-    user = f"Title: {title}\n\nScore this title. Return inside ===SCORE=== tags."
-    raw = _call_vidiq_agent(system, user, max_turns=6, log_fn=log_fn)
-    block = _extract("SCORE", raw)
-    if not block:
-        raise RuntimeError("vidIQ score response had no SCORE block")
-    parsed = json.loads(block)
-    return {"score": int(parsed["score"]), "breakdown": parsed.get("breakdown", {})}
-
-
 def _score_titles(titles: list[str], log_fn) -> list[dict]:
-    """Score every title via vidIQ in parallel. Returns one entry per input title in input order.
+    """Score every title via a single vidIQ agent session (one tool call per title).
 
-    Each entry: {"text": str, "score": int | None, "score_breakdown": dict}.
+    Returns one entry per input title in input order:
+    {"text": str, "score": int | None, "score_breakdown": dict}.
     """
     if not VIDIQ_KEY:
         log_fn("⚠️  vidIQ key not set — scores will be null")
         return [{"text": t, "score": None, "score_breakdown": {}} for t in titles]
 
-    log_fn(f"📊  Scoring {len(titles)} titles via vidIQ in parallel...")
-    results: list[dict | None] = [None] * len(titles)
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        futures = {
-            ex.submit(_score_one_title, t, log_fn): i
-            for i, t in enumerate(titles)
-        }
-        for fut in futures:
-            i = futures[fut]
-            try:
-                payload = fut.result()
-                results[i] = {
-                    "text": titles[i],
-                    "score": payload["score"],
-                    "score_breakdown": payload["breakdown"],
-                }
-            except Exception as e:
-                log_fn(f"⚠️  Score failed for '{titles[i]}': {e}")
-                results[i] = {"text": titles[i], "score": None, "score_breakdown": {}}
+    log_fn(f"📊  Scoring {len(titles)} titles via vidIQ...")
+    system = (
+        "You are a YouTube SEO assistant. For EACH title listed below, call the "
+        "vidiq_score_title tool exactly once. After scoring all of them, return:\n"
+        "===SCORES===\n"
+        '[{"title": <exact title text>, "score": <int 0-100>, "breakdown": <object from the tool>}, ...]\n'
+        "One array entry per title. If a tool call fails for a title, still include it "
+        'with "score": null and "breakdown": {}.'
+    )
+    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
+    user = f"Score these {len(titles)} titles:\n{numbered}\n\nReturn the JSON array inside ===SCORES=== tags."
+
+    by_title: dict[str, dict] = {}
+    try:
+        raw = _call_vidiq_agent(system, user, max_turns=len(titles) * 2 + 4, log_fn=log_fn)
+        block = _extract("SCORES", raw)
+        if not block:
+            raise RuntimeError("vidIQ scores response had no SCORES block")
+        for entry in json.loads(block):
+            by_title[entry["title"]] = entry
+    except Exception as e:
+        log_fn(f"⚠️  Title scoring failed: {e}")
+
+    results = []
+    for t in titles:
+        entry = by_title.get(t)
+        score = entry.get("score") if entry else None
+        results.append({
+            "text": t,
+            "score": int(score) if score is not None else None,
+            "score_breakdown": (entry or {}).get("breakdown", {}),
+        })
     log_fn("✅  Scoring complete")
-    return [r for r in results if r is not None]  # type narrow
+    return results
 
 
 def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn) -> dict:
@@ -246,15 +240,14 @@ def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[
     raise ValueError("thumbnail prompt generation failed twice — aborting metadata run")
 
 
-def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> list[dict]:
-    """Render each thumbnail serially. Returns one entry per input with filename and any error."""
+def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn, max_workers: int = 3) -> list[dict]:
+    """Render thumbnails concurrently. Returns one entry per input with filename and any error, in input order."""
     thumb_dir = run_dir / "thumbnails"
     thumb_dir.mkdir(exist_ok=True)
     anchor_parts = _load_anchor_parts(profile)
     model = profile.image_gen.get("pro_model") or profile.image_gen["default_model"]
 
-    out: list[dict] = []
-    for i, p in enumerate(prompts, start=1):
+    def _one(i: int, p: dict) -> dict:
         stem = f"thumb-{i:02d}"
         # Requested filename — generate_image_google may swap the extension to
         # .jpg when Google AI returns a JPEG mime, so we read the real path back
@@ -269,20 +262,16 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn) -> l
             )
         except Exception as e:
             log_fn(f"❌  Thumbnail {i} raised: {e}")
-            out.append({**p, "filename": requested_filename, "render_error": str(e)})
-            continue
+            return {**p, "filename": requested_filename, "render_error": str(e)}
         if not ok:
-            out.append({**p, "filename": requested_filename, "render_error": "generator returned False"})
-            continue
-        actual = next(
-            (q for q in (thumb_dir / f"{stem}.png", thumb_dir / f"{stem}.jpg", thumb_dir / f"{stem}.jpeg") if q.exists()),
-            None,
-        )
+            return {**p, "filename": requested_filename, "render_error": "generator returned False"}
+        actual = _find_image(thumb_dir, stem)
         if actual is None:
-            out.append({**p, "filename": requested_filename, "render_error": "rendered file missing on disk"})
-            continue
-        out.append({**p, "filename": f"thumbnails/{actual.name}"})
-    return out
+            return {**p, "filename": requested_filename, "render_error": "rendered file missing on disk"}
+        return {**p, "filename": f"thumbnails/{actual.name}"}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        return list(ex.map(lambda args: _one(*args), enumerate(prompts, start=1)))
 
 
 def _read_run_inputs(run_slug: str) -> tuple[str, str, str]:
@@ -354,14 +343,10 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
         "description": desc_block["description"],
         "hashtags": desc_block["hashtags"],
         "thumbnails": thumbs_with_idx,
-        "chosen_thumbnail_index": 0,
+        "chosen_thumbnail_index": next(
+            (i for i, t in enumerate(thumbs_with_idx) if "render_error" not in t), 0
+        ),
     }
-
-    # If chosen index 0 has render_error, find first non-errored
-    for i, t in enumerate(thumbs_with_idx):
-        if "render_error" not in t:
-            data["chosen_thumbnail_index"] = i
-            break
 
     _save_metadata(run_dir, data)
 

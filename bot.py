@@ -23,9 +23,10 @@ from telegram.ext import (
     filters,
 )
 
+import functools
+
 import anthropic
 import metadata as _metadata_mod
-import pipeline
 from pipeline import (
     OUTPUT_ROOT,
     ANTHROPIC_KEY,
@@ -48,7 +49,6 @@ _state: dict = {
     "running":           False,
     "run_slug":          None,
     "stop_event":        None,
-    "loop":              None,
     "approval_event":    None,
     "approval_result":   None,
     "revision_mode":     False,
@@ -57,8 +57,7 @@ _state: dict = {
     "clarifying_questions": None, # parsed list of {question, default} dicts
     "approach_pitches":  None,    # raw pitches text for context storage
     "approach_answers":  None,    # user's answers to clarifying questions
-    "chat_id":           None,
-    "log_queue":         None,
+    "log_queue":         None,    # identity guard so a stale worker can't clear a newer run's "running" flag
     "total_images":      0,
     "done_images":       0,
     "milestone_sent":    set(),
@@ -69,11 +68,11 @@ _state: dict = {
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 def auth(func):
+    @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.effective_user or update.effective_user.id != ALLOWED_USER_ID:
             return
         return await func(update, context)
-    wrapper.__name__ = func.__name__
     return wrapper
 
 
@@ -106,11 +105,11 @@ def _check_milestone(msg: str) -> int | None:
     if total == 0:
         return None
     pct = int(done / total * 100)
-    for milestone in (25, 50, 75, 100):
-        if pct >= milestone and milestone not in _state["milestone_sent"]:
-            _state["milestone_sent"].add(milestone)
-            return milestone
-    return None
+    crossed = [m for m in (25, 50, 75, 100) if pct >= m and m not in _state["milestone_sent"]]
+    if not crossed:
+        return None
+    _state["milestone_sent"].update(crossed)
+    return max(crossed)
 
 
 # ── Script review ──────────────────────────────────────────────────────────────
@@ -150,10 +149,17 @@ def _make_approval_callback(bot, chat_id: int, loop: asyncio.AbstractEventLoop):
         _state["approval_event"]  = evt
         _state["approval_result"] = None
 
-        asyncio.run_coroutine_threadsafe(
+        def _on_send_done(fut):
+            # e.g. Markdown parse error on the script text — don't hang the worker forever
+            if fut.exception() is not None:
+                _state["approval_result"] = False
+                evt.set()
+
+        future = asyncio.run_coroutine_threadsafe(
             _send_script_for_review(bot, chat_id, script_text),
             loop,
         )
+        future.add_done_callback(_on_send_done)
         evt.wait()
         return bool(_state["approval_result"])
     return approval_callback
@@ -198,7 +204,8 @@ async def _relay_and_finish(app: Application, chat_id: int, lq: queue.Queue) -> 
         elif etype == "done":
             break
 
-    _state["running"] = False
+    if _state.get("log_queue") is lq:
+        _state["running"] = False
 
     if complete_result:
         await _deliver_completion(app, chat_id, complete_result)
@@ -260,13 +267,11 @@ def _parse_clarifying_questions(text: str) -> list[dict]:
 
 async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str) -> None:
     chat_id = update.effective_chat.id
-    available = list_profiles()
-    if not available:
-        await update.message.reply_text("❌ No profiles found.")
+    try:
+        profile, _ = _resolve_profile_for_bot()
+    except RuntimeError as e:
+        await update.message.reply_text(f"❌ {e}")
         return
-
-    profile_name = _state["profile_name"] or available[0]
-    profile = load_profile(profile_name)
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     await update.message.reply_text(f"🤔 Thinking about your topic: *{topic}*…", parse_mode="Markdown")
@@ -302,10 +307,12 @@ async def _send_approach_pitches(update: Update, context: ContextTypes.DEFAULT_T
     chat_id = update.effective_chat.id
     topic   = _state["clarifying_topic"]
 
-    available    = list_profiles()
-    profile_name = _state["profile_name"] or available[0]
-    profile      = load_profile(profile_name)
-    client       = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    try:
+        profile, _ = _resolve_profile_for_bot()
+    except RuntimeError as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ {e}")
+        return
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
     await context.bot.send_message(chat_id=chat_id, text="💡 Pitching approaches…")
 
@@ -410,7 +417,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("💤 No pipeline running. No output folder yet.")
         return
 
-    dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
+    dirs = _run_dirs()
     if not dirs:
         await update.message.reply_text("💤 No pipeline running.")
         return
@@ -432,7 +439,7 @@ async def cmd_runs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not OUTPUT_ROOT.exists():
         await update.message.reply_text("No output folder yet.")
         return
-    dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
+    dirs = _run_dirs()
     if not dirs:
         await update.message.reply_text("No runs found.")
         return
@@ -448,23 +455,30 @@ async def cmd_runs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+def _run_dirs() -> list[str]:
+    """Run slugs, most recently modified first."""
+    if not OUTPUT_ROOT.exists():
+        return []
+    dirs = [d for d in OUTPUT_ROOT.iterdir() if d.is_dir()]
+    dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    return [d.name for d in dirs]
+
+
 def _resolve_run_slug(arg: str | None) -> str | None:
     if arg and arg != "regenerate":
         return arg.strip()
-    if not OUTPUT_ROOT.exists():
-        return None
-    dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
+    dirs = _run_dirs()
     return dirs[0] if dirs else None
 
 
 def _resolve_profile_for_bot():
     name = _state.get("profile_name")
     available = list_profiles()
-    if name and name in available:
-        return load_profile(name)
-    if available:
-        return load_profile(available[0])
-    raise RuntimeError("No profiles available")
+    if not (name and name in available):
+        name = available[0] if available else None
+    if not name:
+        raise RuntimeError("No profiles available")
+    return load_profile(name), name
 
 
 async def _send_metadata_view(chat, data, run_slug):
@@ -544,7 +558,7 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"📦 Generating metadata for `{slug}`…", parse_mode="Markdown")
     try:
-        profile = _resolve_profile_for_bot()
+        profile, _ = _resolve_profile_for_bot()
     except Exception as e:
         await update.message.reply_text(f"❌ {e}")
         return
@@ -583,13 +597,7 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @auth
 async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Resolve slug: explicit arg, or most recent run
-    if context.args:
-        slug = context.args[0].strip()
-    elif OUTPUT_ROOT.exists():
-        dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
-        slug = dirs[0] if dirs else None
-    else:
-        slug = None
+    slug = _resolve_run_slug(context.args[0].strip() if context.args else None)
 
     if not slug:
         await update.message.reply_text("Usage: /download <slug>  (or omit for the latest run)")
@@ -680,7 +688,7 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if not OUTPUT_ROOT.exists():
             await update.message.reply_text("No runs found.")
             return
-        dirs = sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True)
+        dirs = _run_dirs()
         incomplete = []
         for slug in dirs[:10]:
             s = run_status(slug)
@@ -813,13 +821,15 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _state["approach_pitches"]     = None
             await query.message.reply_text("❌ Pipeline planning cancelled.")
             return
-        approach_context = _state.get("approach_answers") or ""
-        topic            = _state["clarifying_topic"]
+        answers = _state.get("approach_answers") or ""
+        pitches = _state.get("approach_pitches") or ""
+        topic   = _state["clarifying_topic"]
+        approach_context = f"{answers}\n\nApproach pitches:\n{pitches}\n\nUser chose Approach {choice}."
         _state["clarifying_topic"]  = None
         _state["approach_answers"]  = None
         _state["approach_pitches"]  = None
         await query.message.reply_text(f"✅ Approach {choice} selected — starting pipeline…")
-        await _start_pipeline(query, context, topic=topic, approach_context=approach_context)
+        await _start_pipeline(update, context, topic=topic, approach_context=approach_context)
         return
 
     if data.startswith("profile:"):
@@ -951,7 +961,7 @@ def main() -> None:
     if not ALLOWED_USER_ID:
         raise RuntimeError("TELEGRAM_USER_ID not set in .env")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
 
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("help",     cmd_start))

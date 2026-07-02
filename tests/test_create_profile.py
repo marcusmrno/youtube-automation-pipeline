@@ -6,7 +6,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from create_profile import next_version_name
+from profile_creator.revise import next_version_name
 from profile_creator.claude_helpers import extract_fenced_block
 from profile_creator.anchors import run_full_anchors
 
@@ -53,7 +53,7 @@ def test_run_full_anchors_skips_existing(tmp_path):
         "image_gen": {"default_model": "gemini-3.1-flash-image"},
         "image_style": {"max_anchors": 14},
     }
-    prompts = ["prompt1", "prompt2", "prompt3"]
+    prompts = {"anchor-01": "prompt1", "anchor-02": "prompt2", "anchor-03": "prompt3"}
     plan = [
         {"label": "anchor-01", "tier": "full", "purpose": "test slot 1"},
         {"label": "anchor-02", "tier": "full", "purpose": "test slot 2"},
@@ -125,7 +125,7 @@ image_gen:
 
 def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     import profile_creator.revise as m
-    from create_profile import next_version_name
+    from profile_creator.revise import next_version_name
 
     src_dir = tmp_path / "my-channel"
     src_dir.mkdir()

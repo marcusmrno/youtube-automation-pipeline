@@ -209,12 +209,13 @@ def test_score_titles_per_title_failure_is_null(monkeypatch):
     import metadata
     monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
 
-    def score(title, log_fn):
-        if title == "fail":
-            raise RuntimeError("nope")
-        return {"score": 80, "breakdown": {"ctr": 7.0}}
+    def fake_call(system, user, max_turns, log_fn):
+        # Agent silently drops "fail" from its response — simulates a per-title tool failure.
+        return ('===SCORES===\n'
+                '[{"title": "ok", "score": 80, "breakdown": {"ctr": 7.0}}, '
+                '{"title": "ok2", "score": 80, "breakdown": {"ctr": 7.0}}]')
 
-    monkeypatch.setattr(metadata, "_score_one_title", score)
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", fake_call)
     result = metadata._score_titles(["ok", "fail", "ok2"], lambda _: None)
     assert result[0] == {"text": "ok", "score": 80, "score_breakdown": {"ctr": 7.0}}
     assert result[1]["text"] == "fail" and result[1]["score"] is None
@@ -224,11 +225,15 @@ def test_score_titles_per_title_failure_is_null(monkeypatch):
 def test_score_titles_preserves_input_order(monkeypatch):
     import metadata
     monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
-    scores_by_title = {"x": 50, "y": 70, "z": 60}
-    monkeypatch.setattr(
-        metadata, "_score_one_title",
-        lambda t, log_fn: {"score": scores_by_title[t], "breakdown": {}},
-    )
+
+    def fake_call(system, user, max_turns, log_fn):
+        # Agent returns entries out of order — output must still match input order.
+        return ('===SCORES===\n'
+                '[{"title": "z", "score": 60, "breakdown": {}}, '
+                '{"title": "x", "score": 50, "breakdown": {}}, '
+                '{"title": "y", "score": 70, "breakdown": {}}]')
+
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", fake_call)
     result = metadata._score_titles(["x", "y", "z"], lambda _: None)
     assert [r["text"] for r in result] == ["x", "y", "z"]
     assert [r["score"] for r in result] == [50, 70, 60]
@@ -366,10 +371,8 @@ def test_render_thumbnails_all_succeed(tmp_path, monkeypatch):
 def test_render_thumbnails_middle_fails(tmp_path, monkeypatch):
     import metadata
 
-    call_idx = {"n": 0}
     def fake_gen(prompt, output_path, profile, log_fn, model=None, anchor_parts=None):
-        call_idx["n"] += 1
-        if call_idx["n"] == 2:
+        if prompt == "p2":
             return False
         output_path.write_bytes(b"PNGDATA")
         return True
@@ -398,10 +401,8 @@ def test_render_thumbnails_middle_fails(tmp_path, monkeypatch):
 def test_render_thumbnails_exception_raised(tmp_path, monkeypatch):
     import metadata
 
-    call_idx = {"n": 0}
     def fake_gen(prompt, output_path, profile, log_fn, model=None, anchor_parts=None):
-        call_idx["n"] += 1
-        if call_idx["n"] == 2:
+        if prompt == "p2":
             raise RuntimeError("kaboom")
         output_path.write_bytes(b"PNGDATA")
         return True

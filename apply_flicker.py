@@ -193,17 +193,23 @@ def apply_flicker(interval_frames: int, dry_run: bool = False) -> None:
     flicker_label = new_labels[0]
     flicker_idx = find_track_by_label(post, flicker_label)
 
+    # Write the snapshot as soon as the track is known so a mid-loop failure
+    # (network error, Palmier timeout) still leaves --undo able to clean up.
+    # ponytail: the narrower window before this point (add succeeds but track
+    # detection above fails) still orphans the first batch with no snapshot —
+    # add a pre-add snapshot or a clip-id-based cleanup if that gets hit in practice.
+    SNAPSHOT_PATH.write_text(json.dumps({
+        "flicker_track_label": flicker_label,
+        "interval": interval_frames,
+        "segments": len(segments),
+    }, indent=2))
+
     for i in range(ADD_BATCH_SIZE, len(segments), ADD_BATCH_SIZE):
         batch = segments[i: i + ADD_BATCH_SIZE]
         for entry in batch:
             entry["trackIndex"] = flicker_idx
         call_tool("add_clips", {"entries": batch})
         print(f"  added {min(i + ADD_BATCH_SIZE, len(segments))}/{len(segments)}")
-    SNAPSHOT_PATH.write_text(json.dumps({
-        "flicker_track_label": flicker_label,
-        "interval": interval_frames,
-        "segments": len(segments),
-    }, indent=2))
 
     print(f"\nFlicker layer created on track '{flicker_label}'.")
     print(f"Run 'python apply_flicker.py --undo' to remove it.")

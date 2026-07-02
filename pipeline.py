@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import functools
 import json
+import mimetypes
 import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import anthropic
@@ -19,7 +21,7 @@ import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
-from PIL import Image
+from PIL import Image, ImageOps
 
 from agents import run_script_agent, run_vet_agent
 from prompts import (
@@ -43,7 +45,6 @@ OUTPUT_ROOT     = PROJECT_ROOT / "output"
 
 ANTHROPIC_KEY   = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
-EL_VOICE_ID     = (os.getenv("ELEVENLABS_VOICE_ID") or "").strip()
 VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 
@@ -53,10 +54,6 @@ EL_MODEL      = "eleven_v3"
 GOOGLE_MODEL  = "gemini-3.1-flash-image"   # bulk generation + regen
 GOOGLE_PRO_MODEL = "gemini-3-pro-image"    # highest quality, slowest
 
-GOOGLE_MODEL_OPTIONS = {
-    "nano-banana-2": GOOGLE_MODEL,
-    "3-pro":         GOOGLE_PRO_MODEL,
-}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -275,9 +272,6 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
             base_instructions
             + f"\nSCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
             f"NUMBERING: {numbering}\n"
-            f"TARGET DENSITY: one image every 3–4 seconds — roughly 15+ prompts per minute of narration. A 14-minute script needs ~210+ prompts. If you finish a batch with fewer than 15 prompts per minute, you are combining too many sentences — go back and split them. "
-            f"Every sentence gets its own image, including transition sentences. Never combine two sentences into one prompt. A sentence listing multiple items (A, B, and C) must be split into one prompt per item. "
-            f"Transition phrases like 'Now the opposite kind.', 'The team continues.', 'So back to that opening promise.', 'Remember X' each get their own prompt. "
             f"Timestamps are 3–4 seconds each, never more than 5. Verify timestamps are contiguous — end of prompt N = start of prompt N+1, no gaps."
         )
         log_fn(f"  Generating image prompts ({batch_label})...")
@@ -320,8 +314,6 @@ def _vet_image_prompts(
     log_fn,
 ) -> list[dict]:
     """Two-stage vetting: Haiku detects problems, Sonnet rewrites flagged prompts."""
-    import json as _json
-
     prompt_lines = "\n".join(
         f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts
     )
@@ -336,7 +328,7 @@ def _vet_image_prompts(
             messages=[{"role": "user", "content": vet_instructions + "\n\n" + prompt_lines}]
         )
         raw_flags = r1.content[0].text.strip()
-        flagged: list[dict] = _json.loads(raw_flags)
+        flagged: list[dict] = json.loads(raw_flags)
     except Exception as e:
         log_fn(f"⚠️  Vetting Stage 1 failed ({e}) — using original prompts")
         return prompts
@@ -395,16 +387,8 @@ def _vet_image_prompts(
 # ── Phase 2: Image Generation ─────────────────────────────────────────────────
 
 def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
-    """Center-crop to 16:9 and resize to `size` in place."""
-    img = Image.open(path).convert("RGB")
-    w, h = img.size
-    target_w = min(w, int(h * 16 / 9))
-    target_h = min(h, int(w * 9 / 16))
-    left = (w - target_w) // 2
-    top  = (h - target_h) // 2
-    img  = img.crop((left, top, left + target_w, top + target_h))
-    img  = img.resize(size, Image.LANCZOS)
-    img.save(path)
+    """Center-crop to `size`'s aspect ratio and resize to `size` in place."""
+    ImageOps.fit(Image.open(path).convert("RGB"), size, Image.LANCZOS).save(path)
 
 
 def _stretch_horizontal(img: Image.Image, pct: float) -> Image.Image:
@@ -433,14 +417,6 @@ def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitud
     _stretch_horizontal(img, magnitude).save(b_path)
     _stretch_vertical(img, magnitude).save(c_path)
     log_fn(f"  🎞️  Flicker frames saved: flicker/{b_path.name}, flicker/{c_path.name}")
-
-
-def _image_mime(path: Path) -> str:
-    """Detect image mime type from magic bytes."""
-    header = path.read_bytes()[:4]
-    if header[:3] == b'\xff\xd8\xff':
-        return "image/jpeg"
-    return "image/png"
 
 
 def _find_image(img_dir: Path, num: str) -> Path | None:
@@ -480,7 +456,7 @@ def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
             reference_files.append(f)
     reference_files = reference_files[:max_anchors]
     return [
-        genai_types.Part.from_bytes(data=ref.read_bytes(), mime_type=_image_mime(ref))
+        genai_types.Part.from_bytes(data=ref.read_bytes(), mime_type=mimetypes.guess_type(ref.name)[0] or "image/png")
         for ref in reference_files
     ]
 
@@ -534,49 +510,57 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
 
 
 def generate_all_images(prompts: list[dict], out_dir: Path,
-                        profile: "Profile", log_fn, stop_event=None, skip_existing=False) -> dict:
-    """Generate images sequentially. Returns {num: path} for successful images."""
+                        profile: "Profile", log_fn, stop_event=None, skip_existing=False,
+                        max_workers: int = 4) -> dict:
+    """Generate images concurrently (rate-limited by max_workers). Returns {num: path} for successful images."""
     anchor_parts = _load_anchor_parts(profile)
     results = {}
     total = len(prompts)
-    for i, p in enumerate(prompts):
-        if stop_event and stop_event.is_set():
-            break
+
+    def _one(i: int, p: dict):
         num      = p["num"]
         img_path = out_dir / "images" / f"{num}.png"
-
-        existing = _find_image(out_dir / "images", num)
-        if skip_existing and existing:
-            results[num] = existing
-            continue
-
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
         ok = generate_image_google(p["prompt"], img_path, profile, log_fn, anchor_parts=anchor_parts)
-        if ok:
-            found = _find_image(out_dir / "images", num) or img_path
-            results[num] = found
-            flicker_cfg = profile.image_gen.get("flicker", {})
-            if flicker_cfg.get("enabled"):
-                magnitude = flicker_cfg.get("magnitude", 0.004)
-                generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
-        else:
+        if not ok:
             log_fn(f"  ❌ Image {num} failed after 3 attempts — flagged")
+            return num, None
+        found = _find_image(out_dir / "images", num) or img_path
+        flicker_cfg = profile.image_gen.get("flicker", {})
+        if flicker_cfg.get("enabled"):
+            magnitude = flicker_cfg.get("magnitude", 0.004)
+            generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
+        return num, found
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {}
+        for i, p in enumerate(prompts):
+            if stop_event and stop_event.is_set():
+                break
+            num = p["num"]
+            existing = _find_image(out_dir / "images", num)
+            if skip_existing and existing:
+                results[num] = existing
+                continue
+            futures[ex.submit(_one, i, p)] = num
+
+        for fut in as_completed(futures):
+            num, found = fut.result()
+            if found:
+                results[num] = found
+
     return results
 
 
 def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
-                      profile: "Profile" = None, progress_callback=None) -> dict:
+                      profile: "Profile", progress_callback=None) -> dict:
     """Manually regenerate specific images for a completed run."""
     def log_fn(msg):
         log(msg, progress_callback)
 
-    model = None
-    if profile is not None and model_key == "3-pro":
-        model = profile.image_gen.get("pro_model")
-    if model is None:
-        model = GOOGLE_MODEL_OPTIONS.get(model_key)
+    model = profile.image_gen.get("pro_model" if model_key == "3-pro" else "default_model")
     if not model:
-        log_fn(f"❌  Unknown model key '{model_key}'. Choose from: {list(GOOGLE_MODEL_OPTIONS)}")
+        log_fn(f"❌  Unknown model key '{model_key}' or no matching model configured on this profile")
         return {"status": "error", "reason": "unknown model key"}
 
     out_dir      = OUTPUT_ROOT / run_slug
@@ -591,7 +575,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     if missing:
         log_fn(f"⚠️  Image numbers not found in prompts: {missing}")
 
-    anchor_parts = _load_anchor_parts(profile) if profile is not None else None
+    anchor_parts = _load_anchor_parts(profile)
     results = {"regenerated": [], "failed": []}
     for num in targets:
         if num not in all_prompts:
@@ -602,7 +586,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
-            flicker_cfg = profile.image_gen.get("flicker", {}) if profile else {}
+            flicker_cfg = profile.image_gen.get("flicker", {})
             if flicker_cfg.get("enabled"):
                 magnitude = flicker_cfg.get("magnitude", 0.004)
                 found = _find_image(out_dir / "images", num) or img_path
@@ -632,18 +616,16 @@ def _split_into_chunks(text: str, max_chars: int = 4500) -> list[str]:
 
 
 def _tts_chunk(text: str, headers: dict, voice_settings: dict, log_fn,
-               voice_id: str = "", model: str = "",
+               voice_id: str, model: str,
                prev_text: str = "", next_text: str = "") -> bytes | None:
     """Send one chunk to ElevenLabs. Returns raw mp3 bytes or None on failure."""
-    vid = voice_id or EL_VOICE_ID
-    mdl = model or EL_MODEL
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     payload = {
         "text": text,
-        "model_id": mdl,
+        "model_id": model,
         "voice_settings": voice_settings,
     }
-    if mdl != "eleven_v3":
+    if model != "eleven_v3":
         if prev_text:
             payload["previous_text"] = prev_text
         if next_text:
@@ -729,71 +711,6 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
     return audio_path
 
 
-# ── Audio duration ─────────────────────────────────────────────────────────────
-
-def get_audio_duration(audio_path: Path) -> float:
-    """Return audio duration in seconds by scanning MP3 frames.
-
-    ElevenLabs chunks are concatenated after generation, which leaves the Xing
-    VBR header (written for only the first chunk) with a stale frame count.
-    We therefore scan the actual frame data rather than trusting the header.
-    """
-    if not audio_path or not audio_path.exists():
-        return 720.0
-    data   = audio_path.read_bytes()
-    offset = _id3_skip_offset(data)
-
-    BITRATES    = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320]
-    SAMPLERATES = [44100, 48000, 32000]
-
-    total_samples = 0
-    samplerate    = 44100
-    i = offset
-    n = len(data)
-    while i < n - 3:
-        if not (data[i] == 0xFF and (data[i+1] & 0xE0) == 0xE0):
-            i += 1
-            continue
-        hdr     = int.from_bytes(data[i:i+4], 'big')
-        br_idx  = (hdr >> 12) & 0xF
-        sr_idx  = (hdr >> 10) & 0x3
-        layer   = 4 - ((hdr >> 17) & 0x3)
-        padding = (hdr >> 9) & 0x1
-        if layer != 3 or br_idx in (0, 15) or sr_idx == 3:
-            i += 1
-            continue
-        bitrate    = BITRATES[br_idx] * 1000
-        samplerate = SAMPLERATES[sr_idx]
-        frame_size = (144 * bitrate // samplerate) + padding
-        if frame_size < 21:
-            i += 1
-            continue
-        # Skip Xing/Info header frame — it contains no audio
-        xing_off = i + (36 if ((hdr >> 6) & 0x3) != 3 else 21)
-        if data[xing_off:xing_off+4] in (b'Xing', b'Info'):
-            i += frame_size
-            continue
-        total_samples += 1152
-        i += frame_size
-
-    if total_samples > 0:
-        return total_samples / samplerate
-    return audio_path.stat().st_size / 24000.0
-
-
-def _ts_to_seconds(ts: str) -> float | None:
-    try:
-        parts = [int(x) for x in ts.strip().split(":")]
-        if len(parts) == 2:
-            return parts[0] * 60 + parts[1]
-        if len(parts) == 3:
-            return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    except Exception:
-        pass
-    return None
-
-
-
 # ── Shared production phase ───────────────────────────────────────────────────
 
 def _run_production(topic: str, prompts: list[dict], tts_script: str,
@@ -805,7 +722,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
     def voiceover_thread():
         nonlocal audio_path
         existing_mp3 = out_dir / "audio" / "voiceover.mp3"
-        if existing_mp3.exists():
+        if skip_existing_images and existing_mp3.exists():
             log_fn("🎙  Voiceover already exists — skipping")
             audio_path = existing_mp3
             return
