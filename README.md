@@ -1,6 +1,6 @@
 # YouTube Pipeline
 
-An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~300 images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
+An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~200+ images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
 
 ---
 
@@ -11,7 +11,7 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 | **Orchestration** | Python — async pipeline with checkpoint-based resumability |
 | **LLM** | Anthropic Claude (Sonnet + Haiku) — research, script writing, script planning, TTS enhancement, revision |
 | **AI Agents** | Claude Agent SDK, connected to vidIQ's MCP server as a tool source — script generation, SEO vetting, keyword research |
-| **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~300 images per video with style anchor references |
+| **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~200-280 images per video with style anchor references, generated in parallel |
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
 | **Web UI** | Flask + vanilla JS — real-time SSE log streaming, image gallery, lightbox, script review modal |
 | **Bot interface** | python-telegram-bot — full pipeline control via Telegram with inline keyboard interactions |
