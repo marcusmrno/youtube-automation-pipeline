@@ -2181,12 +2181,16 @@ let galleryRun             = null;
 let gallerySelected        = new Set();
 let galleryNums            = [];
 let galleryPrompts         = {};
-let galleryScriptSections = { sections: [], visualSectionMap: {} };
+let galleryScriptSections = [];
+
+function tsToSec(ts) {
+  return ts.split(':').reduce((acc, p) => acc * 60 + parseInt(p, 10), 0);
+}
 
 function parseScriptSections(text) {
-  // Returns { sections: [{title, lines}], visualSectionMap: {promptNum(1-based index) -> sectionIndex} }
+  // Returns [{title, start, end, lines}] from "[MM:SS-MM:SS] TITLE" headers
   const sections = [];
-  const sectionHeaderRe = /^\[[\d:–\-]+\]\s*(.+)$/;
+  const sectionHeaderRe = /^\[(\d+:\d+(?::\d+)?)\s*[–-]\s*(\d+:\d+(?::\d+)?)\]\s*(.+)$/;
   let cur = null;
 
   for (const raw of text.split('\n')) {
@@ -2194,38 +2198,35 @@ function parseScriptSections(text) {
     const hm = line.match(sectionHeaderRe);
     if (hm) {
       if (cur) sections.push(cur);
-      cur = { title: hm[1].trim(), lines: [] };
-    } else if (cur) {
-      if (!line.startsWith('VISUAL:') && !line.startsWith('TITLE:') && !line.startsWith('KEYWORDS:') && line) {
+      cur = { title: hm[3].trim(), start: tsToSec(hm[1]), end: tsToSec(hm[2]), lines: [], raw: [] };
+    } else if (cur && line) {
+      cur.raw.push(line);
+      if (!line.startsWith('VISUAL:') && !line.startsWith('TITLE:') && !line.startsWith('KEYWORDS:')) {
         cur.lines.push(line);
       }
     }
   }
   if (cur) sections.push(cur);
-
-  const sectionMap = {};
-  let curSectionIdx = -1;
-  let vIdx = 0;
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (line.match(sectionHeaderRe)) {
-      curSectionIdx++;
-    } else if (line.startsWith('VISUAL:') && curSectionIdx >= 0) {
-      vIdx++;
-      sectionMap[vIdx] = curSectionIdx;
-    }
-  }
-
-  return { sections, visualSectionMap: sectionMap };
+  return sections;
 }
 
 function findScriptSection(imageNum) {
-  // imageNum is "001", "042", etc. — 1-based ordinal matching VISUAL line order
-  if (!galleryScriptSections || !galleryScriptSections.sections) return null;
-  const idx = parseInt(imageNum, 10);
-  const sectionIdx = galleryScriptSections.visualSectionMap[idx];
-  if (sectionIdx === undefined) return null;
-  return galleryScriptSections.sections[sectionIdx] || null;
+  // Images are per-beat, not per-section. Match on the source field from
+  // image_prompts.txt: a "MM:SS-MM:SS" range, or (older runs) a narration sentence.
+  const secs = galleryScriptSections;
+  if (!secs.length) return null;
+  const source = (galleryPrompts[imageNum] || {}).source || '';
+
+  const tm = source.match(/^(\d+:\d+(?::\d+)?)/);
+  if (tm) {
+    const t = tsToSec(tm[1]);
+    return secs.find(s => t >= s.start && t < s.end) || secs[secs.length - 1];
+  }
+
+  // ponytail: legacy fallback — source was the narration sentence itself
+  const needle = source.slice(0, 40).toLowerCase();
+  if (!needle) return null;
+  return secs.find(s => s.raw.join(' ').toLowerCase().includes(needle)) || null;
 }
 let lightboxIdx     = 0;
 
@@ -2246,7 +2247,7 @@ async function openGallery() {
     fetch(`/script/${encodeURIComponent(run)}`).then(r => r.json()),
   ]);
   galleryPrompts = prompts;
-  galleryScriptSections = scriptRes.ok ? parseScriptSections(scriptRes.text) : { sections: [], visualSectionMap: {} };
+  galleryScriptSections = scriptRes.ok ? parseScriptSections(scriptRes.text) : [];
 }
 
 function closeGallery() {
