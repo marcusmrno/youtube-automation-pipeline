@@ -269,7 +269,7 @@ def _build_image_prompt_instructions(profile: "Profile") -> str:
     template = f"""
 You are an image prompt writer for a YouTube video pipeline targeting Google Gemini image generation.
 
-Below is a segment of the script. Each VISUAL line shows the timestamp and narration that will be playing at that moment. Your job is to write one image prompt per VISUAL line — a scene that is a direct, literal translation of EXACTLY what the narrator says in that line.
+Below is a segment of the script — timestamped sections of narration. Your job is to write image prompts covering that narration — each a direct, literal translation of EXACTLY what the narrator says at that moment.
 
 ---
 
@@ -429,8 +429,6 @@ def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -
     c = profile.channel
     target_words, min_words, _, hook_words, cta_words, section_min, section_max = _word_budget(s)
 
-    char_names = " / ".join(ch["name"] for ch in profile.characters)
-    char_block = profile.characters_block()
 
     approach_section = ""
     if approach_context.strip():
@@ -476,7 +474,6 @@ KEYWORDS: [3-5 top keywords from vidIQ]
 
 [00:{s["hook_duration_s"]:02d}-02:00] SECTION 1 — [section title]
 [narration prose]
-VISUAL: [which character, what action, what prop — one line per scene beat]
 
 ... {s["section_count"]} sections total ...
 
@@ -494,20 +491,11 @@ VISUAL: [which character, what action, what prop — one line per scene beat]
   - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA ({s["cta_duration_s"]}s) = ~{cta_words} words.
   - After writing, count narration words — if under {round(min_words * 1.1)}, expand sections before finishing
 - Hook hard in the first 10 seconds — lead with the most surprising fact, not context
-- Every narration beat gets a VISUAL line showing a character doing an action, not reacting
-- VISUAL lines must be literal: "cat holds five flat gold trophies" not "cat looks amazed"
-- Vary which character appears ({char_names}) — never the same character 3 beats in a row
-
-## Characters
-
-{char_block}
-
-{profile.character_behavior.strip()}
+- Narration only — no visual directions, camera notes, or on-screen descriptions. Images are written from the narration in a later stage.
 
 ### Forbidden
 - Starting the hook with "In this video…", "Welcome back…", or "Today we're going to…"
-- VISUAL lines describing character emotions
-- Generic visuals that could fit any moment in any video
+- VISUAL: lines, scene directions, or any reference to what is on screen
 - CTA that teases a next video
 - Re-explaining a concept already introduced — each core idea appears once. Callbacks only if they add new information.
 
@@ -516,7 +504,7 @@ VISUAL: [which character, what action, what prop — one line per scene beat]
 Return the finished script in this exact format — nothing after it:
 
 ===SCRIPT===
-[full script here with TITLE, KEYWORDS, timestamps, section headers, narration, and VISUAL lines]
+[full script here with TITLE, KEYWORDS, timestamps, section headers, and narration]
 """
 
 
@@ -543,7 +531,7 @@ STEP 2 — Review the script against the data:
 
 STEP 3 — Rewrite the script with all fixes applied:
 Make only the changes the review identified. Do not restructure the whole script or change the channel tone.
-Preserve all VISUAL lines, timestamps, and section headers exactly unless a section was expanded.
+Preserve all timestamps and section headers exactly unless a section was expanded. Never add VISUAL: lines or scene directions.
 
 STEP 4 — Output:
 Return the vetted script in this exact format — nothing after it:
