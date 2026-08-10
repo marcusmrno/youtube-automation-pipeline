@@ -65,11 +65,21 @@ async def run_vidiq_agent(
     return full_text
 
 
-def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> str:
+def split_agent_output(raw: str) -> tuple[str, str]:
+    """Split agent output into (script, research_notes).
+
+    Notes are whatever the agent said before the SCRIPT block — its vidIQ
+    findings (keywords, outliers, title scores). Empty if it went straight
+    to the script.
+    """
+    return _extract("SCRIPT", raw), raw.split("===SCRIPT===")[0].strip()
+
+
+def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> tuple[str, str]:
     system_prompt = _build_agent_system_prompt(topic, profile)
     user_prompt   = f"Topic: {topic}\n\n{_build_agent_script_prompt(profile, approach_context)}"
     raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn))
-    return _extract("SCRIPT", raw)
+    return split_agent_output(raw)
 
 
 def run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:

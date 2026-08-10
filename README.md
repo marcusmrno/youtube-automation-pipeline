@@ -162,7 +162,7 @@ python apply_flicker.py --undo                 # remove the flicker layer (uses 
 ```
 output/why-humans-sleep/
 ├── profile.txt            # name of the profile used for this run
-├── research.txt           # verified facts and hook angles
+├── research.txt           # verified facts and hook angles (or the agent's vidIQ findings)
 ├── script.txt             # full script with timestamps and VISUAL lines
 ├── tts_script.txt         # clean narration with ElevenLabs audio tags
 ├── image_prompts.txt      # NNN | MM:SS-MM:SS | [prompt] per image

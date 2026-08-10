@@ -586,6 +586,7 @@ def _build_metadata_titles_prompt(
     c = profile.channel
     kw_lines = "\n".join(f"- {k.get('keyword', '')}" for k in keywords if k.get("keyword"))
     kw_section = f"\nTop vidIQ keywords for this topic (work the best 1-2 into at least 3 of the titles):\n{kw_lines}\n" if kw_lines else ""
+    research_section = f"\nRESEARCH NOTES:\n{research[:2000]}\n" if research.strip() else ""
 
     template = f"""
 You are a YouTube title strategist for a {c["niche"]} channel targeting {c["audience"]}.
@@ -594,10 +595,7 @@ Channel title format reference: {c["title_format"]}
 Tone: {c["tone"]}
 
 TOPIC: {topic}
-{kw_section}
-RESEARCH NOTES:
-{research[:2000]}
-
+{kw_section}{research_section}
 SCRIPT HOOK (first 600 chars — use this to ground the curiosity gap):
 {script[:600]}
 

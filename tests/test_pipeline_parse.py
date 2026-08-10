@@ -62,3 +62,26 @@ def test_parse_pipe_in_prompt_body_preserved():
 def test_parse_empty_string_returns_empty():
     assert parse_image_prompts("") == []
 
+
+
+# ── agents.split_agent_output ──────────────────────────────────────────────────
+
+def test_split_agent_output_separates_research_from_script():
+    from agents import split_agent_output
+    raw = (
+        "Keyword research: 'why we dream' — 40k/mo, low competition.\n"
+        "Top outlier reframes it as a survival mechanism.\n"
+        "===SCRIPT===\n"
+        "TITLE: Why You Dream\n[00:00-00:35] HOOK\nYour brain never sleeps."
+    )
+    script, notes = split_agent_output(raw)
+    assert script.startswith("TITLE: Why You Dream")
+    assert "40k/mo" in notes
+    assert "===SCRIPT===" not in notes
+
+
+def test_split_agent_output_no_notes_when_script_only():
+    from agents import split_agent_output
+    script, notes = split_agent_output("===SCRIPT===\nTITLE: X")
+    assert script == "TITLE: X"
+    assert notes == ""

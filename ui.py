@@ -53,9 +53,9 @@ STAGE_KEYWORDS: dict[str, list[str]] = {
                  "output directory", "style anchor", "api keys", "missing api"],
     "script":   ["writing script", "script written", "image prompts parsed",
                  "script ready", "📝", "vidiq script vet", "script vetted", "vet agent", "🔎"],
-    "images":   ["generating image", "images generated", "fal.ai", "sending request"],
+    "images":   ["generating image", "images generated", "sending request"],
     "voice":    ["generating voiceover", "voiceover generated", "voiceover failed", "🎙"],
-    "timeline": ["pipeline complete", "pipeline finished", "🎬", "╔", "╚"],
+    "done":     ["pipeline complete", "pipeline finished", "🎬", "╔", "╚"],
 }
 
 

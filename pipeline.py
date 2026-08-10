@@ -51,8 +51,7 @@ GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 CLAUDE_MODEL  = "claude-sonnet-4-6"
 HAIKU_MODEL   = "claude-haiku-4-5-20251001"
 EL_MODEL      = "eleven_v3"
-GOOGLE_MODEL  = "gemini-3.1-flash-image"   # bulk generation + regen
-GOOGLE_PRO_MODEL = "gemini-3-pro-image"    # highest quality, slowest
+# Image models come from the profile (image_gen.default_model / pro_model).
 
 
 
@@ -714,7 +713,7 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
 # ── Shared production phase ───────────────────────────────────────────────────
 
 def _run_production(topic: str, prompts: list[dict], tts_script: str,
-                    profile: "Profile", out_dir: Path, client: anthropic.Anthropic,
+                    profile: "Profile", out_dir: Path,
                     log_fn, stop_event=None, skip_existing_images=False) -> dict:
     """Phases 2-4: images + voiceover."""
     audio_path = None
@@ -868,7 +867,7 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
 
     topic = script[:80]
     return _run_production(
-        topic, prompts, tts_script, profile, out_dir, client,
+        topic, prompts, tts_script, profile, out_dir,
         log_fn, stop_event, skip_existing_images=True,
     )
 
@@ -904,8 +903,9 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     if VIDIQ_KEY:
         log_fn("🤖  Running vidIQ research + script agent...")
-        script = run_script_agent(topic, profile, log_fn, approach_context)
-        (out_dir / "research.txt").write_text("(handled by agent — see script.txt)")
+        script, research_notes = run_script_agent(topic, profile, log_fn, approach_context)
+        if research_notes:
+            (out_dir / "research.txt").write_text(research_notes)
         if not script:
             log_fn("❌  Agent did not produce a script — aborting")
             return {"status": "error", "reason": "agent produced no script"}
@@ -964,7 +964,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
     if stop_event and stop_event.is_set():
         return {"status": "cancelled", "out_dir": str(out_dir)}
 
-    return _run_production(topic, prompts, tts_script, profile, out_dir, client, log_fn, stop_event)
+    return _run_production(topic, prompts, tts_script, profile, out_dir, log_fn, stop_event)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────

@@ -1108,10 +1108,10 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
         <div class="stage-node"></div>
         <span class="stage-label">Voice</span>
       </div>
-      <div class="stage-connector" id="conn-voice-timeline"><div class="stage-connector-fill"></div></div>
-      <div class="stage-item" data-stage="timeline" id="stage-timeline">
+      <div class="stage-connector" id="conn-voice-done"><div class="stage-connector-fill"></div></div>
+      <div class="stage-item" data-stage="done" id="stage-done">
         <div class="stage-node"></div>
-        <span class="stage-label">Timeline</span>
+        <span class="stage-label">Done</span>
       </div>
     </div>
   </header>
@@ -1499,8 +1499,8 @@ async function loadResumeStatus(run) {
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-const STAGES = ['research', 'script', 'images', 'voice', 'timeline'];
-const STAGE_ORDER = { research: 0, script: 1, images: 2, voice: 3, timeline: 4 };
+const STAGES = ['research', 'script', 'images', 'voice', 'done'];
+const STAGE_ORDER = { research: 0, script: 1, images: 2, voice: 3, done: 4 };
 
 let currentStage = null;
 let logSections = {}; // stage -> DOM element
@@ -1567,7 +1567,7 @@ function resetStages() {
 const STAGE_LABELS = {
   research: 'Research', script: 'Script',
   images:   'Images',   voice:  'Voice',
-  timeline: 'Timeline', metadata: 'Metadata',
+  done:     'Done',     metadata: 'Metadata',
 };
 
 function ensureLogSection(stage) {
