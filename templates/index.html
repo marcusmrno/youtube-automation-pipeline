@@ -891,8 +891,8 @@ html, body {
 
 .lightbox-header {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -905,12 +905,26 @@ html, body {
   font-size: 0.72rem;
   color: var(--text);
   font-weight: 600;
+  flex-shrink: 0;
+}
+.lightbox-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .lightbox-ts {
   font-family: var(--mono);
   font-size: 0.65rem;
   color: var(--muted);
 }
+.lightbox-ts summary {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ponytail: no JS — [open] just unclamps the same text */
+.lightbox-ts[open] summary { white-space: normal; overflow-wrap: anywhere; }
 .lightbox-nav {
   display: flex;
   align-items: center;
@@ -958,6 +972,8 @@ html, body {
   padding: 5px 10px;
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .btn-lightbox-select:hover { border-color: var(--blue); color: var(--blue); }
 .btn-lightbox-select.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
@@ -1321,15 +1337,19 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
 <div class="lightbox-overlay" id="lightboxOverlay">
   <div class="lightbox-inner">
     <div class="lightbox-header">
-      <span class="lightbox-num" id="lightboxNum"></span>
-      <span class="lightbox-ts" id="lightboxTs"></span>
-      <button class="btn-lightbox-select" id="lightboxSelectBtn" onclick="toggleLightboxSelect()">✓ Mark for regen</button>
-      <div class="lightbox-nav">
-        <button class="lightbox-nav-btn" id="lightboxPrev" onclick="lightboxStep(-1)">&#8592;</button>
-        <span class="lightbox-counter" id="lightboxCounter"></span>
-        <button class="lightbox-nav-btn" id="lightboxNext" onclick="lightboxStep(1)">&#8594;</button>
+      <div class="lightbox-header-row">
+        <span class="lightbox-num" id="lightboxNum"></span>
+        <div class="lightbox-nav">
+          <button class="lightbox-nav-btn" id="lightboxPrev" onclick="lightboxStep(-1)">&#8592;</button>
+          <span class="lightbox-counter" id="lightboxCounter"></span>
+          <button class="lightbox-nav-btn" id="lightboxNext" onclick="lightboxStep(1)">&#8594;</button>
+        </div>
+        <button class="btn-lightbox-select" id="lightboxSelectBtn" onclick="toggleLightboxSelect()">✓ Mark for regen</button>
+        <button class="btn-lightbox-close" onclick="closeLightbox()">✕</button>
       </div>
-      <button class="btn-lightbox-close" onclick="closeLightbox()">✕</button>
+      <details class="lightbox-ts" id="lightboxTsWrap">
+        <summary id="lightboxTs"></summary>
+      </details>
     </div>
     <div class="lightbox-img-wrap">
       <img class="lightbox-img" id="lightboxImg" src="" alt="">
@@ -2314,7 +2334,9 @@ function renderLightbox() {
 
   const section = findScriptSection(num);
   document.getElementById('lightboxNum').textContent        = `Image ${num}`;
-  document.getElementById('lightboxTs').textContent         = meta.source ? `Source: ${meta.source.slice(0, 80)}` : '';
+  const tsEl = document.getElementById('lightboxTs');
+  tsEl.textContent = meta.source ? `Source: ${meta.source}` : '';
+  document.getElementById('lightboxTsWrap').hidden = !meta.source;
   document.getElementById('lightboxImg').src                = src;
   document.getElementById('lightboxPrompt').textContent     = meta.prompt || '(no prompt found)';
   document.getElementById('lightboxScriptTitle').textContent = section ? section.title : 'Script';
