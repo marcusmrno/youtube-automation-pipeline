@@ -803,19 +803,21 @@ html, body {
   color: var(--muted);
 }
 .img-card-checkbox {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border: 1.5px solid var(--border-2);
   border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   color: #fff;
   background: transparent;
   flex-shrink: 0;
+  cursor: pointer;
   transition: all 0.1s;
 }
+.img-card-checkbox:hover { border-color: var(--blue); }
 .img-card.selected .img-card-checkbox {
   background: var(--blue);
   border-color: var(--blue);
@@ -2292,6 +2294,7 @@ function makeImgCard(num) {
 
   card.addEventListener('click', (e) => {
     if (e.target.classList.contains('img-card-regen')) return;
+    if (e.target.classList.contains('img-card-checkbox')) { toggleSelect(num); return; }
     if (e.shiftKey || e.ctrlKey || e.metaKey) { toggleSelect(num); return; }
     openLightbox(galleryNums.indexOf(num));
   });
