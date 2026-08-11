@@ -53,10 +53,12 @@ image_style:
     No smooth digital lines. All text is bold handwritten uppercase in black marker.
     16:9 landscape composition.
 
-  anchor_priority:
-    - anchor-01
-    - anchor-02
-    - anchor-03
+  # Short hard-rule form of the style, sent AHEAD of every image prompt and every
+  # anchor generation. Optional — omit it and the full art_style_block is used instead.
+  style_constraints: >
+    Bold uneven black marker outlines. Color fills bleed outside lines with visible
+    marker streaks. Off-white warm paper background (#F5F0E8). No gradients. No drop
+    shadows. No clean fonts. No photorealistic textures. No smooth digital lines.
 
   max_anchors: 6   # anchors passed as references per image call — higher = more consistent, more expensive
 

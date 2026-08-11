@@ -257,7 +257,10 @@ def _build_image_prompt_instructions(profile: "Profile") -> str:
 
     char_block = profile.characters_block()
     behavior   = (profile.character_behavior or "").strip()
-    characters_section = f"""## Characters — embed description verbatim in EVERY prompt
+    characters_section = f"""## Characters — reference only, do NOT reproduce
+
+These descriptions are inserted automatically by the pipeline. Never write them
+out. Name the character in the character field and write only what it is DOING.
 
 {char_block}
 
@@ -265,6 +268,26 @@ def _build_image_prompt_instructions(profile: "Profile") -> str:
 
 ---
 """ if char_block else ""
+
+    character_field = ("""a name from the roster above, or several separated by
+  `+` when the scene needs more than one, or `none` for a scene with no
+  character. The pipeline inserts each named character's description."""
+        if char_block else
+        "always `none` — this style has no recurring characters.")
+
+    # Character-specific variety guidance only applies to profiles with a roster.
+    # Actions come from the profile's own behaviour rules — never hardcode them
+    # here, or this builder contradicts whatever profile is loaded.
+    variety_extra = f"""Vary what the characters are doing within the range the character rules above
+allow — different actions, props, groupings and framing, not the same gesture
+relabelled.
+
+**At least 60% of scenes must feature a character.** The characters are the
+channel's identity; variety means giving them different things to do, not
+removing them. Use `none` only when a frame is genuinely stronger without one
+(a pure diagram, a cutaway, a map, a close-up of an object, a before/after
+pair), and never for more than 40% of the video.""" if char_block else """Vary the subject and framing of each scene — different objects, diagrams,
+viewpoints and scales, not the same layout relabelled."""
 
     template = f"""
 You are an image prompt writer for a YouTube video pipeline targeting Google Gemini image generation.
@@ -290,7 +313,7 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 **Transition sentences are not skippable.** Short pivot phrases like "Now the opposite kind.", "The team continues.", "So back to that opening promise.", "Remember the fat-soluble ones" are their own image beats. Never merge them silently into the next content beat.
 
 How to visualize transitions by type:
-- **Section pivot** ("Now…", "Next up…", "Moving on…"): title-card showing the name/letter of the incoming topic large center frame — cat pointing at it
+- **Section pivot** ("Now…", "Next up…", "Moving on…"): title-card showing the name/letter of the incoming topic large center frame
 - **Callback/recall** ("Back to…", "Remember…"): the key prop from the earlier beat re-shown, with a bold RECALL label or arrow pointing back to it
 - **Summary pivot** ("Here's where X really matters", "The team continues"): a visual summary of what is about to be elaborated — the relevant diagram or object group already on screen
 - **Consequence setup** ("Without X…", "Run low for long enough…"): show the consequence visually with a red X or fading/cracking element, even before the full sentence lands
@@ -301,7 +324,10 @@ How to visualize transitions by type:
 
 ---
 
-## Art style — end EVERY prompt with this exact block
+## Art style — reference only, do NOT reproduce
+
+The pipeline appends this block to every prompt automatically. Never write it
+out. It is shown here so your scene descriptions stay compatible with it.
 
 {style}
 
@@ -319,10 +345,33 @@ After writing, do a final gap check: confirm every narration sentence has a prom
 
 For each prompt, copy the exact narration sentence you are illustrating as the source field.
 Format each line as:
-NNN | [exact source sentence] | [full prompt]
+NNN | [exact source sentence] | [character name] | [scene]
 
-Number sequentially from wherever instructed — never restart from 001 mid-batch.
-Do NOT include a style prefix. Write ALL prompts for this segment.
+- **character name** — {character_field}
+- **scene** — only what is happening: the action, props, labels, and background.
+  Start with a verb ("holds a jar labeled...", "points at a timeline..."), not
+  with the character's name or appearance. End with the background phrase.
+
+Write no character description and no art-style text — both are added
+automatically, and repeating them wastes the budget you need for actual scenes.
+
+Number sequentially from 001.
+
+## Composition variety — a hard requirement, not a preference
+
+You are writing every prompt for the whole script in one pass, so you can see
+everything you have already written. Use that.
+
+**"points at X" is your default and it is wrong.** Left unchecked you will open
+more than half of all prompts with it, and the finished video will look like the
+same drawing 190 times. Across the entire script, no more than **10%** of scenes
+may open with "points at". The same applies to any other single opening.
+
+Before writing each scene, look at the previous five. If the composition you are
+about to write matches any of them, write a different one. Two consecutive
+scenes must never share a composition.
+
+{variety_extra}
 
 Return only:
 
@@ -330,98 +379,6 @@ Return only:
 [prompts here]
 """
     return template
-
-
-def _build_image_prompt_vet_instructions(profile: "Profile") -> str:
-    char_block = profile.characters_block()
-    style      = profile.image_style["art_style_block"].strip()
-
-    return f"""You are vetting image prompts for a YouTube video pipeline.
-
-## Channel context
-{char_block}
-
-## Art style
-{style}
-
----
-
-You will receive a list of image prompts in this format:
-NNN | [source line] | [prompt]
-
-The source line is the exact narration sentence the prompt was generated from.
-
-## Your job
-
-Read all prompts and flag any that have one or more of these problems:
-
-1. **RELEVANCE** — the prompt does not illustrate what the source line says. The visual content is unrelated, too vague, or shows something from a different part of the script.
-
-2. **ADJACENT_SIMILARITY** — this prompt and the one immediately before or after it describe nearly the same scene (same character position, same object, same setting with no meaningful visual difference).
-
-3. **SCENE_OVERUSE** — the same scene archetype appears more than 3 times across the full list. Count occurrences of recurring archetypes (e.g. "cat at a whiteboard", "cat floating in space", "cat pointing at a chart") and flag the less important occurrences beyond the third.
-
-## Output format
-
-Return a JSON array. If no prompts need fixing, return an empty array `[]`.
-
-For each flagged prompt:
-{{
-  "num": "NNN",
-  "reason": "RELEVANCE | ADJACENT_SIMILARITY | SCENE_OVERUSE",
-  "detail": "one sentence explaining the specific problem"
-}}
-
-Return ONLY the JSON array. No explanation, no markdown fences.
-"""
-
-
-def _build_image_prompt_rewrite_instructions(profile: "Profile") -> str:
-    char_block = profile.characters_block()
-    style      = profile.image_style["art_style_block"].strip()
-    scene_rules = (profile.image_style.get("scene_rules") or "").strip()
-
-    characters_section = f"""## Characters — embed description verbatim in EVERY prompt
-
-{char_block}
-
----
-""" if char_block else ""
-
-    return f"""You are rewriting flagged image prompts for a YouTube video pipeline.
-
-{characters_section}## Art style — end EVERY prompt with this exact block
-
-{style}
-
-{scene_rules}
-
----
-
-You will receive a list of flagged prompts in this format:
-NNN | [source line] | [prompt] | REASON: [reason and detail]
-
-## Your job
-
-Rewrite each prompt to fix the stated problem:
-
-- **RELEVANCE**: rewrite the prompt so it directly and literally illustrates the source line
-- **ADJACENT_SIMILARITY**: change the scene so it is visually distinct from its neighbors (different angle, object placement, background element, or subject action)
-- **SCENE_OVERUSE**: vary the scene — use a different setting, activity, or framing that still fits the source line
-
-Rules:
-- Keep the same prompt number
-- Keep the same source line verbatim
-- Do NOT include a style prefix — the art style block goes at the end only
-- The rewritten prompt must still match the source line content
-
-## Output format
-
-Return each rewritten prompt as:
-NNN | [source line unchanged] | [rewritten prompt]
-
-One per line. Return ONLY the prompt lines. No explanation.
-"""
 
 
 def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
@@ -546,17 +503,19 @@ def _build_agent_system_prompt(topic: str, profile: "Profile") -> str:
     char_block = profile.characters_block()
     style      = profile.image_style["art_style_block"].strip()
 
+    characters_section = f"""## Characters
+{char_block}
+
+{profile.character_behavior.strip()}
+
+""" if char_block else ""
+
     return f"""## Channel: {c["name"]}
 Niche: {c["niche"]}
 Audience: {c["audience"]}
 Tone: {c["tone"]}
 
-## Characters
-{char_block}
-
-{profile.character_behavior.strip()}
-
-## Visual Style
+{characters_section}## Visual Style
 {style}
 
 ---
@@ -652,15 +611,23 @@ def _build_metadata_thumbnail_prompt(script, topic, profile) -> str:
     c = profile.channel
     chars = profile.characters_block()
     style = profile.image_style["art_style_block"]
+
+    characters_section = f"""CHARACTERS (embed the full description of whichever character appears in each prompt):
+{chars}
+
+""" if chars else ""
+
+    # Character rule only applies to profiles with a roster — never assume one exists.
+    character_rule = ("""3. One character from the roster active (pointing, holding, reacting to the hook
+   object) — never idle, never staring at the viewer.
+""" if chars else "")
+
     template = f"""
 You are writing image prompts for 3 YouTube thumbnail variants for a {c["niche"]} video.
 
 TOPIC: {topic}
 
-CHARACTERS (embed the full description of whichever cat appears in each prompt):
-{chars}
-
-ART STYLE (append this block to every thumbnail prompt verbatim — do not paraphrase):
+{characters_section}ART STYLE (append this block to every thumbnail prompt verbatim — do not paraphrase):
 {style}
 
 SCRIPT (use the opening to extract a 1-3 word visual hook):
@@ -669,8 +636,8 @@ SCRIPT (use the opening to extract a 1-3 word visual hook):
 THUMBNAIL RULES (apply to all 3):
 1. 1920×1080 aspect ratio, composition optimized for visibility at small sizes.
 2. A clear visual hook (a single bold object, action, or contrast) occupying ~60% of the frame.
-3. One cat character active (pointing, holding, reacting to the hook object) — never idle, never staring at the viewer.
-4. A 1-3 word marker handwriting text overlay, max one phrase per image, all uppercase, baked into the image as if hand-drawn.
+{character_rule}4. A 1-3 word text overlay, max one phrase per image, all uppercase, baked into the
+   image and rendered in whatever text treatment the art style block specifies.
 5. Do NOT reference the title text — only the hook idea.
 
 Return EXACTLY this format. Each variant needs a HOOK line (the 1-3 word overlay) and a prompt body of 150-250 words.

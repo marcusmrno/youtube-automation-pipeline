@@ -112,7 +112,11 @@ image_gen:
     with patch("profile_creator.new.anthropic.Anthropic"), \
          patch("profile_creator.new.clarification_loop", return_value=[]), \
          patch("profile_creator.new.generate_profile_content", return_value=(fake_yaml, "# Style\n")), \
-         patch("profile_creator.new.generate_anchor_prompts", return_value=["p1", "p2"]), \
+         patch("profile_creator.new.generate_anchor_prompts", return_value=(
+             {"anchor-01": "p1", "anchor-02": "p2"},
+             [{"label": "anchor-01", "purpose": "cast sheet", "tier": "verification"},
+              {"label": "anchor-02", "purpose": "props",      "tier": "full"}],
+         )), \
          patch("profile_creator.new.run_verification_anchors", return_value=True), \
          patch("profile_creator.new.run_full_anchors", return_value={"ok": [], "failed": []}), \
          patch("builtins.input", side_effect=["some channel concept", "---", "my-channel"]):
@@ -121,6 +125,9 @@ image_gen:
     profile_dir = tmp_path / "my-channel"
     assert (profile_dir / "profile.yaml").exists()
     assert (profile_dir / "style-sheet.md").exists()
+    # Anchor slot descriptions must be persisted — image generation reads them back
+    manifest = yaml.safe_load((profile_dir / "anchors" / "manifest.yaml").read_text())
+    assert [s["label"] for s in manifest] == ["anchor-01", "anchor-02"]
 
 
 def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):

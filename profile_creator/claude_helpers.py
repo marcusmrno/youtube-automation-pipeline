@@ -54,6 +54,12 @@ image_style:
     # slightly off-white warm paper, bold black outlines with heavy uneven stroke weight..."
     ...
 
+  style_constraints: >
+    # Short hard-rule form of the style, sent AHEAD of every image prompt and every anchor.
+    # Terse imperatives and anti-rules only — 3-6 short sentences, no scene content.
+    # Good: "Bold uneven black marker outlines. No gradients. No drop shadows. No photorealism."
+    ...
+
   scene_rules: |
     # Freeform markdown injected into the image prompt instructions as the scene composition guide.
     # This is the most important section — it defines HOW scenes are composed for this style.

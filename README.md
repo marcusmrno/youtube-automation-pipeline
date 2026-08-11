@@ -165,7 +165,7 @@ output/why-humans-sleep/
 ├── research.txt           # verified facts and hook angles (or the agent's vidIQ findings)
 ├── script.txt             # full script with timestamps and narration
 ├── tts_script.txt         # clean narration with ElevenLabs audio tags
-├── image_prompts.txt      # NNN | MM:SS-MM:SS | [prompt] per image
+├── image_prompts.txt      # NNN | [source narration sentence] | [full prompt] per image
 ├── metadata.json          # titles, description, hashtags, thumbnail choice (after `metadata` step)
 ├── images/
 │   ├── 001.png
@@ -191,10 +191,16 @@ profiles/my-channel/
 ├── profile.yaml          # channel identity, characters, script settings, voice, image style
 ├── style-sheet.md        # extended visual rules injected into every image prompt
 └── anchors/
-    ├── anchor-01.png     # character reference sheet — always sent first to the image model
-    ├── anchor-02.png     # scene style reference
+    ├── manifest.yaml     # what each anchor slot is — read back to describe the references
+    ├── anchor-01.png     # first reference slot (layout depends on the roster size)
+    ├── anchor-02.png
     └── ...               # additional style anchors (environments, props, lighting)
 ```
+
+The anchor layout is not fixed: `build_anchor_plan` derives it from the roster, so a two-character
+profile starts with a cast sheet while a character-free one starts with an example scene.
+`manifest.yaml` records what each slot actually is. Without it the pipeline falls back to a generic
+"match these references" line rather than guessing.
 
 ### What's inside profile.yaml
 
@@ -224,9 +230,19 @@ characters:
 image_style:
   art_style_block: |
     Flat 2D illustration on off-white paper texture, bold black outlines...
+  style_constraints: >
+    Bold black outlines. No gradients. No drop shadows. No photorealism.
+  scene_rules: |
+    ## Environment
+    - Always include a visible horizon line...
 ```
 
-Every field flows directly into LLM prompts — the script writer, TTS enhancer, and image prompt builder all read from the active profile.
+Every field flows directly into LLM prompts — the script writer, TTS enhancer, and image prompt builder all read from the active profile. The pipeline itself holds no style of its own:
+
+- `art_style_block` is appended to every image prompt
+- `style_constraints` is sent *ahead* of every image prompt and every anchor generation, as hard rules (falls back to `art_style_block` if omitted)
+- `scene_rules` is injected as the composition guide for the image prompt writer
+- `characters` is fully optional — omit the block for a style with no recurring characters, and every character-specific instruction drops out of the prompts automatically
 
 ---
 

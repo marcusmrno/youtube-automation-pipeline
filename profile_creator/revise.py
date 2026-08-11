@@ -14,12 +14,12 @@ from .claude_helpers import (
     clarification_loop,
     generate_profile_content,
 )
-from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
 from profile import PROFILES_ROOT
 
 ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
-STYLE_SENSITIVE_KEYS = {"art_style_block"}
+STYLE_SENSITIVE_KEYS = {"art_style_block", "style_constraints"}
 
 
 def next_version_name(base: str) -> str:
@@ -115,6 +115,7 @@ def run_revise(profile_name: str) -> None:
         plan = build_anchor_plan(new_yaml)
         print(f"\n  Generating {len(plan)} anchor prompts...")
         prompts, plan = generate_anchor_prompts(client, new_yaml, new_style_text, plan)
+        write_manifest(anchors_dir, plan)
         run_verification_anchors(new_yaml, anchors_dir, prompts, plan)
         print("\n  Generating remaining anchors...")
         result = run_full_anchors(new_yaml, anchors_dir, prompts, plan)

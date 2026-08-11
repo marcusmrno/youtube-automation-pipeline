@@ -18,6 +18,7 @@ from pathlib import Path
 
 import anthropic
 import requests
+import yaml
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
@@ -30,8 +31,6 @@ from prompts import (
     _build_script_prompt,
     _build_tts_prompt,
     _build_image_prompt_instructions,
-    _build_image_prompt_vet_instructions,
-    _build_image_prompt_rewrite_instructions,
     _build_agent_system_prompt,
     _extract,
 )
@@ -56,6 +55,8 @@ SONNET_EFFORT     = "medium"
 HAIKU_MODEL   = "claude-haiku-4-5-20251001"
 EL_MODEL      = "eleven_v3"
 # Image models come from the profile (image_gen.default_model / pro_model).
+# Anchors passed as references per image call, when a profile doesn't set image_style.max_anchors.
+DEFAULT_MAX_ANCHORS = 14
 
 
 
@@ -64,6 +65,23 @@ EL_MODEL      = "eleven_v3"
 def _text_of(response) -> str:
     """Concatenate text blocks. Thinking models put a thinking block first."""
     return "".join(b.text for b in response.content if b.type == "text")
+
+
+def _stream_text(client: anthropic.Anthropic, attempts: int = 3, **kwargs) -> str:
+    """Stream a Sonnet call and return its text.
+
+    The SDK retries connection errors, but not once a stream has started — a
+    mid-stream drop surfaces as APIConnectionError and loses the whole response.
+    """
+    for attempt in range(attempts):
+        try:
+            with client.messages.stream(**kwargs) as stream:
+                return _text_of(stream.get_final_message())
+        except anthropic.APIConnectionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(2 ** attempt)
+    raise AssertionError("unreachable")
 
 
 @functools.cache
@@ -182,14 +200,13 @@ def generate_script(topic: str, research: str, profile: "Profile",
                     client: anthropic.Anthropic, log_fn, approach_context: str = "") -> str:
     prompt = _build_script_prompt(topic, research, profile, approach_context)
     log_fn("✍️  Writing script...")
-    with client.messages.stream(
+    script = _extract("SCRIPT", _stream_text(
+        client,
         model=CLAUDE_MODEL,
         max_tokens=SONNET_MAX_TOKENS,
         output_config={"effort": SONNET_EFFORT},
-        messages=[{"role": "user", "content": prompt}]
-    ) as stream:
-        r = stream.get_final_message()
-    script = _extract("SCRIPT", _text_of(r))
+        messages=[{"role": "user", "content": prompt}],
+    ))
     log_fn("✅  Script written")
     return script
 
@@ -213,14 +230,13 @@ CURRENT SCRIPT:
 
 ===SCRIPT===
 """
-    with client.messages.stream(
+    text = _stream_text(
+        client,
         model=CLAUDE_MODEL,
         max_tokens=SONNET_MAX_TOKENS,
         output_config={"effort": SONNET_EFFORT},
-        messages=[{"role": "user", "content": prompt}]
-    ) as stream:
-        response = stream.get_final_message()
-    text = _text_of(response)
+        messages=[{"role": "user", "content": prompt}],
+    )
     return _extract("SCRIPT", text) or text.strip()
 
 
@@ -241,6 +257,36 @@ def parse_image_prompts(raw: str) -> list[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
+def _expand_short_prompts(raw: str, profile: "Profile") -> list[dict]:
+    """Expand `NNN | source | character | scene` into full prompts.
+
+    The model writes only the scene (~18% of the final text); the character
+    description and art-style block are stitched in here from the profile.
+    """
+    descs = {c["name"].strip().lower(): c["description"].strip()
+             for c in profile.characters}
+    style = profile.image_style["art_style_block"].strip()
+
+    seen: dict[str, dict] = {}
+    for line in raw.strip().splitlines():
+        parts = line.strip().split("|", 3)
+        if len(parts) != 4:
+            continue
+        num, source, character, scene = (p.strip() for p in parts)
+        if not scene:
+            continue
+        # "Orange Cat + White Cat" -> both descriptions, in the order named
+        named = [descs.get(n.strip().lower(), "") for n in character.split("+")]
+        desc = " and ".join(d for d in named if d)
+        body = f"{desc} — {scene}" if desc else scene
+        seen[num.zfill(3)] = {
+            "num": num.zfill(3),
+            "source": source,
+            "prompt": f"{body} — {style}",
+        }
+    return [seen[k] for k in sorted(seen)]
+
+
 def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
     """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
 
@@ -255,151 +301,27 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     log_fn("✅  TTS narration extracted")
 
     log_fn("🖼️  Generating image prompts...")
-    base_instructions = _build_image_prompt_instructions(profile)
-
-    # Split script in half by section boundaries so each batch has full section context
-    script_lines   = script.strip().splitlines()
-    section_starts = [i for i, l in enumerate(script_lines) if re.match(r'^\[[\d:–\-]+\]', l.strip())]
-
-    if len(section_starts) >= 2:
-        mid = section_starts[len(section_starts) // 2]
-        batches = [
-            ("\n".join(script_lines[:mid]),  "first half"),
-            ("\n".join(script_lines[mid:]),  "second half"),
-        ]
-    else:
-        batches = [(script, "full script")]
-
-    all_prompt_lines: list[str] = []
-    last_prompt_num  = 0
-
-    for batch_idx, (batch_script, batch_label) in enumerate(batches):
-        start_num  = last_prompt_num + 1
-        numbering  = (
-            "Start numbering from 001."
-            if batch_idx == 0
-            else f"Continue numbering from {start_num:03d}. Do NOT restart from 001 — the previous batch ended at {last_prompt_num:03d}."
-        )
-        batch_msg = (
-            base_instructions
-            + f"\nSCRIPT SEGMENT ({batch_label}):\n{batch_script}\n\n"
-            f"NUMBERING: {numbering}\n"
-            f"Timestamps are 3–4 seconds each, never more than 5. Verify timestamps are contiguous — end of prompt N = start of prompt N+1, no gaps."
-        )
-        log_fn(f"  Generating image prompts ({batch_label})...")
-        with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=64000,
-            output_config={"effort": SONNET_EFFORT},
-            messages=[{"role": "user", "content": batch_msg}]
-        ) as stream:
-            batch_text = _text_of(stream.get_final_message())
-
-        batch_prompts = _extract("IMAGE_PROMPTS", batch_text)
-        batch_lines   = [l for l in batch_prompts.splitlines() if l.strip()]
-        all_prompt_lines.extend(batch_lines)
-
-        for line in reversed(batch_lines):
-            m = re.match(r'^(\d+)\s*\|', line.strip())
-            if m:
-                last_prompt_num = int(m.group(1))
-                break
-
-    # Deduplicate by prompt number — keep last occurrence so the second batch wins
-    # where the model ignored the start-numbering instruction and restarted from 001.
-    seen: dict[int, str] = {}
-    for line in all_prompt_lines:
-        m = re.match(r'^(\d+)\s*\|', line.strip())
-        if m:
-            seen[int(m.group(1))] = line
-    deduped_lines   = [seen[k] for k in sorted(seen)]
-    last_prompt_num = max(seen) if seen else 0
-
-    image_prompts = "\n".join(deduped_lines)
-    log_fn(f"✅  Image prompts generated — {last_prompt_num} total")
-    return tts_script, image_prompts
-
-
-def _vet_image_prompts(
-    prompts: list[dict],
-    profile: "Profile",
-    client: anthropic.Anthropic,
-    log_fn,
-) -> list[dict]:
-    """Two-stage vetting: Haiku detects problems, Sonnet rewrites flagged prompts."""
-    prompt_lines = "\n".join(
-        f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts
+    msg = (
+        _build_image_prompt_instructions(profile)
+        + f"\nSCRIPT:\n{script}\n\n"
+        "Timestamps are 3–4 seconds each, never more than 5. Verify timestamps are "
+        "contiguous — end of prompt N = start of prompt N+1, no gaps."
+    )
+    raw = _stream_text(
+        client,
+        model=CLAUDE_MODEL,
+        max_tokens=64000,
+        output_config={"effort": SONNET_EFFORT},
+        messages=[{"role": "user", "content": msg}],
     )
 
-    # Stage 1 — detection (Haiku)
-    vet_instructions = _build_image_prompt_vet_instructions(profile)
-    log_fn("🔎  Vetting image prompts (Stage 1: detection)...")
-    try:
-        r1 = client.messages.create(
-            model=HAIKU_MODEL,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": vet_instructions + "\n\n" + prompt_lines}]
-        )
-        raw_flags = r1.content[0].text.strip()
-        flagged: list[dict] = json.loads(raw_flags)
-    except Exception as e:
-        log_fn(f"⚠️  Vetting Stage 1 failed ({e}) — using original prompts")
-        return prompts
+    prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
+    image_prompts = "\n".join(
+        f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts
+    )
+    log_fn(f"✅  Image prompts generated — {len(prompts)} total")
+    return tts_script, image_prompts
 
-    if not flagged:
-        log_fn(f"✅  All {len(prompts)} image prompts passed vetting")
-        return prompts
-
-    log_fn(f"  ✏️  {len(flagged)} prompts flagged — rewriting (Stage 2: Sonnet)...")
-
-    # Build flagged subset for Stage 2
-    prompt_by_num = {p["num"]: p for p in prompts}
-    flagged_lines = []
-    for f in flagged:
-        num = str(f.get("num", "")).zfill(3)
-        if not num.strip("0") or num not in prompt_by_num:
-            continue
-        reason = f.get("reason", "")
-        detail = f.get("detail", reason)
-        p = prompt_by_num[num]
-        flagged_lines.append(
-            f"{p['num']} | {p['source']} | {p['prompt']} | REASON: {reason} — {detail}"
-        )
-
-    if not flagged_lines:
-        return prompts
-
-    # Stage 2 — rewrite (Sonnet)
-    rewrite_instructions = _build_image_prompt_rewrite_instructions(profile)
-    try:
-        with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=SONNET_MAX_TOKENS,
-            output_config={"effort": SONNET_EFFORT},
-            messages=[{"role": "user", "content": rewrite_instructions + "\n\n" + "\n".join(flagged_lines)}]
-        ) as stream:
-            r2 = stream.get_final_message()
-        rewritten_raw = _text_of(r2).strip()
-        rewritten = parse_image_prompts(rewritten_raw)
-    except Exception as e:
-        log_fn(f"⚠️  Vetting Stage 2 failed ({e}) — using original prompts")
-        return prompts
-
-    if not rewritten:
-        log_fn("⚠️  Vetting Stage 2 returned no prompts — using original prompts")
-        return prompts
-
-    # Merge rewrites back into original list
-    rewritten_by_num = {p["num"]: p for p in rewritten}
-    result = []
-    for p in prompts:
-        result.append(rewritten_by_num.get(p["num"], p))
-
-    log_fn(f"✅  {len(rewritten)} prompts rewritten by vetting")
-    return result
-
-
-# ── Phase 2: Image Generation ─────────────────────────────────────────────────
 
 def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
     """Center-crop to `size`'s aspect ratio and resize to `size` in place."""
@@ -442,22 +364,32 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
     return None
 
 
-IMAGE_PREAMBLE = (
-    "Reference images are provided in this order:\n"
-    "  anchor-01: Full cast reference sheet — all characters side by side, exact proportions and scale.\n"
-    "  anchor-02: Multi-angle reference sheet — each character shown front, 3/4, side, and back. Match these character designs exactly in every scene.\n"
-    "  anchor-03: Example content scene — shows background, props, and art style in a real frame.\n"
-    "  anchor-04 onward: Additional style and scene references — follow the art style shown precisely.\n\n"
-    "STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines with visible marker streaks. "
-    "Off-white warm paper background. No gradients. No drop shadows. No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
-)
+GENERIC_ANCHOR_REFS = "Reference images define the art style and characters — match them precisely."
 
-ANCHOR_PREAMBLE = (
-    "Reference images define the art style and characters — match them precisely.\n\n"
-    "STYLE CONSTRAINTS: Bold uneven black marker outlines. Color fills bleed outside lines "
-    "with visible marker streaks. Off-white warm paper background. No gradients. No drop shadows. "
-    "No clean fonts. No photorealistic textures. No smooth digital lines.\n\n"
-)
+
+def _anchor_manifest(anchors_dir: Path) -> str:
+    """Per-anchor descriptions from anchors/manifest.yaml, written at profile creation.
+
+    Empty when absent — GENERIC_ANCHOR_REFS covers it. Never describe anchor slots
+    inline here: the layout depends on the profile's roster size.
+    """
+    f = anchors_dir / "manifest.yaml"
+    if not f.exists():
+        return ""
+    slots = yaml.safe_load(f.read_text()) or []
+    lines = "\n".join(f"  {s['label']}: {s['purpose']}" for s in slots if s.get("label"))
+    return f"Reference images are provided in this order:\n{lines}" if lines else ""
+
+
+def build_preamble(image_style: dict, anchors_dir: Path | None = None) -> str:
+    """Prefix sent ahead of every image prompt — entirely profile-driven.
+
+    `style_constraints` is the short hard-rule form; falls back to the full
+    art_style_block when a profile doesn't define one.
+    """
+    constraints = (image_style.get("style_constraints") or image_style["art_style_block"]).strip()
+    refs = (_anchor_manifest(anchors_dir) if anchors_dir else "") or GENERIC_ANCHOR_REFS
+    return f"{refs}\n\nSTYLE CONSTRAINTS: {constraints}\n\n"
 
 
 def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
@@ -478,12 +410,12 @@ def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
 
 def _load_anchor_parts(profile: "Profile") -> list:
     """Pre-load anchor images as genai Parts. Call once per run, not per image."""
-    return _load_anchors_from_dir(profile.anchors_dir, profile.image_style.get("max_anchors", 14))
+    return _load_anchors_from_dir(profile.anchors_dir, profile.image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
 
 
 def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
                           model: str = None, anchor_parts: list | None = None,
-                          preamble: str = IMAGE_PREAMBLE,
+                          preamble: str | None = None,
                           standardize_size: tuple[int, int] = (1920, 1080)) -> bool:
     """Generate image via Google AI with style anchors as references."""
     if model is None:
@@ -491,6 +423,9 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
 
     if anchor_parts is None:
         anchor_parts = _load_anchor_parts(profile)
+
+    if preamble is None:
+        preamble = build_preamble(profile.image_style, profile.anchors_dir)
 
     contents = [f"{preamble}{prompt}"]
     contents.extend(anchor_parts)
@@ -867,7 +802,6 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
             fresh_prompts = parse_image_prompts(image_prompts_raw)
-            fresh_prompts = _vet_image_prompts(fresh_prompts, profile, client, log_fn)
             prompts_file.write_text(
                 "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in fresh_prompts)
             )
@@ -969,8 +903,6 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     prompts = parse_image_prompts(image_prompts_raw)
     log_fn(f"📝  {len(prompts)} image prompts parsed")
-
-    prompts = _vet_image_prompts(prompts, profile, client, log_fn)
 
     (out_dir / "tts_script.txt").write_text(tts_script)
     (out_dir / "image_prompts.txt").write_text(

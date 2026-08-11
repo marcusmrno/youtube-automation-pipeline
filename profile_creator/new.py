@@ -10,7 +10,7 @@ from pathlib import Path
 import anthropic
 
 from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
-from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors
+from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
 from profile import PROFILES_ROOT
 
 ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
@@ -96,6 +96,7 @@ def run_create(seed_image: str | None = None) -> None:
     plan = build_anchor_plan(profile_yaml)
     print(f"\n⏳  Generating {len(plan)} anchor prompts ({sum(1 for s in plan if s['tier'] == 'verification')} verification, {sum(1 for s in plan if s['tier'] == 'full')} full)...")
     prompts, plan = generate_anchor_prompts(client, profile_yaml, style_content, plan)
+    write_manifest(anchors_dir, plan)
 
     # Verification anchors (character sheets — shown to user before continuing)
     run_verification_anchors(profile_yaml, anchors_dir, prompts, plan)

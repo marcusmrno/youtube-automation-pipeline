@@ -3,24 +3,40 @@ from __future__ import annotations
 
 import re
 import anthropic
+import yaml
 from pathlib import Path
 
 from pipeline import (
-    generate_image_google, _load_anchors_from_dir, ANCHOR_PREAMBLE,
+    generate_image_google, _load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
 )
 from .claude_helpers import MODEL
 
 
+def _roster(profile_yaml: dict) -> list[dict]:
+    """Characters are optional — mirror profile.load_profile's tolerance for a missing block."""
+    return (profile_yaml.get("characters") or {}).get("roster") or []
+
+
 def _generate_anchor(prompt: str, output_path: Path, profile_yaml: dict, anchors_dir: Path) -> bool:
-    max_anchors = profile_yaml["image_style"].get("max_anchors", 14)
-    anchor_parts = _load_anchors_from_dir(anchors_dir, max_anchors)
+    image_style = profile_yaml["image_style"]
+    anchor_parts = _load_anchors_from_dir(anchors_dir, image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
     return generate_image_google(
         prompt, output_path, profile=None, log_fn=print,
         model=profile_yaml["image_gen"]["default_model"],
         anchor_parts=anchor_parts,
-        preamble=ANCHOR_PREAMBLE,
+        # No manifest yet — these anchors are what it will describe.
+        preamble=build_preamble(image_style),
         standardize_size=(1280, 720),
     )
+
+
+def write_manifest(anchors_dir: Path, plan: list[dict]) -> None:
+    """Persist what each anchor slot is, so image generation can describe the references."""
+    anchors_dir.mkdir(parents=True, exist_ok=True)
+    (anchors_dir / "manifest.yaml").write_text(yaml.safe_dump(
+        [{"label": s["label"], "purpose": s["purpose"]} for s in plan],
+        sort_keys=False, default_flow_style=False, allow_unicode=True,
+    ))
 
 ANCHOR_SYSTEM = """You write image generation prompts for YouTube channel anchor images.
 Each prompt must:
@@ -42,7 +58,7 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
     Returns a list of slot dicts: {label, purpose, tier}
     Tier: "verification" (shown to user before proceeding) or "full"
     """
-    characters = profile_yaml["characters"]["roster"]
+    characters = _roster(profile_yaml)
     plan = []
 
     # ── Tier: verification — character reference sheets ───────────────────────
@@ -57,7 +73,7 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
             "label": "anchor-01",
             "purpose": (
                 f"Character reference sheet for {char['name']} — left side shows full body "
-                f"front view on plain off-white background; right side shows front, 3/4, side, "
+                f"front view on a plain neutral background; right side shows front, 3/4, side, "
                 f"and back views arranged in a row. No scene context, no props. "
                 f"Pure character design reference from all angles."
             ),
@@ -71,7 +87,7 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
             "label": "anchor-01",
             "purpose": (
                 f"Full cast reference sheet — {char_names} standing side by side on a plain "
-                f"off-white background. Full body, no scene context, no props. "
+                f"neutral background. Full body, no scene context, no props. "
                 f"Shows exact proportions and scale relationship between all characters."
             ),
             "tier": "verification",
@@ -86,13 +102,13 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
                 purpose = (
                     f"Multi-angle reference sheet for {pair_names} — each character shown "
                     f"in four views side by side: full front, 3/4 front, side profile, and "
-                    f"3/4 back. Plain off-white background, no scene context. "
+                    f"3/4 back. Plain neutral background, no scene context. "
                     f"Locks in both characters' designs from every angle."
                 )
             else:
                 purpose = (
                     f"Multi-angle reference sheet for {pair[0]['name']} — four views arranged "
-                    f"on a plain off-white background: full front, 3/4 front, side profile, and "
+                    f"on a plain neutral background: full front, 3/4 front, side profile, and "
                     f"3/4 back. No scene context. Locks in design from every angle."
                 )
             plan.append({
@@ -146,7 +162,7 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
             f"A flat lay of many props and objects relevant to the channel niche, "
             f"no characters present. Tests how the art style renders objects — "
             f"this is where style drift usually first appears. "
-            f"Objects should be flat 2D, bold outlined, matching the art style exactly."
+            f"Objects must match the channel's art style exactly."
         ),
         "tier": "full",
     })
@@ -224,15 +240,14 @@ def generate_anchor_prompts(
     Respects image_style.max_anchors — verification slots fill the budget first,
     then full-tier slots fill the remainder in order.
     """
-    max_anchors = profile_yaml.get("image_style", {}).get("max_anchors", 6)
+    max_anchors = profile_yaml.get("image_style", {}).get("max_anchors", DEFAULT_MAX_ANCHORS)
     verification = [s for s in plan if s["tier"] == "verification"]
     full         = [s for s in plan if s["tier"] == "full"]
     plan = (verification + full)[:max_anchors]
 
-    characters = profile_yaml["characters"]["roster"]
     char_block = "\n".join(
-        f"- {c['name']}: {c['description']}" for c in characters
-    )
+        f"- {c['name']}: {c['description']}" for c in _roster(profile_yaml)
+    ) or "(no recurring characters — these anchors define style only)"
     art_style = profile_yaml["image_style"].get("art_style_block", "")
 
     slot_block = "\n".join(
@@ -290,7 +305,7 @@ def run_verification_anchors(
     failed = []
 
     for slot in verification_slots:
-        prompt = prompts.get(slot["label"], f"flat 2D scene for {slot['label']}")
+        prompt = prompts.get(slot["label"]) or slot["purpose"]
         out_path = anchors_dir / f"{slot['label']}.png"
         print(f"  ⏳  Generating {slot['label']} ({slot['purpose'][:60]}...)")
         ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)
@@ -330,7 +345,7 @@ def run_full_anchors(
             ok_list.append(label)
             continue
 
-        prompt   = prompts.get(label, f"flat 2D scene for {label}")
+        prompt   = prompts.get(label) or slot["purpose"]
         out_path = anchors_dir / f"{label}.png"
         print(f"  ⏳  Generating {label} — {slot['purpose'][:60]}...")
         ok = _generate_anchor(prompt, out_path, profile_yaml, anchors_dir)

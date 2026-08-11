@@ -28,10 +28,7 @@ characters:
 image_style:
   art_style_block: |
     flat 2D test illustration on off-white paper, bold black outlines
-  sky_rotation: "sky blue → pale yellow → warm orange"
-  anchor_priority:
-    - anchor-01
-    - anchor-02
+  style_constraints: "Bold black outlines. No gradients. No photorealism."
   max_anchors: 2
   scene_rules: |
     ## Environment
