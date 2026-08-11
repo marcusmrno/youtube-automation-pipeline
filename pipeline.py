@@ -48,7 +48,11 @@ EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
 VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 
-CLAUDE_MODEL  = "claude-sonnet-4-6"
+CLAUDE_MODEL  = "claude-sonnet-5"
+# Sonnet 5 thinks by default and max_tokens caps thinking + text together,
+# so every CLAUDE_MODEL call needs headroom for both (and must stream).
+SONNET_MAX_TOKENS = 32000
+SONNET_EFFORT     = "medium"
 HAIKU_MODEL   = "claude-haiku-4-5-20251001"
 EL_MODEL      = "eleven_v3"
 # Image models come from the profile (image_gen.default_model / pro_model).
@@ -56,6 +60,11 @@ EL_MODEL      = "eleven_v3"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _text_of(response) -> str:
+    """Concatenate text blocks. Thinking models put a thinking block first."""
+    return "".join(b.text for b in response.content if b.type == "text")
+
 
 @functools.cache
 def _get_genai_client() -> "genai.Client":
@@ -173,12 +182,14 @@ def generate_script(topic: str, research: str, profile: "Profile",
                     client: anthropic.Anthropic, log_fn, approach_context: str = "") -> str:
     prompt = _build_script_prompt(topic, research, profile, approach_context)
     log_fn("✍️  Writing script...")
-    r = client.messages.create(
+    with client.messages.stream(
         model=CLAUDE_MODEL,
-        max_tokens=8000,
+        max_tokens=SONNET_MAX_TOKENS,
+        output_config={"effort": SONNET_EFFORT},
         messages=[{"role": "user", "content": prompt}]
-    )
-    script = _extract("SCRIPT", r.content[0].text)
+    ) as stream:
+        r = stream.get_final_message()
+    script = _extract("SCRIPT", _text_of(r))
     log_fn("✅  Script written")
     return script
 
@@ -202,12 +213,14 @@ CURRENT SCRIPT:
 
 ===SCRIPT===
 """
-    response = client.messages.create(
+    with client.messages.stream(
         model=CLAUDE_MODEL,
-        max_tokens=8000,
+        max_tokens=SONNET_MAX_TOKENS,
+        output_config={"effort": SONNET_EFFORT},
         messages=[{"role": "user", "content": prompt}]
-    )
-    text = response.content[0].text
+    ) as stream:
+        response = stream.get_final_message()
+    text = _text_of(response)
     return _extract("SCRIPT", text) or text.strip()
 
 
@@ -277,9 +290,10 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=64000,
+            output_config={"effort": SONNET_EFFORT},
             messages=[{"role": "user", "content": batch_msg}]
         ) as stream:
-            batch_text = stream.get_final_text()
+            batch_text = _text_of(stream.get_final_message())
 
         batch_prompts = _extract("IMAGE_PROMPTS", batch_text)
         batch_lines   = [l for l in batch_prompts.splitlines() if l.strip()]
@@ -358,12 +372,14 @@ def _vet_image_prompts(
     # Stage 2 — rewrite (Sonnet)
     rewrite_instructions = _build_image_prompt_rewrite_instructions(profile)
     try:
-        r2 = client.messages.create(
+        with client.messages.stream(
             model=CLAUDE_MODEL,
-            max_tokens=8192,
+            max_tokens=SONNET_MAX_TOKENS,
+            output_config={"effort": SONNET_EFFORT},
             messages=[{"role": "user", "content": rewrite_instructions + "\n\n" + "\n".join(flagged_lines)}]
-        )
-        rewritten_raw = r2.content[0].text.strip()
+        ) as stream:
+            r2 = stream.get_final_message()
+        rewritten_raw = _text_of(r2).strip()
         rewritten = parse_image_prompts(rewritten_raw)
     except Exception as e:
         log_fn(f"⚠️  Vetting Stage 2 failed ({e}) — using original prompts")
