@@ -27,7 +27,8 @@ VIDIQ_MCP_URL = "https://mcp.vidiq.com/mcp"
 VIDIQ_KEY     = (os.getenv("VIDIQ_API_KEY") or "").strip()
 
 
-VET_MODEL = "claude-haiku-4-5-20251001"
+SCRIPT_MODEL = "claude-opus-5"
+VET_MODEL    = "claude-haiku-4-5-20251001"
 
 
 async def run_vidiq_agent(
@@ -78,7 +79,7 @@ def split_agent_output(raw: str) -> tuple[str, str]:
 def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> tuple[str, str]:
     system_prompt = _build_agent_system_prompt(topic, profile)
     user_prompt   = f"Topic: {topic}\n\n{_build_agent_script_prompt(profile, approach_context)}"
-    raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn))
+    raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn, model=SCRIPT_MODEL))
     return split_agent_output(raw)
 
 
