@@ -709,6 +709,25 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
     return summary
 
 
+def _produce_from_script(script: str, topic: str, profile: "Profile", out_dir: Path,
+                         client: anthropic.Anthropic, log_fn, stop_event=None) -> dict:
+    """Phases 1b-4: a finished script -> TTS + image prompts -> images + voiceover."""
+    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
+
+    prompts = parse_image_prompts(image_prompts_raw)
+    log_fn(f"📝  {len(prompts)} image prompts parsed")
+
+    (out_dir / "tts_script.txt").write_text(tts_script)
+    (out_dir / "image_prompts.txt").write_text(
+        "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
+    )
+
+    if stop_event and stop_event.is_set():
+        return {"status": "cancelled", "out_dir": str(out_dir)}
+
+    return _run_production(topic, prompts, tts_script, profile, out_dir, log_fn, stop_event)
+
+
 # ── Run status + resume ───────────────────────────────────────────────────────
 
 def run_status(run_slug: str) -> dict:
@@ -898,21 +917,50 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     log_fn("✅  Script approved — generating TTS and image prompts...")
 
-    script = (out_dir / "script.txt").read_text()
-    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
+    # re-read: the approval step may have persisted the user's edits
+    return _produce_from_script((out_dir / "script.txt").read_text(), topic, profile,
+                                out_dir, client, log_fn, stop_event)
 
-    prompts = parse_image_prompts(image_prompts_raw)
-    log_fn(f"📝  {len(prompts)} image prompts parsed")
 
-    (out_dir / "tts_script.txt").write_text(tts_script)
-    (out_dir / "image_prompts.txt").write_text(
-        "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
-    )
+def _topic_from_script(script: str) -> str:
+    """Slug source for a premade script: its TITLE: line, else its first line."""
+    for line in script.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        return line[6:].strip() if line[:6].lower() == "title:" else line
+    return "untitled"
 
-    if stop_event and stop_event.is_set():
-        return {"status": "cancelled", "out_dir": str(out_dir)}
 
-    return _run_production(topic, prompts, tts_script, profile, out_dir, log_fn, stop_event)
+def run_from_script(script: str, profile: "Profile", topic: str = "",
+                    progress_callback=None, stop_event=None) -> dict:
+    """Run the pipeline from an already-written script — no research, writing, or approval.
+
+    Overwrites the run folder named after `topic` (or the script's TITLE line),
+    same as re-running that topic would. Use resume_pipeline() to fill in only
+    what a folder is missing.
+    """
+    def log_fn(msg):
+        log(msg, progress_callback)
+
+    script = script.strip()
+    if not script:
+        log_fn("❌  Empty script — nothing to produce")
+        return {"status": "error", "reason": "empty script"}
+
+    if not check_keys(profile, log_fn):
+        return {"status": "error", "reason": "missing API keys"}
+
+    topic   = topic.strip() or _topic_from_script(script)
+    out_dir = make_output_dir(slugify(topic))
+    (out_dir / "profile.txt").write_text(profile.name)
+    (out_dir / "script.txt").write_text(script)
+
+    log_fn(f"\n🚀  Starting pipeline from premade script: {topic}")
+    log_fn(f"📁  Output directory: {out_dir}")
+
+    return _produce_from_script(script, topic, profile, out_dir,
+                                anthropic.Anthropic(api_key=ANTHROPIC_KEY), log_fn, stop_event)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
@@ -930,6 +978,12 @@ if __name__ == "__main__":
     run_p.add_argument("topic", nargs="+")
     run_p.add_argument("--profile", default=None)
 
+    # Run production from a script you already wrote
+    sc = sub.add_parser("script", help="Run production from an existing script file ('-' for stdin)")
+    sc.add_argument("path")
+    sc.add_argument("--profile", default=None)
+    sc.add_argument("--topic", default="", help="Overrides the slug taken from the script's TITLE line")
+
     # Metadata subcommand
     md = sub.add_parser("metadata", help="Generate or update metadata + thumbnails")
     md.add_argument("run_slug")
@@ -940,7 +994,7 @@ if __name__ == "__main__":
 
     # Back-compat: if first arg isn't a known subcommand, treat as run
     argv = sys.argv[1:]
-    if argv and argv[0] not in {"run", "metadata"}:
+    if argv and argv[0] not in {"run", "metadata", "script"}:
         argv = ["run"] + argv
 
     args = parser.parse_args(argv)
@@ -959,6 +1013,11 @@ if __name__ == "__main__":
         for p in available:
             print(f"  {p}")
         sys.exit(1)
+
+    if args.cmd == "script":
+        text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
+        run_from_script(text, _resolve_profile(args.profile), args.topic)
+        sys.exit(0)
 
     if args.cmd == "metadata":
         import metadata as md_mod

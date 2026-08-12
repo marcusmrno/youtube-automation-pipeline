@@ -13,8 +13,8 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
-from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, regenerate_images,
-                      parse_image_prompts, revise_script,
+from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, run_from_script,
+                      regenerate_images, parse_image_prompts, revise_script,
                       run_status, ANTHROPIC_KEY, VIDIQ_KEY,
                       generate_clarifying_questions, generate_approach_pitches)
 from profile import load_profile, list_profiles
@@ -68,6 +68,45 @@ def detect_stage(msg: str) -> str | None:
     return None
 
 
+def _load_ui_profile(profile_name: str):
+    """(profile, error) — falls back to the only profile when exactly one exists."""
+    available = list_profiles()
+    if not available:
+        return None, "No profiles found. Create profiles/<name>/profile.yaml first."
+    if not profile_name:
+        if len(available) > 1:
+            return None, f"Select a profile. Available: {available}"
+        profile_name = available[0]
+    try:
+        return load_profile(profile_name), None
+    except ValueError as e:
+        return None, str(e)
+
+
+def _start_run(call):
+    """Wire up the log queue + stop event, then run `call(progress_cb, stop_event)` on a thread."""
+    lq = queue.Queue()
+    se = threading.Event()
+
+    _state["log_queue"]      = lq
+    _state["stop_event"]     = se
+    _state["approval_queue"] = None
+
+    def progress_cb(msg: str):
+        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
+
+    def worker():
+        try:
+            call(progress_cb, se)
+        except Exception as e:
+            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
+        finally:
+            lq.put({"type": "done"})
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"ok": True})
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/profiles")
@@ -97,20 +136,9 @@ def run():
     if not topic:
         return jsonify({"ok": False, "error": "No topic provided"})
 
-    available = list_profiles()
-    if not available:
-        return jsonify({"ok": False, "error": "No profiles found. Create profiles/<name>/profile.yaml first."})
-
-    if not profile_name:
-        if len(available) == 1:
-            profile_name = available[0]
-        else:
-            return jsonify({"ok": False, "error": f"Select a profile. Available: {available}"})
-
-    try:
-        profile = load_profile(profile_name)
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)})
+    profile, err = _load_ui_profile(profile_name)
+    if err:
+        return jsonify({"ok": False, "error": err})
 
     lq = queue.Queue()
     aq = queue.Queue()
@@ -209,26 +237,26 @@ def resume():
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)})
 
-    lq = queue.Queue()
-    se = threading.Event()
+    return _start_run(lambda cb, se: resume_pipeline(
+        run_slug, profile, progress_callback=cb, stop_event=se))
 
-    _state["log_queue"]  = lq
-    _state["stop_event"] = se
-    _state["approval_queue"] = None
 
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
+@app.route("/run_from_script", methods=["POST"])
+def run_from_script_route():
+    """Produce assets from a script the user already wrote — no research, writing, or approval."""
+    data   = request.get_json(force=True)
+    script = (data.get("script") or "").strip()
+    topic  = (data.get("topic") or "").strip()
 
-    def worker():
-        try:
-            resume_pipeline(run_slug, profile, progress_callback=progress_cb, stop_event=se)
-        except Exception as e:
-            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "done"})
+    if not script:
+        return jsonify({"ok": False, "error": "No script provided"})
 
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    profile, err = _load_ui_profile((data.get("profile") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
+
+    return _start_run(lambda cb, se: run_from_script(
+        script, profile, topic, progress_callback=cb, stop_event=se))
 
 
 

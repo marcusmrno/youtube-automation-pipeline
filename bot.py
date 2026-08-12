@@ -32,6 +32,8 @@ from pipeline import (
     ANTHROPIC_KEY,
     run_pipeline,
     resume_pipeline,
+    run_from_script,
+    _topic_from_script,
     revise_script,
     run_status,
     slugify,
@@ -52,6 +54,7 @@ _state: dict = {
     "approval_event":    None,
     "approval_result":   None,
     "revision_mode":     False,
+    "script_mode":       False,   # waiting for a premade script (pasted or uploaded)
     "clarifying_mode":   False,   # waiting for answers to clarifying questions
     "clarifying_topic":  None,    # topic being planned
     "clarifying_questions": None, # parsed list of {question, default} dicts
@@ -287,6 +290,7 @@ async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAU
         return
 
     parsed = _parse_clarifying_questions(questions_text)
+    _state["script_mode"]          = False   # these two both eat the next text message
     _state["clarifying_mode"]      = True
     _state["clarifying_topic"]     = topic
     _state["clarifying_questions"] = parsed
@@ -353,6 +357,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/run <topic> — plan & start a pipeline run\n"
         "   ↳ asks clarifying questions, pitches 3 approaches, then runs\n"
         "   ↳ reply `default` to auto-fill all suggested answers\n"
+        "/script — produce from a script you already wrote\n"
+        "   ↳ then paste it, or upload it as a .txt file\n"
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
         "/download [slug] — download run assets as zip (latest if omitted)\n"
@@ -662,7 +668,8 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if ae:
         _state["approval_result"] = False
         ae.set()
-    _state["running"] = False
+    _state["running"]     = False
+    _state["script_mode"] = False
     await update.message.reply_text("🛑 Stop signal sent.")
 
 
@@ -676,6 +683,52 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /run <topic>")
         return
     await _send_clarifying_questions(update, context, topic=topic)
+
+
+@auth
+async def cmd_script(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if _state["running"]:
+        await update.message.reply_text("⚠️ A pipeline is already running. Use /stop first.")
+        return
+    _state["script_mode"] = True
+    await update.message.reply_text(
+        "📄 Send the script now — paste it, or upload it as a .txt file.\n\n"
+        "No research, writing, or approval step: it goes straight to TTS, image prompts, "
+        "images, and voiceover. The run is named after the script's `TITLE:` line, and a run "
+        "folder of that name is overwritten.",
+        parse_mode="Markdown",
+    )
+
+
+async def _run_premade_script(update, context: ContextTypes.DEFAULT_TYPE, script: str) -> None:
+    """Consume a pasted or uploaded script and start production."""
+    if not script.strip():
+        await update.message.reply_text("⚠️ That script is empty — send another, or /stop to cancel.")
+        return
+    _state["script_mode"] = False
+    await _start_pipeline(update, context, script=script)
+
+
+@auth
+async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A .txt upload is only meaningful while /script is waiting for one."""
+    if not _state.get("script_mode"):
+        await update.message.reply_text("Use /script first if that's a script to produce from.")
+        return
+
+    doc = update.message.document
+    try:
+        raw = await (await doc.get_file()).download_as_bytearray()
+        script = bytes(raw).decode("utf-8")
+    except UnicodeDecodeError:
+        await update.message.reply_text(f"❌ `{doc.file_name}` isn't UTF-8 text — send a .txt file.",
+                                        parse_mode="Markdown")
+        return
+    except Exception as e:
+        await update.message.reply_text(f"❌ Could not read that file: {e}")
+        return
+
+    await _run_premade_script(update, context, script)
 
 
 @auth
@@ -716,10 +769,14 @@ async def _start_pipeline(
     topic: str | None = None,
     run_slug: str | None = None,
     approach_context: str = "",
+    script: str | None = None,
 ) -> None:
     chat_id = update.effective_chat.id
     app     = context.application
     loop    = asyncio.get_running_loop()
+
+    if script and not topic:
+        topic = _topic_from_script(script)
 
     lq = queue.Queue()
     se = threading.Event()
@@ -732,6 +789,7 @@ async def _start_pipeline(
         "approval_event":  None,
         "approval_result": None,
         "revision_mode":   False,
+        "script_mode":     False,
         "chat_id":         chat_id,
         "log_queue":       lq,
         "total_images":    0,
@@ -748,7 +806,18 @@ async def _start_pipeline(
         _state["running"] = False
         return
 
-    if topic:
+    if script:
+        profile_name = _state["profile_name"] or available[0]
+        profile = load_profile(profile_name)
+        label = f"▶️ Producing from script: *{topic}*\nProfile: `{profile_name}`"
+        fn    = lambda: run_from_script(
+            script,
+            profile,
+            topic,
+            progress_callback=progress_cb,
+            stop_event=se,
+        )
+    elif topic:
         profile_name = _state["profile_name"] or available[0]
         profile = load_profile(profile_name)
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
@@ -880,6 +949,11 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @auth
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # A pasted premade script (Telegram caps these at 4096 chars — longer ones come as a file)
+    if _state.get("script_mode"):
+        await _run_premade_script(update, context, update.message.text)
+        return
+
     # Handle clarifying question answers
     if _state.get("clarifying_mode"):
         text = update.message.text.strip()
@@ -969,12 +1043,14 @@ def main() -> None:
     app.add_handler(CommandHandler("runs",     cmd_runs))
     app.add_handler(CommandHandler("stop",     cmd_stop))
     app.add_handler(CommandHandler("run",      cmd_run))
+    app.add_handler(CommandHandler("script",   cmd_script))
     app.add_handler(CommandHandler("resume",   cmd_resume))
     app.add_handler(CommandHandler("download", cmd_download))
     app.add_handler(CommandHandler("metadata", cmd_metadata))
     app.add_handler(CommandHandler("profile",  cmd_profile))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, on_document))
 
     print(f"✅ Bot running — authorized user ID: {ALLOWED_USER_ID}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

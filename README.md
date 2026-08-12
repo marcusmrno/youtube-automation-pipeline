@@ -91,6 +91,10 @@ python ui.py
 4. Pipeline runs, then pauses at the script approval gate before any paid generation
 5. Edit, revise with feedback, or approve — production starts on approval
 
+**Starting from a script you already wrote:**
+- Switch the input card to **Script**, paste it, and click **Produce From Script** — no research, writing, or approval gate, straight to TTS, image prompts, images, and voiceover
+- The run is named after the script's `TITLE:` line unless you fill in **Run Name**; a run folder of that name is overwritten
+
 **Image gallery:**
 - Browse all generated images at consistent size with scroll
 - Lightbox shows the matching script section for each image's timestamp; image prompt available as a collapsible dropdown
@@ -108,6 +112,7 @@ python ui.py
 | Command | Description |
 |---------|-------------|
 | `/run <topic>` | Starts the planning flow — clarifying questions → approach pitches → pipeline |
+| `/script` | Produce from a script you already wrote — then paste it, or upload it as a `.txt` |
 | `/resume [slug]` | Resume an incomplete run |
 | `/runs` | List recent runs with status |
 | `/status` | Show status of the current/last run |
@@ -127,6 +132,14 @@ python ui.py
 
 ```bash
 python pipeline.py "why humans sleep"
+```
+
+Already have a script? Skip research, writing, and the approval gate — go straight to
+TTS, image prompts, images, and voiceover. The run folder is named after the script's
+`TITLE:` line unless `--topic` says otherwise.
+
+```bash
+python pipeline.py script my-script.txt --profile <name>
 ```
 
 ### Metadata & Thumbnail

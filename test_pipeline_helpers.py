@@ -129,3 +129,15 @@ with TemporaryDirectory() as td:
     assert "anchor-01: cast sheet" in pre and GENERIC_ANCHOR_REFS not in pre, pre
 
 print("test_build_preamble: PASS")
+
+
+# ── premade scripts name their own run folder ────────────────────────────────
+from pipeline import _topic_from_script, slugify
+
+assert _topic_from_script("TITLE: The Real Reason\nKEYWORDS: a, b\n") == "The Real Reason"
+assert _topic_from_script("\n\n  title: lower case works\n") == "lower case works"
+assert _topic_from_script("No title line here\nsecond line") == "No title line here"
+assert _topic_from_script("   \n\n") == "untitled"
+assert slugify(_topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
+
+print("test_topic_from_script: PASS")
