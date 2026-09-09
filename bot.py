@@ -4,6 +4,7 @@ Run: python bot.py
 """
 
 import asyncio
+import functools
 import io
 import os
 import re
@@ -22,8 +23,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-
-import functools
 
 import anthropic
 import metadata as _metadata_mod
@@ -785,12 +784,10 @@ async def _start_pipeline(
         "running":         True,
         "run_slug":        run_slug or slugify(topic or ""),
         "stop_event":      se,
-        "loop":            loop,
         "approval_event":  None,
         "approval_result": None,
         "revision_mode":   False,
         "script_mode":     False,
-        "chat_id":         chat_id,
         "log_queue":       lq,
         "total_images":    0,
         "done_images":     0,

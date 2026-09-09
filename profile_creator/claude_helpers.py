@@ -8,9 +8,11 @@ import anthropic
 
 MODEL = "claude-sonnet-4-6"
 
-# Load the cat-educational profile as a concrete example for the system prompt
-_EXAMPLE_PROFILE_PATH = Path(__file__).parent.parent / "profiles" / "cat-educational-v2" / "profile.yaml"
-_EXAMPLE_STYLE_PATH   = Path(__file__).parent.parent / "profiles" / "cat-educational-v2" / "style-sheet.md"
+# profiles/example is the only profile that ships with the repo (the rest are
+# gitignored), so it is the one that is always here to show as a concrete example.
+_EXAMPLE_DIR          = Path(__file__).parent.parent / "profiles" / "example"
+_EXAMPLE_PROFILE_PATH = _EXAMPLE_DIR / "profile.yaml"
+_EXAMPLE_STYLE_PATH   = _EXAMPLE_DIR / "style-sheet.md"
 
 SYSTEM_PROMPT_NEW = f"""You are a YouTube channel profile designer. Your job is to take a user's channel concept and produce a complete channel profile.
 
@@ -104,7 +106,7 @@ This is injected as the scene composition section of the prompt writer's instruc
 
 **There is no required structure.** A minimalist diagram style might have 3 bullet points. A rich illustrated style might have 10+ rules covering landscape types, sky rotation, foreground elements, text labels, and forbidden clichés.
 
-## Example profile.yaml (cat-educational)
+## Example profile.yaml
 ```yaml
 {_EXAMPLE_PROFILE_PATH.read_text() if _EXAMPLE_PROFILE_PATH.exists() else "# not found"}
 ```

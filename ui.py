@@ -9,11 +9,10 @@ import json
 import queue
 import re
 import threading
-from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
-from pipeline import (PROJECT_ROOT, run_pipeline, resume_pipeline, run_from_script,
+from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
                       regenerate_images, parse_image_prompts, revise_script,
                       run_status, ANTHROPIC_KEY, VIDIQ_KEY,
                       generate_clarifying_questions, generate_approach_pitches)
@@ -40,7 +39,6 @@ def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
     return available[0] if available else None
 
 app = Flask(__name__)
-OUTPUT_ROOT = PROJECT_ROOT / "output"
 
 _state: dict = {
     "log_queue":      None,
@@ -277,20 +275,25 @@ def stop():
 
 # ── Data endpoints ────────────────────────────────────────────────────────────
 
-@app.route("/runs")
-def runs():
+def _list_runs(required_file: str | None = None):
+    """Run slugs, newest name first, optionally filtered to those holding `required_file`."""
     if not OUTPUT_ROOT.exists():
         return jsonify([])
-    return jsonify(sorted([d.name for d in OUTPUT_ROOT.iterdir() if d.is_dir()], reverse=True))
+    return jsonify(sorted(
+        (d.name for d in OUTPUT_ROOT.iterdir()
+         if d.is_dir() and (required_file is None or (d / required_file).exists())),
+        reverse=True,
+    ))
+
+
+@app.route("/runs")
+def runs():
+    return _list_runs()
 
 
 @app.route("/runs_with_prompts")
 def runs_with_prompts():
-    if not OUTPUT_ROOT.exists():
-        return jsonify([])
-    result = [d.name for d in OUTPUT_ROOT.iterdir()
-              if d.is_dir() and (d / "image_prompts.txt").exists()]
-    return jsonify(sorted(result, reverse=True))
+    return _list_runs("image_prompts.txt")
 
 
 @app.route("/run_status/<path:run_slug>")
@@ -403,11 +406,7 @@ def metadata_thumbnail_file(run_slug, index):
 
 @app.route("/runs_with_scripts")
 def runs_with_scripts():
-    if not OUTPUT_ROOT.exists():
-        return jsonify([])
-    result = [d.name for d in OUTPUT_ROOT.iterdir()
-              if d.is_dir() and (d / "script.txt").exists()]
-    return jsonify(sorted(result, reverse=True))
+    return _list_runs("script.txt")
 
 
 @app.route("/prompts/<run_name>")
@@ -417,24 +416,15 @@ def get_prompts(run_name: str):
     path = OUTPUT_ROOT / run_name / "image_prompts.txt"
     if not path.exists():
         return jsonify({})
-    prompts = {}
-    for line in path.read_text().splitlines():
-        parts = line.split("|", 2)
-        if len(parts) == 3:
-            num    = parts[0].strip().zfill(3)
-            source = parts[1].strip()
-            txt    = parts[2].strip()
-            prompts[num] = {"source": source, "prompt": txt}
-    return jsonify(prompts)
+    return jsonify({
+        p["num"]: {"source": p["source"], "prompt": p["prompt"]}
+        for p in parse_image_prompts(path.read_text())
+    })
 
 
 @app.route("/runs_with_audio")
 def runs_with_audio():
-    if not OUTPUT_ROOT.exists():
-        return jsonify([])
-    result = [d.name for d in OUTPUT_ROOT.iterdir()
-              if d.is_dir() and (d / "audio" / "voiceover.mp3").exists()]
-    return jsonify(sorted(result, reverse=True))
+    return _list_runs("audio/voiceover.mp3")
 
 
 @app.route("/audio/<run_name>")

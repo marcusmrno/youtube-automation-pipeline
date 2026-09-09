@@ -62,6 +62,8 @@ print("test_expand_short_prompts: PASS")
 
 
 # ── _stream_text retries mid-stream drops ────────────────────────────────────
+# pipeline.time IS the stdlib module — restore it below, or every later sleep is a no-op
+_real_sleep = pipeline.time.sleep
 pipeline.time.sleep = lambda s: None   # don't actually back off in the test
 
 
@@ -100,6 +102,8 @@ try:
 except anthropic.APIConnectionError:
     pass
 assert c.calls == 3, c.calls
+
+pipeline.time.sleep = _real_sleep
 
 print("test_stream_text_retry: PASS")
 
@@ -141,3 +145,41 @@ assert _topic_from_script("   \n\n") == "untitled"
 assert slugify(_topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
 
 print("test_topic_from_script: PASS")
+
+
+# ── a stop that lands after submission halts the queued images ───────────────
+import threading, time
+from pipeline import generate_all_images
+
+_Profile.image_gen = {"flicker": {"enabled": False}}
+pipeline._load_anchor_parts = lambda profile: []
+
+generated: list[str] = []
+stop = threading.Event()
+
+
+def _fake_gen(prompt, path, profile, log_fn, **kw):
+    generated.append(path.name)
+    time.sleep(0.05)   # the submit loop queues every remaining prompt during this
+    stop.set()         # ...then the user hits stop
+    return True
+
+
+# pytest imports this file too, so anything patched here has to be handed back
+_real = (pipeline.generate_image_google, pipeline._load_anchor_parts)
+pipeline.generate_image_google = _fake_gen
+
+with TemporaryDirectory() as td:
+    out = Path(td)
+    (out / "images").mkdir()
+    results = generate_all_images(
+        [{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
+        out, P, lambda m: None, stop_event=stop, max_workers=1,
+    )
+
+pipeline.generate_image_google, pipeline._load_anchor_parts = _real
+
+assert generated == ["001.png"], generated   # 19 queued images must not bill
+assert list(results) == ["001"], results
+
+print("test_stop_halts_queued_images: PASS")

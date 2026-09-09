@@ -4,7 +4,6 @@ Prompt builder functions — pure functions that return strings, no API calls.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,6 +13,34 @@ if TYPE_CHECKING:
 def _extract(tag: str, text: str) -> str:
     m = re.search(rf"==={tag}===(.*?)(?====|\Z)", text, re.DOTALL)
     return m.group(1).strip() if m else ""
+
+
+def _build_research_prompt(topic: str) -> str:
+    return f"""
+You are a research assistant preparing verified facts for a YouTube educational video script.
+
+TOPIC: {topic}
+
+Your job:
+1. Identify the 10-15 most interesting, accurate, and surprising facts about this topic.
+2. Flag any claims that are commonly misunderstood or frequently stated incorrectly online.
+3. Note the current scientific or historical consensus on any contested points.
+4. Highlight 2-3 counterintuitive angles that would make a strong video hook.
+
+Return your response in this exact format:
+
+===VERIFIED_FACTS===
+[Numbered list of verified facts. Each fact on its own line. Be specific — include real numbers, dates, names, and sources where possible.]
+
+===COMMON_MISCONCEPTIONS===
+[Numbered list of myths or exaggerations to avoid. State what is wrong and what is actually true.]
+
+===HOOK_ANGLES===
+[2-3 bullet points — surprising or counterintuitive angles that would make a strong video opening]
+
+===CONFIDENCE_NOTES===
+[Any facts where certainty is lower, or where scientific consensus is still evolving. Flag these so the script writer can soften the language.]
+"""
 
 
 def _build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:

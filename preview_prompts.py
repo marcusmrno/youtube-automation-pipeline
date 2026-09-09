@@ -15,20 +15,15 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add the pipeline directory to path
-sys.path.insert(0, str(Path(__file__).parent))
-
 import anthropic
 from pipeline import _generate_tts_and_prompts, parse_image_prompts, ANTHROPIC_KEY
-from profile import load_profile
-
-DEFAULT_PROFILE = "cat-educational-v2"
+from profile import load_profile, list_profiles
 
 
 def main():
     parser = argparse.ArgumentParser(description="Test script → image prompt generation")
     parser.add_argument("script", help="Path to script.txt")
-    parser.add_argument("--profile", default=DEFAULT_PROFILE, help=f"Profile name (default: {DEFAULT_PROFILE})")
+    parser.add_argument("--profile", default=None, help="Profile name (default: the only one, if there is only one)")
     parser.add_argument("--out", default=None, help="Directory to write outputs (default: same dir as script)")
     args = parser.parse_args()
 
@@ -40,13 +35,18 @@ def main():
     out_dir = Path(args.out).resolve() if args.out else script_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    profiles_dir = Path(__file__).parent / "profiles"
-    if not (profiles_dir / args.profile).exists():
-        print(f"❌  Profile not found: {args.profile}")
-        print(f"   Available: {[p.name for p in profiles_dir.iterdir() if p.is_dir()]}")
-        sys.exit(1)
+    available = list_profiles()
+    if not args.profile:
+        if len(available) != 1:
+            print(f"❌  Specify --profile. Available: {available}")
+            sys.exit(1)
+        args.profile = available[0]
 
-    profile = load_profile(args.profile)
+    try:
+        profile = load_profile(args.profile)   # raises with the available list
+    except ValueError as e:
+        print(f"❌  {e}")
+        sys.exit(1)
     script  = script_path.read_text()
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 

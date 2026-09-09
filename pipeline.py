@@ -28,6 +28,7 @@ from agents import run_script_agent, run_vet_agent
 from prompts import (
     _build_clarifying_questions_prompt,
     _build_approach_pitch_prompt,
+    _build_research_prompt,
     _build_script_prompt,
     _build_tts_prompt,
     _build_image_prompt_instructions,
@@ -127,37 +128,10 @@ def check_keys(profile: "Profile", log_fn) -> bool:
 
 def research_topic(topic: str, client: anthropic.Anthropic, log_fn) -> str:
     log_fn("🔬  Researching topic and verifying facts...")
-
-    prompt = f"""
-You are a research assistant preparing verified facts for a YouTube educational video script.
-
-TOPIC: {topic}
-
-Your job:
-1. Identify the 10-15 most interesting, accurate, and surprising facts about this topic.
-2. Flag any claims that are commonly misunderstood or frequently stated incorrectly online.
-3. Note the current scientific or historical consensus on any contested points.
-4. Highlight 2-3 counterintuitive angles that would make a strong video hook.
-
-Return your response in this exact format:
-
-===VERIFIED_FACTS===
-[Numbered list of verified facts. Each fact on its own line. Be specific — include real numbers, dates, names, and sources where possible.]
-
-===COMMON_MISCONCEPTIONS===
-[Numbered list of myths or exaggerations to avoid. State what is wrong and what is actually true.]
-
-===HOOK_ANGLES===
-[2-3 bullet points — surprising or counterintuitive angles that would make a strong video opening]
-
-===CONFIDENCE_NOTES===
-[Any facts where certainty is lower, or where scientific consensus is still evolving. Flag these so the script writer can soften the language.]
-"""
-
     response = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": _build_research_prompt(topic)}]
     )
     research = response.content[0].text
     log_fn("✅  Research complete")
@@ -240,6 +214,11 @@ CURRENT SCRIPT:
     return _extract("SCRIPT", text) or text.strip()
 
 
+def format_image_prompts(prompts: list[dict]) -> str:
+    """Serialize parsed prompts back to image_prompts.txt form. Inverse of parse_image_prompts."""
+    return "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
+
+
 def parse_image_prompts(raw: str) -> list[dict]:
     """Parse NNN | source line | prompt lines into list of dicts, deduplicated by number."""
     seen: dict[str, dict] = {}
@@ -316,9 +295,7 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     )
 
     prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
-    image_prompts = "\n".join(
-        f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts
-    )
+    image_prompts = format_image_prompts(prompts)
     log_fn(f"✅  Image prompts generated — {len(prompts)} total")
     return tts_script, image_prompts
 
@@ -469,6 +446,10 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
 
     def _one(i: int, p: dict):
         num      = p["num"]
+        # Every prompt is submitted up front, so a stop that lands after submission
+        # must be caught here — otherwise ~200 queued images keep billing.
+        if stop_event and stop_event.is_set():
+            return num, None
         img_path = out_dir / "images" / f"{num}.png"
         log_fn(f"🖼  Generating image {i+1}/{total} ({num})")
         ok = generate_image_google(p["prompt"], img_path, profile, log_fn, anchor_parts=anchor_parts)
@@ -718,9 +699,7 @@ def _produce_from_script(script: str, topic: str, profile: "Profile", out_dir: P
     log_fn(f"📝  {len(prompts)} image prompts parsed")
 
     (out_dir / "tts_script.txt").write_text(tts_script)
-    (out_dir / "image_prompts.txt").write_text(
-        "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
-    )
+    (out_dir / "image_prompts.txt").write_text(format_image_prompts(prompts))
 
     if stop_event and stop_event.is_set():
         return {"status": "cancelled", "out_dir": str(out_dir)}
@@ -820,10 +799,7 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
             tts_file.write_text(tts_script)
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
-            fresh_prompts = parse_image_prompts(image_prompts_raw)
-            prompts_file.write_text(
-                "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in fresh_prompts)
-            )
+            prompts_file.write_text(format_image_prompts(parse_image_prompts(image_prompts_raw)))
             log_fn("✅  image_prompts.txt saved")
     else:
         tts_script = tts_file.read_text()
@@ -834,9 +810,8 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
     images_on_disk = sum(1 for p in prompts if _find_image(out_dir / "images", p["num"]))
     log_fn(f"🖼   {images_on_disk}/{len(prompts)} images already on disk — skipping those")
 
-    topic = script[:80]
     return _run_production(
-        topic, prompts, tts_script, profile, out_dir,
+        _topic_from_script(script), prompts, tts_script, profile, out_dir,
         log_fn, stop_event, skip_existing_images=True,
     )
 

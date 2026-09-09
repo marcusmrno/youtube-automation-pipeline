@@ -8,7 +8,7 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 
 | Layer | Technology |
 |-------|-----------|
-| **Orchestration** | Python — async pipeline with checkpoint-based resumability |
+| **Orchestration** | Python — threaded pipeline with checkpoint-based resumability |
 | **LLM** | Anthropic Claude (Sonnet + Haiku) — research, script writing, script planning, TTS enhancement, revision |
 | **AI Agents** | Claude Agent SDK, connected to vidIQ's MCP server as a tool source — script generation, SEO vetting, keyword research |
 | **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~200-280 images per video with style anchor references, generated in parallel |
@@ -34,7 +34,7 @@ topic → clarifying questions → approach selection → research → script
 | **Vet** | Second agent pass fact-checks, closes SEO gaps, and enforces word count targets |
 | **Approval gate** | Pipeline pauses for human review — script can be edited, revised with feedback, or rejected before any paid generation |
 | **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
-| **Image prompts** | One detailed prompt per ~3–4 seconds of narration (`NNN \| MM:SS-MM:SS \| [description]`), vetted in a two-stage Haiku-detect / Sonnet-rewrite pass, then written with embedded character and style rules |
+| **Image prompts** | One prompt per ~3–4 seconds of narration. Sonnet writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
 | **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
 | **Voiceover** | ElevenLabs generates chunked audio in parallel with image generation |
 | **Flicker pass (optional, manual)** | If the profile enables `image_gen.flicker`, each image gets stretched b/c variants generated alongside it; `apply_flicker.py` then layers alternating b/c segments over the placed clips in the live Palmier project for a hand-drawn flicker effect |
@@ -139,7 +139,8 @@ TTS, image prompts, images, and voiceover. The run folder is named after the scr
 `TITLE:` line unless `--topic` says otherwise.
 
 ```bash
-python pipeline.py script my-script.txt --profile <name>
+python pipeline.py script my-script.txt           # --profile optional when only one profile exists
+python pipeline.py script - --profile <name>      # read the script from stdin
 ```
 
 ### Metadata & Thumbnail
@@ -180,6 +181,7 @@ output/why-humans-sleep/
 ├── tts_script.txt         # clean narration with ElevenLabs audio tags
 ├── image_prompts.txt      # NNN | [source narration sentence] | [full prompt] per image
 ├── metadata.json          # titles, description, hashtags, thumbnail choice (after `metadata` step)
+├── thumbnail.png          # copy of the chosen thumbnail
 ├── images/
 │   ├── 001.png
 │   ├── flicker/           # NNNb.png / NNNc.png stretch variants — only if profile.image_gen.flicker is enabled
@@ -189,8 +191,7 @@ output/why-humans-sleep/
 └── thumbnails/
     ├── thumb-01.png        # rendered thumbnail candidates (after `metadata` step)
     ├── thumb-02.png
-    ├── thumb-03.png
-    └── thumbnail.png       # copy of the chosen thumbnail
+    └── thumb-03.png
 ```
 
 ---
@@ -315,10 +316,26 @@ Versioning follows `my-channel` → `my-channel-v2` → `my-channel-v3` automati
 
 ## Image generation models
 
-| Alias | Model | Notes |
-|-------|-------|-------|
-| `nano-banana-2` | `gemini-3.1-flash-image` | Default — fast and cost-effective for full runs |
-| `3-pro` | `gemini-3-pro-image` | Highest quality — use for hero images or anchors |
+Model IDs are not hardcoded — they come from the active profile's `image_gen` block. The
+regenerate selector in the UI picks between the two slots by alias:
+
+| Alias | Profile field | Notes |
+|-------|---------------|-------|
+| `nano-banana-2` | `image_gen.default_model` | Default — fast and cost-effective for full runs |
+| `3-pro` | `image_gen.pro_model` | Highest quality — used for hero images, anchors, and thumbnails |
+
+`profiles/example` ships with `gemini-3.1-flash-image` and `gemini-3-pro-image` in those slots.
+
+---
+
+## Tests
+
+```bash
+python -m pytest tests/ test_pipeline_helpers.py test_bot_script_mode.py -q
+```
+
+`tests/` is the pytest suite. The top-level `test_*.py` files are assert-based checks that
+pytest collects but that also run on their own — `python test_pipeline_helpers.py`.
 
 ---
 
@@ -335,10 +352,12 @@ youtube-pipeline/
 ├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, metadata)
 ├── bot.py                # Telegram bot interface
 ├── create_profile.py     # interactive profile creator CLI
+├── preview_prompts.py    # script → tts_script.txt + image_prompts.txt, no images generated
 ├── profile_creator/      # profile creation subpackage
 ├── profiles/example/     # fully annotated profile schema — copy to get started
 ├── templates/index.html  # web UI (vanilla JS, SSE, gallery, lightbox)
-├── tests/                # pytest suite (pipeline parsing/vetting, metadata, profile, create_profile)
-├── docs/                 # design docs for past features
+├── tests/                # pytest suite (pipeline parsing, metadata, profile, create_profile)
+├── test_*.py             # assert-based checks that also run standalone: `python test_<name>.py`
+├── docs/                 # design docs for past features (gitignored)
 └── output/               # generated assets per run (gitignored)
 ```
