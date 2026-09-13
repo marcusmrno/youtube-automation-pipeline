@@ -4,7 +4,13 @@
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~200+ images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
+An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~150 images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
+
+![Sample output — 24 consecutive frames from a single run](assets/sample-output.jpg)
+
+*24 consecutive frames from one run, generated with the bundled `example` profile. No frame was
+hand-picked or retouched — style consistency and the in-image text come from the profile's
+`art_style_block` and `scene_rules`, not from post-processing.*
 
 ---
 
@@ -15,7 +21,7 @@ An end-to-end AI video production system for a faceless educational YouTube chan
 | **Orchestration** | Python — threaded pipeline with checkpoint-based resumability |
 | **LLM** | Anthropic Claude (Sonnet + Haiku) — research, script writing, script planning, TTS enhancement, revision |
 | **AI Agents** | Claude Agent SDK, connected to vidIQ's MCP server as a tool source — script generation, SEO vetting, keyword research |
-| **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~200-280 images per video with style anchor references, generated in parallel |
+| **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~130-150 images per 12-minute video with style anchor references, generated in parallel |
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
 | **Web UI** | Flask + vanilla JS — real-time SSE log streaming, image gallery, lightbox, script review modal |
 | **Bot interface** | python-telegram-bot — full pipeline control via Telegram with inline keyboard interactions |
@@ -226,35 +232,35 @@ profile starts with a cast sheet while a character-free one starts with an examp
 
 ```yaml
 channel:
-  name: "My Channel"
-  niche: "educational science"
-  audience: "curious adults 25-40"
-  tone: "warm, precise, slightly dry"
-  reference_channel: "Kurzgesagt"
-  title_format: "Why [surprising claim]"
+  name: "Deep Field"
+  niche: "astronomy and space science"
+  audience: "curious adults who want the real physics"
+  tone: "precise, unhurried, quietly astonished"
+  reference_channel: "PBS Space Time"
+  title_format: "What [Object] Actually [Does] — And Why It Matters"
 
 script:
   target_mins: 12
-  wpm: 160
-  hook_duration_s: 35
-  section_count: "10-14"
-  section_duration_s: "60-90"
+  wpm: 150
+  hook_duration_s: 30
+  section_count: 6
+  section_duration_s: "90-120"
 
 characters:
   roster:
-    - name: "Orange Cat"
-      description: "Large orange tabby, slightly lopsided round head..."
+    - name: "The Surveyor"
+      description: "Small figure in a rounded retro spacesuit, blank visor..."
   behavior: |
-    Characters react to information with curiosity, never alarm.
+    The Surveyor observes and measures — it never emotes.
 
 image_style:
   art_style_block: |
-    Flat 2D illustration on off-white paper texture, bold black outlines...
+    Two-color risograph screenprint. Exactly two inks: fluorescent orange...
   style_constraints: >
-    Bold black outlines. No gradients. No drop shadows. No photorealism.
+    Two inks only. Visible halftone dots. No black, no gradients, no photorealism.
   scene_rules: |
-    ## Environment
-    - Always include a visible horizon line...
+    ## Composition
+    - Every scene states its scale explicitly...
 ```
 
 Every field flows directly into LLM prompts — the script writer, TTS enhancer, and image prompt builder all read from the active profile. The pipeline itself holds no style of its own:

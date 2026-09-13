@@ -1,4 +1,4 @@
-# Curious Critters — Visual Style Sheet
+# Deep Field — Visual Style Sheet
 
 This file is a human-readable reference for the channel's visual identity.
 The pipeline reads `profile.yaml` for generation — update both if you change the style.
@@ -7,54 +7,54 @@ The pipeline reads `profile.yaml` for generation — update both if you change t
 
 ## Art style
 
-Flat 2D marker illustration. Think a children's science book drawn with thick Copic
-markers on warm off-white paper.
+Two-color risograph screenprint. Think a 1970s observatory poster run off on a
+cheap duplicator: two ink drums, coarse paper, and registration that never quite
+lines up.
 
-- **Outlines:** Bold, uneven black marker lines. Slightly wobbly — hand-drawn feel,
-  not vector-perfect.
-- **Color fills:** Bleed slightly outside the outlines. Visible marker streaks and
-  texture — no flat digital fills.
-- **Background:** Off-white warm paper (#F5F0E8). Never pure white, never grey.
-- **No gradients, no drop shadows, no 3D effects, no photorealistic textures.**
-- **Text:** Bold handwritten uppercase in black marker. Numbers are always large and
-  prominent when narration states a statistic.
+- **Inks:** Exactly two. Fluorescent orange (#FF6B35) and deep navy (#1B2A4A).
+  Where they overprint they make a muddy plum. There is no third ink and no black.
+- **Texture:** Heavy halftone dots in every fill. Nothing is a smooth flat.
+  Coarse paper grain sits over the entire frame.
+- **Registration:** Deliberately off by 1–2mm between layers. The misalignment is
+  the style, not a defect — never correct it.
+- **Background:** Unbleached newsprint (#EDE6D6), left bare wherever the image
+  needs a highlight. Never pure white.
+- **No gradients, no black, no drop shadows, no photorealism, no digital smoothness.**
+- **Text:** Condensed uppercase sans-serif in navy, set on bare newsprint. Figures
+  and distances are always large when the narration states them.
 
 ---
 
 ## Composition (16:9)
 
-- Visible horizon line divides sky (top) from ground plane (bottom)
-- Sky: flat solid color — rotates through pale yellow, soft coral, sky blue, mint
-  green, lavender. Never the same color twice in a row.
-- Ground: flat solid color filling the bottom third. Always visible.
-- Midground (optional): one flat silhouette layer — solid fill, no interior detail.
-- Characters always stand on the ground plane. Never floating.
+- Every frame states its scale — a horizon, a measurement grid, a tether, or a
+  size-reference object. A scene with no scale cue is wrong.
+- One dominant celestial or instrument form per frame. Never the same subject
+  two scenes running.
+- Ink balance alternates: orange-dominant, then navy-dominant, then orange again.
+  Never the same dominant ink twice in a row.
+- At least a quarter of every frame stays bare newsprint. Crowding kills the print
+  feel faster than anything else.
 
 ---
 
 ## Characters
 
-### Orange Cat
-Large, round orange tabby. Black bowtie. Stands upright. Slightly pudgy.
-Role: explainer — holds diagrams, points at labels, demonstrates processes.
+### The Surveyor
+A small figure in a rounded retro spacesuit — fishbowl helmet, solid dark visor,
+boxy chest pack, stubby limbs, oversized boots. No face, ever.
 
-### White Cat
-Small, fluffy white cat. Pink collar with bell. Grey eye patch. Stands upright,
-noticeably shorter than Orange Cat.
-Role: reactor / second perspective — used when comparing two things or showing scale.
+Role: scale reference. It observes, measures, and points, and it is always dwarfed
+by whatever it is standing next to. It occupies under 15% of the frame unless the
+narration is specifically about human scale.
 
-**Both characters are always flat 2D — no shading, no 3D volume.**
+It does not emote. The visor is blank in every single image, and that is the point —
+the drama belongs to the object, not the observer.
 
 ---
 
-## Anchor images
+## Text in image
 
-Place reference images in `anchors/` as `anchor-01.png`, `anchor-02.png`, etc.
-The pipeline passes these to the image model in priority order (set in `profile.yaml`)
-to lock in the art style and character designs across every generated image.
-
-Recommended anchor set:
-- `anchor-01` — multi-angle character sheet (both cats, front/side/back)
-- `anchor-02` — original character reference sheet
-- `anchor-03` — environment example (horizon, ground plane, sky)
-- Additional anchors — style samples showing text labels, props, compositions
+When narration states a figure, distance, or name, set it as condensed uppercase
+navy type on a bare newsprint strip. Use the exact words from the narration —
+never paraphrase a number.

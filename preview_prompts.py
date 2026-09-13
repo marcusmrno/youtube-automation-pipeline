@@ -6,8 +6,8 @@ Usage:
     python preview_prompts.py <script.txt> [--profile <profile_name>] [--out <output_dir>]
 
 Examples:
-    python preview_prompts.py ../old-outputs/every-essential-vitamin-explained/script.txt
-    python preview_prompts.py my_script.txt --profile cat-educational-v2
+    python preview_prompts.py output/my-run/script.txt
+    python preview_prompts.py my_script.txt --profile example
     python preview_prompts.py my_script.txt --out /tmp/test_run
 """
 

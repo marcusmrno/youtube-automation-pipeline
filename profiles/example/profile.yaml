@@ -1,11 +1,13 @@
 # ── Channel identity ──────────────────────────────────────────────────────────
+# Every field below flows into an LLM prompt. Nothing here is decorative —
+# change a value and the scripts, narration, and images change with it.
 channel:
-  name: "Curious Critters"
-  niche: "animal facts and nature science"
-  audience: "curious adults who want surprising, well-researched facts"
-  tone: "conversational, warm, occasionally dry humor — never condescending"
-  reference_channel: "Kurzgesagt"
-  title_format: "Why [Animal] Does [Surprising Thing] — The Science"
+  name: "Deep Field"
+  niche: "astronomy and space science"
+  audience: "curious adults who want the real physics, not awe-noises over stock footage"
+  tone: "precise, unhurried, quietly astonished — explains scale without hyperbole"
+  reference_channel: "PBS Space Time"
+  title_format: "What [Object] Actually [Does] — And Why It Matters"
 
 # ── Script settings ───────────────────────────────────────────────────────────
 script:
@@ -19,72 +21,72 @@ script:
   section_duration_s: "90-120"
 
 # ── Characters ────────────────────────────────────────────────────────────────
+# Optional. Delete this whole block for a channel with no recurring characters —
+# every character-specific instruction drops out of the prompts automatically.
 characters:
   roster:
-    - name: "Orange Cat"
+    - name: "The Surveyor"
       description: >
-        A large, round orange tabby cat with thick black marker outlines and blotchy
-        orange fur filled with visible marker streaks. Wears a small black bowtie.
-        Big expressive eyes with oval pupils. Stands upright on two legs at about
-        human height. Slightly pudgy build. Always drawn in flat 2D with no shading.
-
-    - name: "White Cat"
-      description: >
-        A small, fluffy white cat with thick black marker outlines and soft grey
-        shading on the ears and tail tip. Wears a pink collar with a tiny bell.
-        Has a grey patch over one eye. Big round eyes. Stands upright on two legs,
-        noticeably shorter than Orange Cat. Always drawn in flat 2D with no shading.
+        A small figure in a rounded retro spacesuit, drawn as a flat two-tone
+        screenprint shape. Bulbous fishbowl helmet with a single wide visor that
+        reads as a solid dark oval — no face is ever visible. Boxy chest pack with
+        two round dials. Stubby limbs, oversized boots. Rendered only in the
+        channel's two ink colors with visible halftone dot texture. No outlines
+        thinner than the ink registration allows.
 
   behavior: |
     ## Character behavior rules
-    - Characters hold, point at, or physically demonstrate the fact being narrated
-    - Characters never react emotionally to what is being said — no shocked faces, no thinking poses
-    - Props are always flat 2D objects matching the art style — no 3D or photorealistic items
-    - Never place both characters in the same scene unless the narration explicitly compares two things
-    - Vary which character appears — never the same character in more than 3 consecutive images
+    - The Surveyor observes, measures, or points — it never emotes, and its visor stays blank
+    - Scale is the recurring joke: the figure is always dwarfed by whatever it is measuring
+    - Props are limited to simple instruments — flags, tripods, tethers, hand lamps, rulers
+    - The figure occupies less than 15% of the frame unless the narration is about human scale
+    - Vary placement across images — never the same corner in more than 2 consecutive images
 
 # ── Image style ───────────────────────────────────────────────────────────────
 image_style:
+  # Appended to every image prompt.
   art_style_block: |
-    Flat 2D illustration. Bold uneven black marker outlines — lines vary in thickness
-    and are slightly wobbly, not perfectly smooth. Color fills bleed slightly outside
-    the outlines with visible marker streaks and texture. Off-white warm paper
-    background (#F5F0E8). No gradients. No drop shadows. No photorealistic textures.
-    No smooth digital lines. All text is bold handwritten uppercase in black marker.
-    16:9 landscape composition.
+    Two-color risograph screenprint. Exactly two inks: fluorescent orange (#FF6B35)
+    and deep navy (#1B2A4A), overprinted where they meet to make a muddy plum. Heavy
+    visible halftone dot texture in every fill — no smooth flats. Deliberate 1-2mm
+    misregistration between the two ink layers. Coarse paper grain over the whole
+    frame. Unbleached newsprint background (#EDE6D6) left bare for highlights.
+    No gradients. No black. No photorealism. No digital smoothness. All text is
+    condensed uppercase sans-serif in navy ink. 16:9 landscape composition.
 
   # Short hard-rule form of the style, sent AHEAD of every image prompt and every
   # anchor generation. Optional — omit it and the full art_style_block is used instead.
   style_constraints: >
-    Bold uneven black marker outlines. Color fills bleed outside lines with visible
-    marker streaks. Off-white warm paper background (#F5F0E8). No gradients. No drop
-    shadows. No clean fonts. No photorealistic textures. No smooth digital lines.
+    Two inks only: fluorescent orange and deep navy on unbleached newsprint. Visible
+    halftone dots in every fill. Deliberate misregistration. No black, no gradients,
+    no photorealism, no smooth digital shading, no third color.
 
   max_anchors: 6   # anchors passed as references per image call — higher = more consistent, more expensive
 
   scene_rules: |
-    ## Environment
-    - Always include a visible horizon line separating sky (top) from ground plane (bottom)
-    - **Landscape/background (primary):** Every scene must include a named, described landscape. Choose one per scene from: rolling hills, rocky terrain, desert dunes, dense forest treeline, snowy mountain peaks, coastal cliffs, grassy plains, jungle canopy edge, volcanic rocks, canyon walls, city skyline silhouette, farmland rows, frozen tundra. Describe the landscape's silhouette shape and fill color. Never reuse the same landscape two scenes in a row.
-    - **Sky (secondary — sits behind the landscape):** Rotate through pale yellow → soft coral → sky blue → mint green → lavender. Never the same sky color twice in a row.
-    - Ground: flat solid color plane filling the bottom third. Always visible.
-    - Characters always stand on the ground plane — never floating.
+    ## Composition
+    - Every scene states its scale explicitly — a horizon, a grid, a tether, or a size-reference object
+    - **Subject (primary):** one dominant celestial or instrument form per frame. Choose one per scene from: gas giant limb, ringed body, cratered moon surface, nebula filament, accretion disk, comet nucleus, spacecraft hull section, radio dish array, star field with one bright anchor star, planetary shadow terminator, asteroid cluster, solar prominence. Describe its silhouette and which ink fills it. Never reuse the same subject two scenes in a row.
+    - **Ink balance (secondary):** alternate which ink dominates the frame — orange-dominant, then navy-dominant. Never the same dominant ink twice in a row.
+    - Negative space: leave at least a quarter of the frame as bare newsprint. Always.
 
     **Forbidden:**
-    - A scene with no described landscape type
-    - Two consecutive scenes with the same landscape type
+    - A scene with no explicit scale reference
+    - Two consecutive scenes with the same dominant ink
+    - Any third color, or pure black anywhere in the frame
 
     ## Text in image
-    Whenever narration states a fact, name, or stat: include it as exact bold handwritten uppercase marker text inside a grey rounded rectangle label box. Always write the exact words.
+    Whenever narration states a figure, distance, or name: set it as condensed uppercase
+    navy type on a bare newsprint strip. Always write the exact words from the narration.
 
 # ── Voice / TTS ───────────────────────────────────────────────────────────────
 voice:
   voice_id: "${ELEVENLABS_VOICE_ID}"   # or hardcode: "abc123..."
   model: "eleven_v3"
   tone_description: >
-    Warm and curious — like a knowledgeable friend sharing something fascinating.
-    Naturally conversational pace with occasional dry wit. Never robotic or
-    lecture-y. Genuine enthusiasm on reveals, not performed excitement.
+    Measured and low-key — a researcher walking you through something they find
+    genuinely remarkable. Unhurried pace, long pauses before big numbers. Never
+    breathless, never awed-sounding. The scale does the work, not the delivery.
   stability: 0.65
   similarity_boost: 0.85
   style: 0.0
