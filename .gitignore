@@ -8,3 +8,7 @@ __pycache__/
 .worktrees/
 docs/
 .flicker_snapshot.json
+.pytest_cache/
+.superpowers/
+.venv/
+venv/

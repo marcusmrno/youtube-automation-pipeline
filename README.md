@@ -1,5 +1,9 @@
 # YouTube Pipeline
 
+[![tests](https://github.com/marcusmrno/youtube-automation-pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/marcusmrno/youtube-automation-pipeline/actions/workflows/tests.yml)
+![python](https://img.shields.io/badge/python-3.11%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~200+ images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
 
 ---
@@ -54,6 +58,8 @@ topic → clarifying questions → approach selection → research → script
 ---
 
 ## Setup
+
+Requires Python 3.11+.
 
 ```bash
 pip install -r requirements.txt
@@ -361,3 +367,9 @@ youtube-pipeline/
 ├── docs/                 # design docs for past features (gitignored)
 └── output/               # generated assets per run (gitignored)
 ```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

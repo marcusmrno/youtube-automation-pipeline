@@ -11,6 +11,7 @@ import json
 import mimetypes
 import os
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,6 +48,16 @@ ANTHROPIC_KEY   = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
 VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
+
+
+def require_keys(*names: str) -> None:
+    """Exit with a clear message if any required API key is unset."""
+    missing = [n for n in names if not (os.getenv(n) or "").strip()]
+    if missing:
+        sys.exit(
+            "Missing required env var(s): " + ", ".join(missing) +
+            "\nCopy .env.example to .env and fill them in."
+        )
 
 CLAUDE_MODEL  = "claude-sonnet-5"
 # Sonnet 5 thinks by default and max_tokens caps thinking + text together,
@@ -941,7 +952,6 @@ def run_from_script(script: str, profile: "Profile", topic: str = "",
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
     import argparse
     from profile import load_profile, list_profiles
 
@@ -990,6 +1000,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if args.cmd == "script":
+        require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY")
         text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
         run_from_script(text, _resolve_profile(args.profile), args.topic)
         sys.exit(0)
@@ -1019,11 +1030,13 @@ if __name__ == "__main__":
             if answer != "y":
                 print("aborted")
                 sys.exit(0)
+        require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
         profile = _resolve_profile(args.profile)
         md_mod.generate_metadata(args.run_slug, profile, log_fn, regenerate=True)
         sys.exit(0)
 
     # args.cmd == "run"
+    require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY")
     topic = " ".join(args.topic)
     profile = _resolve_profile(args.profile)
     run_pipeline(topic, profile)
