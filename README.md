@@ -8,11 +8,12 @@ An asset pipeline for a faceless educational YouTube channel. Input a topic — 
 
 **Scope:** the pipeline produces images, audio, script, and SEO metadata — it does not render a video file. Final assembly happens in a video editor. `apply_flicker.py` can add a flicker overlay track to a Palmier project once the clips are placed.
 
-![Sample output — 24 consecutive frames from a single run](assets/sample-output.jpg)
+![Sample run — all 28 frames from a single pipeline run](assets/sample-run.gif)
 
-*24 consecutive frames from one run, generated with the bundled `example` profile. No frame was
-hand-picked or retouched — style consistency and the in-image text come from the profile's
-`art_style_block` and `scene_rules`, not from post-processing.*
+*Every frame from one run, in order, generated with the bundled `example` profile. Nothing was
+hand-picked or retouched — the style consistency and the in-image text come from the profile's
+`art_style_block` and `scene_rules`, not from post-processing. The run also produced a 1:47
+narration track from the same script.*
 
 ---
 
