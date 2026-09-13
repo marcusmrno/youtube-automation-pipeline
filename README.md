@@ -4,7 +4,9 @@
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-An end-to-end AI video production system for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~150 images, records a voiceover, and assembles a timeline ready for export. Every stage is fully automated, resumable, and runs on a multi-model AI stack.
+An asset pipeline for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~150 style-consistent images, and records a voiceover, leaving a complete asset set to drop into an editor. Every stage is automated, resumable, and runs on a multi-model AI stack.
+
+**Scope:** the pipeline produces images, audio, script, and SEO metadata — it does not render a video file. Final assembly happens in a video editor. `apply_flicker.py` can add a flicker overlay track to a Palmier project once the clips are placed.
 
 ![Sample output — 24 consecutive frames from a single run](assets/sample-output.jpg)
 
