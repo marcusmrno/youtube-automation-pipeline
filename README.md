@@ -12,8 +12,11 @@ An asset pipeline for a faceless educational YouTube channel. Input a topic — 
 
 *Every frame from one run, in order, generated with the bundled `example` profile. Nothing was
 hand-picked or retouched — the style consistency and the in-image text come from the profile's
-`art_style_block` and `scene_rules`, not from post-processing. The run also produced a 1:47
-narration track from the same script.*
+`art_style_block` and `scene_rules`, not from post-processing.*
+
+The same run, cut together with its generated narration — first 30 seconds, sound on:
+
+https://github.com/user-attachments/assets/a6910944-f411-41ac-9444-8ed1ffc1ff8b
 
 ---
 
