@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import anthropic
-from pipeline import _generate_tts_and_prompts, parse_image_prompts, ANTHROPIC_KEY
+from pipeline import _generate_tts_and_prompts, parse_image_prompts, require_keys, ANTHROPIC_KEY
 from profile import load_profile, list_profiles
 
 
@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--profile", default=None, help="Profile name (default: the only one, if there is only one)")
     parser.add_argument("--out", default=None, help="Directory to write outputs (default: same dir as script)")
     args = parser.parse_args()
+    require_keys("ANTHROPIC_API_KEY")   # otherwise an SDK auth traceback at the first call
 
     script_path = Path(args.script).resolve()
     if not script_path.exists():
@@ -36,7 +37,6 @@ def main():
     if not args.out and (out_dir / "image_prompts.txt").exists():
         # a run's prompts are what made its images; a preview must not replace them
         sys.exit(f"❌  {out_dir} already has image_prompts.txt — pass --out <dir> to preview elsewhere")
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     available = list_profiles()
     if not args.profile:
@@ -50,6 +50,7 @@ def main():
     except ValueError as e:
         print(f"❌  {e}")
         sys.exit(1)
+    out_dir.mkdir(parents=True, exist_ok=True)   # only once the run can actually start
     script  = script_path.read_text()
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
