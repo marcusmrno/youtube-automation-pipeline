@@ -1,4 +1,4 @@
-"""Image-prompt expansion + stream retry. Run: python test_pipeline_helpers.py"""
+"""Image-prompt expansion + stream retry. Run: python -m tests.test_pipeline_helpers"""
 import types
 import anthropic
 import pipeline

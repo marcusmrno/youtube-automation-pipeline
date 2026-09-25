@@ -1,4 +1,4 @@
-"""/script routing: arming, paste, upload, and mode exclusivity. Run: python test_bot_script_mode.py"""
+"""/script routing: arming, paste, upload, and mode exclusivity. Run: python -m tests.test_bot_script_mode"""
 import asyncio
 import types
 
