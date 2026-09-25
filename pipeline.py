@@ -306,9 +306,7 @@ def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.A
     log_fn("🖼️  Generating image prompts...")
     msg = (
         _build_image_prompt_instructions(profile)
-        + f"\nSCRIPT:\n{script}\n\n"
-        "Timestamps are 3–4 seconds each, never more than 5. Verify timestamps are "
-        "contiguous — end of prompt N = start of prompt N+1, no gaps."
+        + f"\nSCRIPT:\n{script}\n"
     )
     raw = _stream_text(
         client,

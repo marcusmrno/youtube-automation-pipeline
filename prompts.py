@@ -324,7 +324,7 @@ viewpoints and scales, not the same layout relabelled."""
     template = f"""
 You are an image prompt writer for a YouTube video pipeline targeting Google Gemini image generation.
 
-Below is a segment of the script — timestamped sections of narration. Your job is to write image prompts covering that narration — each a direct, literal translation of EXACTLY what the narrator says at that moment.
+Below is the full script — timestamped sections of narration. Your job is to write image prompts covering that narration — each a direct, literal translation of EXACTLY what the narrator says at that moment.
 
 ---
 
@@ -340,7 +340,7 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 - Never show a "mood" or "vibe" — show the exact fact being stated
 - Never write a scene that could fit 3 different moments in the script
 - Style prefix at the start of a prompt is forbidden (pipeline prepends it automatically)
-- **Every word of narration must be covered by an image. Zero gaps.** Timestamps must span the full audio with no uncovered narration.
+- **Every word of narration must be covered by an image. Zero gaps.**
 
 **Transition sentences are not skippable.** Short pivot phrases like "Now the opposite kind.", "The team continues.", "So back to that opening promise.", "Remember the fat-soluble ones" are their own image beats. Never merge them silently into the next content beat.
 

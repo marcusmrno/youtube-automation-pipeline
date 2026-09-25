@@ -96,3 +96,14 @@ def test_generate_voiceover_uses_profile_voice_settings(test_profile, tmp_path):
     payload = captured_payloads[0]
     assert payload["model_id"] == "eleven_v3"
     assert payload["voice_settings"]["stability"] == 0.68
+
+
+def test_image_prompt_request_does_not_ask_for_timestamps(test_profile, monkeypatch):
+    # the line format has no timestamp column; asking for one shifts every field when obeyed
+    import re
+    import pipeline
+    sent = []
+    monkeypatch.setattr(pipeline, "_stream_text", lambda client, **k: sent.append(k["messages"][0]["content"])
+                        or "===IMAGE_PROMPTS===\n001 | s | none | scene")
+    pipeline._generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
+    assert not re.search(r"(?i)timestamps (are|must)|contiguous|segment of the script", sent[0])
