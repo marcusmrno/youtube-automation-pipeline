@@ -231,3 +231,17 @@ def test_topic_comes_from_the_scripts_title(tmp_path, monkeypatch):
                           script="**TITLE:** Why Your Cat's Purr Heals\n[00:00-00:30] HOOK\nbody")
     data = metadata.generate_metadata("why-cats-purr-heals", MagicMock(image_gen={}), log_fn=lambda _: None)
     assert data["topic"] == "Why Your Cat's Purr Heals" and data["tags"][0] == "Why Your Cat's Purr Heals"
+
+
+def test_failed_regenerate_does_not_keep_the_old_pick(tmp_path, monkeypatch):
+    import metadata
+    _stub_metadata_internals(monkeypatch, metadata)
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(metadata, "anthropic", MagicMock())
+    monkeypatch.setattr(metadata, "_render_thumbnails", lambda prompts, run_dir, profile, log_fn: [
+        {**p, "filename": f"thumbnails/thumb-0{i}.png", "render_error": "quota"} for i, p in enumerate(prompts, 1)])
+    run_dir = _seed_run_with_script(tmp_path)
+    (run_dir / "thumbnail.png").write_bytes(b"OLD PICK")
+    data = metadata.generate_metadata("abc", MagicMock(image_gen={}), log_fn=lambda _: None, regenerate=True)
+    assert "render_error" in data["thumbnails"][data["chosen_thumbnail_index"]]
+    assert not (run_dir / "thumbnail.png").exists()      # it no longer matches metadata.json

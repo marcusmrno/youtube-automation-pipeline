@@ -377,6 +377,8 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
     chosen = thumbs_with_idx[data["chosen_thumbnail_index"]]
     if "render_error" not in chosen:
         shutil.copyfile(run_dir / chosen["filename"], run_dir / "thumbnail.png")
+    else:   # every render failed: the previous pick no longer matches metadata.json
+        (run_dir / "thumbnail.png").unlink(missing_ok=True)
 
     log_fn(f"✅  Metadata written: {run_dir / 'metadata.json'}")
     return data
