@@ -6,7 +6,7 @@ Usage:
     python preview_prompts.py <script.txt> [--profile <profile_name>] [--out <output_dir>]
 
 Examples:
-    python preview_prompts.py output/my-run/script.txt
+    python preview_prompts.py output/my-run/script.txt --out /tmp/preview
     python preview_prompts.py my_script.txt --profile example
     python preview_prompts.py my_script.txt --out /tmp/test_run
 """
@@ -33,6 +33,9 @@ def main():
         sys.exit(1)
 
     out_dir = Path(args.out).resolve() if args.out else script_path.parent
+    if not args.out and (out_dir / "image_prompts.txt").exists():
+        # a run's prompts are what made its images; a preview must not replace them
+        sys.exit(f"❌  {out_dir} already has image_prompts.txt — pass --out <dir> to preview elsewhere")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     available = list_profiles()

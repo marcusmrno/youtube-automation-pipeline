@@ -55,3 +55,19 @@ def test_malformed_metadata_can_be_regenerated(tmp_path, monkeypatch, two_profil
     assert run_cli(tmp_path, monkeypatch, "metadata", "r1", "--regenerate") == 0
     assert generated == ["r1"]
     assert run_cli(tmp_path, monkeypatch, "metadata", "r1") not in (0, None)   # a message, not a traceback
+
+
+def test_preview_never_overwrites_a_runs_prompts(tmp_path, monkeypatch):
+    # its own docstring example (output/my-run/script.txt) replaced the prompts that made the images
+    import preview_prompts
+    run = tmp_path / "my-run"
+    run.mkdir()
+    (run / "script.txt").write_text("TITLE: T\nbody")
+    (run / "image_prompts.txt").write_text("001 | s | ORIGINAL prompt")
+    monkeypatch.setattr(preview_prompts, "load_profile", lambda name: f"<profile {name}>")
+    monkeypatch.setattr(preview_prompts, "_generate_tts_and_prompts", lambda *a: ("NEW TTS", "001 | s | NEW"))
+    monkeypatch.setattr(sys, "argv", ["preview_prompts.py", str(run / "script.txt"), "--profile", "p"])
+    with pytest.raises(SystemExit) as exc:
+        preview_prompts.main()
+    assert exc.value.code not in (0, None)
+    assert (run / "image_prompts.txt").read_text() == "001 | s | ORIGINAL prompt"
