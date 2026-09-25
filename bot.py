@@ -87,9 +87,9 @@ def _should_relay(msg: str) -> bool:
     m = msg.strip()
     if not m:
         return False
-    # Skip indented verbose sub-steps (Google AI request attempts, TTS chunks, etc.)
-    # but still forward failures/warnings that start with an emoji
-    if msg.startswith("  ") and not any(m.startswith(c) for c in ("❌", "⚠️")):
+    # Skip indented sub-steps (Google AI attempts, TTS chunks), warnings included: per-image
+    # retries flood the chat in an outage, and "✅ N/M images ready" reports the failures
+    if msg.startswith("  "):
         return False
     # Per-image lines are tracked via milestones — skip them to avoid flood
     if "Generating image " in msg and "/" in msg:

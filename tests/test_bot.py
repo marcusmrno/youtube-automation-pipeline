@@ -249,3 +249,11 @@ def test_uploads_must_be_plain_text_scripts(monkeypatch, doc, started_with):
         assert started and started[0].startswith(started_with)   # the TITLE: line still names the run
     else:
         assert started == [] and "txt" in u.message.replies[0]
+
+
+def test_per_image_retries_are_not_relayed():
+    # a Gemini outage over 150 images sent ~750 of these to the phone
+    assert not bot._should_relay("  ⚠️  Google AI attempt 1 error: 429 RESOURCE_EXHAUSTED")
+    assert not bot._should_relay("  ❌  Image 001.png failed after 3 attempts — skipping")
+    assert bot._should_relay("❌  Voiceover failed on chunk 1")
+    assert bot._should_relay("✅  148/150 images ready")
