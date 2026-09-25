@@ -123,10 +123,11 @@ def _parse_titles(raw: str) -> list[str]:
         return []
     titles: list[str] = []
     for line in block.splitlines():
-        m = re.match(r"^\s*\d+[\.\)]\s+(.+?)\s*$", line)
+        # "1.", "1)", "1:" or a bullet; markdown bold, a "Title:" label and quotes are not part of it
+        m = re.match(r"^\s*\**(?:\d+[.):]|[-*•])\**\s+(.+?)\s*$", line)
         if not m:
             continue
-        text = m.group(1).strip().strip('"').strip("'")
+        text = re.sub(r"(?i)^title\s*:\s*", "", m.group(1).strip("*").strip()).strip("\"'*“”‘’ ")
         if text:
             titles.append(text)
     return titles
@@ -153,6 +154,8 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     Returns one entry per input title in input order:
     {"text": str, "score": int | None, "score_breakdown": dict}.
     """
+    if not titles:
+        return []   # don't pay for an agent session that scores nothing
     if not VIDIQ_KEY:
         log_fn("⚠️  vidIQ key not set — scores will be null")
         return [{"text": t, "score": None, "score_breakdown": {}} for t in titles]
@@ -169,6 +172,8 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
     user = f"Score these {len(titles)} titles:\n{numbered}\n\nReturn the JSON array inside ===SCORES=== tags."
 
+    # the agent echoes titles back with small changes (curly apostrophe, trailing period, case)
+    key = lambda s: re.sub(r"\W+", "", s).casefold()
     by_title: dict[str, dict] = {}
     try:
         raw = _call_vidiq_agent(system, user, max_turns=len(titles) * 2 + 4, log_fn=log_fn)
@@ -176,13 +181,13 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
         if not block:
             raise RuntimeError("vidIQ scores response had no SCORES block")
         for entry in _json_block(block):
-            by_title[entry["title"]] = entry
+            by_title[key(entry["title"])] = entry
     except Exception as e:
         log_fn(f"⚠️  Title scoring failed: {e}")
 
     results = []
     for t in titles:
-        entry = by_title.get(t)
+        entry = by_title.get(key(t))
         score = entry.get("score") if entry else None
         results.append({
             "text": t,
@@ -221,8 +226,9 @@ def _parse_thumbnail_prompts(raw: str) -> list[dict]:
             return []
         lines = block.strip().splitlines()
         hook = ""
-        if lines and lines[0].upper().startswith("HOOK:"):
-            hook = lines[0].split(":", 1)[1].strip()
+        m = re.match(r"\W*hook\s*[:\-–—]\W*(.+)", lines[0], re.I) if lines else None   # HOOK:, **HOOK:**, Hook -
+        if m:
+            hook = m[1].strip(' *"')
             body = "\n".join(lines[1:]).strip()
         else:
             body = block.strip()

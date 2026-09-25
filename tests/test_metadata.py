@@ -486,3 +486,35 @@ def test_score_titles_tolerates_odd_scores_and_fences(monkeypatch):
                ' {"title": "B", "score": 71, "breakdown": {}}]\n```')
     monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
     assert [t["score"] for t in metadata._score_titles(["A", "B"], lambda _: None)] == [None, 71]
+
+
+def test_parse_titles_strips_markdown_labels_and_accepts_bullets():
+    import metadata
+    raw = ("===TITLES===\n1. **Why Cats Purr**\n2. Title: Cats Rule\n3) “Smart Quotes”\n"
+           "- Bullet Title\n4: Colon Numbered\n===END===")
+    assert metadata._parse_titles(raw) == ["Why Cats Purr", "Cats Rule", "Smart Quotes",
+                                           "Bullet Title", "Colon Numbered"]
+
+
+def test_no_titles_means_no_scoring_session(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **k: pytest.fail("paid session for 0 titles"))
+    assert metadata._score_titles([], lambda _: None) == []
+
+
+def test_scores_match_titles_despite_punctuation_changes(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    payload = '===SCORES===\n[{"title": "Why Your Cat’s Purr Heals.", "score": 77, "breakdown": {}}]'
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    assert metadata._score_titles(["Why Your Cat's Purr Heals"], lambda _: None)[0]["score"] == 77
+
+
+@pytest.mark.parametrize("first_line", ["HOOK: BIG 1", "**HOOK:** BIG 1", "Hook - BIG 1"])
+def test_thumbnail_hook_line_variants(first_line):
+    import metadata
+    raw = "".join(f"===THUMBNAIL_{n}===\n{first_line}\nscene {n}\n" for n in (1, 2, 3)) + "===END==="
+    thumbs = metadata._parse_thumbnail_prompts(raw)
+    assert [t["hook_text"] for t in thumbs] == ["BIG 1"] * 3
+    assert [t["prompt"] for t in thumbs] == ["scene 1", "scene 2", "scene 3"]   # hook not sent to Gemini
