@@ -781,6 +781,12 @@ async def _start_pipeline(
     lq = queue.Queue()
     se = threading.Event()
 
+    # One guard for every caller (the Approach buttons bypassed the per-command checks);
+    # no await between this check and setting running, so two taps can't both pass.
+    if _state["running"]:
+        await context.bot.send_message(chat_id, "⚠️ A pipeline is already running. Use /stop first.")
+        return
+
     _state.update({
         "running":         True,
         "run_slug":        run_slug or slugify(topic or ""),
@@ -789,6 +795,8 @@ async def _start_pipeline(
         "approval_result": None,
         "revision_mode":   False,
         "script_mode":     False,
+        "clarifying_mode": False,   # a started run ends any planning session left open
+        "clarifying_topic": None,
         "log_queue":       lq,
         "total_images":    0,
         "done_images":     0,
