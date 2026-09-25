@@ -183,3 +183,14 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
         generate_all_images([{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
                             tmp_path, P, lambda m: None, max_workers=1)
     assert len(generated) <= 3, generated
+
+
+def test_tts_chunks_respect_the_limit_and_keep_every_word():
+    from pipeline import _split_into_chunks
+    for text in ("word " * 2000,                                   # no terminal punctuation
+                 'He said "stop." Then more. ' * 400,              # sentences ending in a quote
+                 "Short one. " * 900):
+        chunks = _split_into_chunks(text)
+        assert max(map(len, chunks)) <= 4500, max(map(len, chunks))
+        assert " ".join(chunks).split() == text.split()           # nothing dropped
+    assert _split_into_chunks("   \n ") == []                       # no empty ElevenLabs request

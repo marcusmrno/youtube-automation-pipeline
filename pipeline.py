@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import sys
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -564,14 +565,18 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
 # ── Phase 2b: Voiceover ────────────────────────────────────────────────────────
 
 def _split_into_chunks(text: str, max_chars: int = 4500) -> list[str]:
+    if not text.strip():
+        return []
     chunks, current = [], []
     length = 0
     for sentence in re.split(r'(?<=[.!?])\s+', text.strip()):
-        if length + len(sentence) + 1 > max_chars and current:
-            chunks.append(" ".join(current))
-            current, length = [], 0
-        current.append(sentence)
-        length += len(sentence) + 1
+        # text with no terminal punctuation (or sentences ending in a quote) splits into one long "sentence"
+        for piece in textwrap.wrap(sentence, max_chars) if len(sentence) > max_chars else [sentence]:
+            if length + len(piece) + 1 > max_chars and current:
+                chunks.append(" ".join(current))
+                current, length = [], 0
+            current.append(piece)
+            length += len(piece) + 1
     if current:
         chunks.append(" ".join(current))
     return chunks
@@ -650,6 +655,9 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
     }
 
     chunks = _split_into_chunks(tts_script)
+    if not chunks:
+        log_fn("⚠️  TTS script is empty — skipping voiceover")
+        return None
     log_fn(f"  📄  Script split into {len(chunks)} chunk(s)")
 
     parts = []
