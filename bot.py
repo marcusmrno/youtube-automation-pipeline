@@ -588,7 +588,11 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Usage: /metadata [<run-slug>] [regenerate]")
         return
 
-    existing = _metadata_mod.load_metadata(slug)
+    try:   # a malformed metadata.json must not block the regenerate that repairs it
+        existing = None if regenerate else _metadata_mod.load_metadata(slug)
+    except ValueError as e:
+        await update.message.reply_text(f"❌ {e} — send /metadata {slug} regenerate to rebuild it")
+        return
     if existing and not regenerate:
         await update.message.reply_text(f"📦 Loading existing metadata for `{slug}`", parse_mode="Markdown")
         await _send_metadata_view(update.effective_chat, existing, slug)

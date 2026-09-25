@@ -373,3 +373,20 @@ CANONICAL = [{"question": "Angle?", "default": "history"}, {"question": "Audienc
 def test_clarifying_questions_parse_in_common_variants(text):
     # the same parse rules live in templates/index.html (parseClarifyingQuestions)
     assert bot._parse_clarifying_questions(text) == CANONICAL
+
+
+def test_malformed_metadata_can_be_regenerated(monkeypatch, tmp_path):
+    import metadata
+    generated = []
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "metadata.json").write_text('{"titles": [')          # truncated write
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    def fake_generate(slug, *a, **k):   # like the real one, leaves a valid metadata.json
+        generated.append(slug)
+        (tmp_path / slug / "metadata.json").write_text('{"titles": []}')
+    monkeypatch.setattr(bot._metadata_mod, "generate_metadata", fake_generate)
+    u = _update()
+    run(bot.cmd_metadata(u, _context("r1")))                                  # used to raise, no reply
+    assert u.message.replies and "regenerate" in u.message.replies[-1]
+    run(bot.cmd_metadata(_update(), _context("r1", "regenerate")))
+    assert generated == ["r1"]

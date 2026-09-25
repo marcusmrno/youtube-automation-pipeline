@@ -42,3 +42,16 @@ def test_metadata_uses_the_profile_the_run_was_made_with(tmp_path, monkeypatch, 
     monkeypatch.setattr(metadata, "generate_metadata", lambda slug, prof, log_fn, regenerate: used.append(prof))
     assert run_cli(tmp_path, monkeypatch, "metadata", "r1") == 0
     assert used == ["<profile beta>"]
+
+
+def test_malformed_metadata_can_be_regenerated(tmp_path, monkeypatch, two_profiles):
+    run = tmp_path / "output" / "r1"
+    run.mkdir(parents=True)
+    (run / "profile.txt").write_text("beta")
+    (run / "metadata.json").write_text('{"titles": [')                      # truncated write
+    generated = []
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(metadata, "generate_metadata", lambda slug, *a, **k: generated.append(slug))
+    assert run_cli(tmp_path, monkeypatch, "metadata", "r1", "--regenerate") == 0
+    assert generated == ["r1"]
+    assert run_cli(tmp_path, monkeypatch, "metadata", "r1") not in (0, None)   # a message, not a traceback
