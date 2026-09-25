@@ -48,6 +48,11 @@ async def run_vidiq_agent(
             }
         },
         permission_mode="bypassPermissions",
+        # The agent reads third-party YouTube text: give it only the vidIQ tools —
+        # no built-ins (Bash, Write, WebFetch), no other MCP servers, no user hooks/CLAUDE.md.
+        tools=[],
+        strict_mcp_config=True,
+        setting_sources=[],
         max_turns=max_turns,
         model=model,
     )
