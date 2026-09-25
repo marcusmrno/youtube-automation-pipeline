@@ -174,3 +174,29 @@ def test_route_errors_come_back_as_json(monkeypatch, run_dir, route, body, patch
         monkeypatch.setattr(ui, name, fn)
     r = ui.app.test_client().post(route, json=body)
     assert r.status_code == 200 and r.get_json()["ok"] is False, (r.status_code, r.data[:80])
+
+
+def _stream_events(client):
+    import json
+    body = client.get("/stream").get_data(as_text=True)
+    return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+
+
+@pytest.mark.parametrize("result,status", [({"status": "error", "reason": "missing API keys"}, "error"),
+                                           ({"status": "cancelled"}, "cancelled"),
+                                           ({"status": "complete"}, "complete")])
+def test_done_event_carries_the_run_status(monkeypatch, run_dir, result, status):
+    # the page painted every 'done' green, including runs that failed or were cancelled
+    monkeypatch.setattr(ui, "run_from_script", lambda *a, **k: result)
+    client = ui.app.test_client()
+    client.post("/run_from_script", json={"script": "s"})
+    ui._state["thread"].join(2)
+    assert _stream_events(client)[-1] == {"type": "done", "status": status}
+
+
+def test_a_crashed_job_reports_error(monkeypatch, run_dir):
+    monkeypatch.setattr(ui._metadata_mod, "generate_metadata", _raise(RuntimeError("quota")))
+    client = ui.app.test_client()
+    client.post("/metadata/r1/generate", json={"profile": "p", "regenerate": True})
+    ui._state["thread"].join(2)
+    assert _stream_events(client)[-1] == {"type": "done", "status": "error"}

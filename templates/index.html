@@ -1808,14 +1808,15 @@ function handleEvent(event) {
   else if (event.type === 'done') {
     _awaitingApproval = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
+    const ok = !event.status || event.status === 'complete';   // error / rejected / cancelled aren't Done
     if (inputMode === 'metadata') {
       // Don't touch pipeline stage chips for a metadata run.
       if (currentStage) closeLogSection(currentStage);
-      setRunFinished(true);
+      setRunFinished(ok);
       if (typeof loadMetadata === 'function') loadMetadata();
     } else {
-      completeAllStages();
-      setRunFinished(true);
+      if (ok) completeAllStages();
+      setRunFinished(ok);
       refreshRuns();
       refreshScripts();
     }
@@ -2574,7 +2575,8 @@ async function regenAudio() {
       eventSource.close(); eventSource = null;
       btn.disabled = false;
       btn.textContent = '↻ Regenerate Audio';
-      status.textContent = '✅ Done — reload Voice tab to listen';
+      status.textContent = event.status === 'complete'
+        ? '✅ Done — reload Voice tab to listen' : '❌ Voiceover failed — see the log';
       refreshVoicePicker();
       // If this run is already loaded in the player, hot-swap the src
       const picker = document.getElementById('voicePicker');

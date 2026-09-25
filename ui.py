@@ -104,13 +104,17 @@ def _start_job(work, stage=None, done=None, approval_queue=None, stoppable=True)
         lq.put({"type": "log", "stage": stage or detect_stage(msg), "msg": msg})
 
     def worker():
+        status = "error"
         try:
-            work(progress_cb, se, lq.put)
+            result = work(progress_cb, se, lq.put)
+            # pipeline runs return {"status": ...}; generate_voiceover returns None on failure
+            status = result.get("status", "complete") if isinstance(result, dict) else \
+                ("complete" if result is not None else "error")
         except Exception as e:
             lq.put({"type": "log", "stage": stage, "msg": f"❌  Error: {e}"})
         finally:
             _state["approval_queue"] = None   # a finished run can't be approved or rejected
-            lq.put(done or {"type": "done"})
+            lq.put({**(done or {"type": "done"}), "status": status})
 
     thread = threading.Thread(target=worker, daemon=True)
     _state.update(log_queue=lq, stop_event=se if stoppable else None,
@@ -350,6 +354,7 @@ def metadata_generate(run_slug):
         _metadata_mod.generate_metadata(run_slug, profile, log_fn=progress_cb, regenerate=regenerate)
         progress_cb("✅  Metadata generation complete")
         emit({"type": "metadata_done", "run_slug": run_slug})
+        return {"status": "complete"}
 
     err = _start_job(work, stage="metadata", stoppable=False)   # generate_metadata can't be interrupted
     if err:
