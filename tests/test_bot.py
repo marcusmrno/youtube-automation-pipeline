@@ -358,3 +358,18 @@ def test_resume_lists_incomplete_runs_beyond_the_newest_ten(monkeypatch, tmp_pat
     u = _update()
     run(bot.cmd_resume(u, _context()))
     assert "run-11" in u.message.replies[0]
+
+
+CANONICAL = [{"question": "Angle?", "default": "history"}, {"question": "Audience?", "default": "teens"}]
+
+
+@pytest.mark.parametrize("text", [
+    "1. Angle?\n   Default: history\n\n2. Audience?\n   Default: teens",
+    "1) Angle?\n   Default: history\n2) Audience?\n   Default: teens",
+    "**1. Angle?**\n   **Default:** history\n**2. Audience?**\n   **Default:** teens",
+    "Here are some questions:\n\n1. Angle?\n   Default: history\n2. Audience?\n   Default: teens",
+    "1. Angle?\n   DEFAULT: history\n2. Audience?\n   default: teens",
+])
+def test_clarifying_questions_parse_in_common_variants(text):
+    # the same parse rules live in templates/index.html (parseClarifyingQuestions)
+    assert bot._parse_clarifying_questions(text) == CANONICAL

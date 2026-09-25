@@ -260,12 +260,19 @@ async def _deliver_completion(app: Application, chat_id: int, result: dict) -> N
 # ── Clarifying questions + approach pitches ────────────────────────────────────
 
 def _parse_clarifying_questions(text: str) -> list[dict]:
+    """Numbered questions + Default: lines. Tolerates '1)', **bold**, any-case Default and a preamble.
+
+    templates/index.html (parseClarifyingQuestions) applies the same rules for the web UI.
+    """
     items = []
-    for block in re.split(r'\n(?=\d+\.)', text.strip()):
+    for block in re.split(r'\n(?=\s*\**\d+[.)])', text.strip()):
         lines = block.strip().split('\n')
-        question = re.sub(r'^\d+\.\s*', '', lines[0]).strip()
-        default_line = next((l for l in lines if l.strip().lower().startswith('default:')), '')
-        default = re.sub(r'(?i)^\s*default:\s*', '', default_line).strip()
+        first = re.match(r'\**\d+[.)]\**\s*(.*)', lines[0].strip())
+        if not first:
+            continue   # a preamble line, not a question
+        question = first[1].strip().strip('*').strip()
+        default = next((m[1].strip().strip('*').strip() for line in lines
+                        if (m := re.match(r'(?i)\s*\**default\**\s*:\**\s*(.*)', line))), '')
         if question:
             items.append({'question': question, 'default': default})
     return items

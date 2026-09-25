@@ -1994,15 +1994,17 @@ let _awaitingApproval = false;   // true only while a /run waits at the approval
 
 let _parsedQuestions = [];
 
+// Same rules as bot._parse_clarifying_questions: '1)', **bold**, any-case Default:, preamble skipped.
 function parseClarifyingQuestions(text) {
   const items = [];
-  const blocks = text.trim().split(/\n(?=\d+\.)/);
-  for (const block of blocks) {
+  const strip = s => s.trim().replace(/^\*+|\*+$/g, '').trim();
+  for (const block of text.trim().split(/\n(?=\s*\**\d+[.)])/)) {
     const lines = block.trim().split('\n');
-    const questionLine = lines[0].replace(/^\d+\.\s*/, '').trim();
-    const defaultLine = lines.find(l => l.trim().startsWith('Default:'));
-    const defaultText = defaultLine ? defaultLine.replace(/^\s*Default:\s*/i, '').trim() : '';
-    if (questionLine) items.push({ question: questionLine, default: defaultText });
+    const first = lines[0].trim().match(/^\**\d+[.)]\**\s*(.*)/);
+    if (!first) continue;   // a preamble line, not a question
+    const question = strip(first[1]);
+    const def = lines.map(l => l.match(/^\s*\**default\**\s*:\**\s*(.*)/i)).find(Boolean);
+    if (question) items.push({ question, default: def ? strip(def[1]) : '' });
   }
   return items;
 }
