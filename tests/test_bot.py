@@ -390,3 +390,12 @@ def test_malformed_metadata_can_be_regenerated(monkeypatch, tmp_path):
     assert u.message.replies and "regenerate" in u.message.replies[-1]
     run(bot.cmd_metadata(_update(), _context("r1", "regenerate")))
     assert generated == ["r1"]
+
+
+def test_planning_checks_keys_before_paying_for_questions(monkeypatch):
+    asked = []
+    monkeypatch.setattr(bot, "load_profile", lambda name: SimpleNamespace(voice={"voice_id": "v"}))
+    monkeypatch.setattr(bot, "generate_clarifying_questions", lambda *a: asked.append(a) or "1. Q?")
+    u = _update()
+    run(bot.cmd_run(u, _context("cats")))
+    assert asked == [] and "Missing API keys" in u.message.replies[-1]

@@ -479,6 +479,9 @@ def get_clarifying_questions():
     profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
     if err:
         return jsonify({"ok": False, "error": err})
+    missing = []   # say so now, not after the questions and pitches have been paid for
+    if not pipeline.check_keys(profile, missing.append):
+        return jsonify({"ok": False, "error": missing[0]})
     try:
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         questions = generate_clarifying_questions(topic, profile, client, _noop_log)

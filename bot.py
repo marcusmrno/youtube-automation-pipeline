@@ -29,6 +29,7 @@ import metadata as _metadata_mod
 from pipeline import (
     OUTPUT_ROOT,
     ANTHROPIC_KEY,
+    check_keys,
     run_pipeline,
     resume_pipeline,
     run_from_script,
@@ -284,6 +285,10 @@ async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAU
         profile, _ = _resolve_profile_for_bot()
     except RuntimeError as e:
         await update.message.reply_text(f"❌ {e}")
+        return
+    missing = []   # say so now, not after the questions and pitches have been paid for
+    if not check_keys(profile, missing.append):
+        await update.message.reply_text(missing[0])
         return
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 

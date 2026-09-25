@@ -120,6 +120,7 @@ def test_run_disarms_script_mode(monkeypatch):
     bot._state["script_mode"] = True
     monkeypatch.setattr(bot, "generate_clarifying_questions", lambda *a: "1. Angle?\nDefault: history")
     monkeypatch.setattr(bot, "_resolve_profile_for_bot", lambda: (None, "p"))
+    monkeypatch.setattr(bot, "check_keys", lambda profile, log_fn: True)   # this test is about modes, not keys
     context = types.SimpleNamespace(bot=types.SimpleNamespace(
         send_message=lambda *a, **k: asyncio.sleep(0)))
     run(bot._send_clarifying_questions(_update(), context, topic="cats"))

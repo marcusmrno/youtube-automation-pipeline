@@ -259,3 +259,13 @@ def test_runs_are_listed_newest_first(monkeypatch, tmp_path):
         os.utime(tmp_path / name, (mtime, mtime))
     monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
     assert ui.app.test_client().get("/runs").get_json() == ["aaa-newest", "zzz-oldest"]
+
+
+def test_planning_checks_keys_before_paying_for_questions(monkeypatch, run_dir):
+    # keys are blank under the suite: the missing ones must surface before the paid Haiku calls
+    from types import SimpleNamespace
+    asked = []
+    monkeypatch.setattr(ui, "_load_ui_profile", lambda name: (SimpleNamespace(voice={"voice_id": "v"}), None))
+    monkeypatch.setattr(ui, "generate_clarifying_questions", lambda *a: asked.append(a) or "1. Q?")
+    r = ui.app.test_client().post("/clarifying_questions", json={"topic": "t"}).get_json()
+    assert r["ok"] is False and "Missing API keys" in r["error"] and asked == []
