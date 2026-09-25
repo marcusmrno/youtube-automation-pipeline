@@ -1,7 +1,7 @@
 """
 YouTube Pipeline — Flask UI
 Run: python ui.py
-Opens at http://0.0.0.0:7860
+Opens at http://localhost:7860 (bound to 127.0.0.1 only)
 """
 
 import anthropic
@@ -659,4 +659,4 @@ def regen():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=7860, debug=False, threaded=True)
