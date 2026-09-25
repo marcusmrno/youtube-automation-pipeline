@@ -491,7 +491,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
     def _one(i: int, p: dict):
         num      = p["num"]
         # Every prompt is submitted up front, so a stop that lands after submission
-        # must be caught here — otherwise ~200 queued images keep billing.
+        # must be caught here — otherwise ~150 queued images keep billing.
         if stop_event and stop_event.is_set():
             return num, None
         img_path = out_dir / "images" / f"{num}.png"

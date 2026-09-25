@@ -50,7 +50,7 @@ topic → clarifying questions → approach selection → research → script
 | **Vet** | With `VIDIQ_API_KEY`, a second agent pass (Haiku + vidIQ) fact-checks, closes SEO gaps, and enforces word count targets |
 | **Approval gate** | Pipeline pauses for human review before any paid generation — the script can be edited (web UI), revised with feedback (web UI and bot), approved or rejected (all three; the CLI asks y/N) |
 | **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
-| **Image prompts** | One prompt per ~3–4 seconds of narration. Sonnet writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
+| **Image prompts** | Sonnet is asked for one prompt per ~3–4 seconds of narration (real runs land around 130–150 for 12 minutes). It writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
 | **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
 | **Voiceover** | ElevenLabs generates chunked audio in parallel with image generation |
 | **Flicker pass (optional, manual)** | If the profile enables `image_gen.flicker`, each image gets stretched b/c variants generated alongside it; `apply_flicker.py` then layers alternating b/c segments over the placed clips in the live Palmier project for a hand-drawn flicker effect |
