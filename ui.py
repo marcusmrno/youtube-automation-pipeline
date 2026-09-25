@@ -1,7 +1,7 @@
 """
 YouTube Pipeline — Flask UI
 Run: python ui.py
-Opens at http://0.0.0.0:7860
+Opens at http://localhost:7860 (bound to 127.0.0.1 only)
 """
 
 import anthropic
@@ -40,6 +40,14 @@ def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
 
 app = Flask(__name__)
 
+
+@app.before_request
+def _require_json_posts():
+    # A text/plain POST needs no CORS preflight, so any web page could start paid jobs here.
+    if request.method == "POST" and not request.is_json:
+        return jsonify({"ok": False, "error": "JSON body required"}), 415
+
+
 _state: dict = {
     "log_queue":      None,
     "approval_queue": None,
@@ -49,7 +57,7 @@ _state: dict = {
 STAGE_KEYWORDS: dict[str, list[str]] = {
     "research": ["researching", "research complete", "starting pipeline",
                  "output directory", "style anchor", "api keys", "missing api"],
-    "script":   ["writing script", "script written", "image prompts parsed",
+    "script":   ["writing script", "script written", "generating image prompts", "image prompts parsed",
                  "script ready", "📝", "vidiq script vet", "script vetted", "vet agent", "🔎"],
     "images":   ["generating image", "images generated", "sending request"],
     "voice":    ["generating voiceover", "voiceover generated", "voiceover failed", "🎙"],
@@ -373,7 +381,7 @@ def metadata_pick_thumb(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     index = body.get("index")
-    if not isinstance(index, int):
+    if type(index) is not int:   # bool is an int subclass
         return jsonify({"error": "body must include integer 'index'"}), 400
     try:
         return jsonify(_metadata_mod.pick_thumbnail(run_slug, index))
@@ -594,10 +602,10 @@ def list_images(run_name: str):
     img_dir = OUTPUT_ROOT / run_name / "images"
     if not img_dir.exists():
         return jsonify([])
-    imgs = sorted(
+    imgs = sorted({
         p.stem for p in img_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg")
-    )
+    })
     return jsonify(imgs)
 
 
@@ -659,4 +667,4 @@ def regen():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=7860, debug=False, threaded=True)

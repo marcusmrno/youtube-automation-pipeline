@@ -1452,6 +1452,9 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
 </div>
 
 <script>
+// Model output, file names and error text go into innerHTML templates below — escape them first.
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
 // ── Mode toggle ───────────────────────────────────────────────────────────
 
 let inputMode = 'topic';
@@ -1866,7 +1869,7 @@ async function startMetadataRun(slug, regenerate) {
 }
 
 async function stopPipeline() {
-  await fetch('/stop', { method: 'POST' });
+  await fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine(currentStage, '⏹  Pipeline stopped by user');
   setRunFinished(false);
@@ -1949,7 +1952,7 @@ async function reviseScript() {
 
 async function rejectScript() {
   hideReviewPanel();
-  await fetch('/reject', { method: 'POST' });
+  await fetch('/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   addLogLine('script', '🚫 Script rejected — pipeline stopped');
   setRunFinished(false);
 }
@@ -1985,9 +1988,9 @@ function renderClarifyingQuestions(items) {
     wrap.style.cssText = 'margin-bottom:16px;';
     wrap.innerHTML = `
       <label style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);display:block;margin-bottom:4px;">
-        ${i + 1}. ${item.question}
+        ${i + 1}. ${esc(item.question)}
       </label>
-      ${item.default ? `<div style="font-family:var(--mono);font-size:0.65rem;color:var(--dim);margin-bottom:5px;padding:5px 8px;border-left:2px solid var(--border-2);line-height:1.5;">Default: ${item.default}</div>` : ''}
+      ${item.default ? `<div style="font-family:var(--mono);font-size:0.65rem;color:var(--dim);margin-bottom:5px;padding:5px 8px;border-left:2px solid var(--border-2);line-height:1.5;">Default: ${esc(item.default)}</div>` : ''}
       <textarea
         class="review-script"
         id="cq-answer-${i}"
@@ -2022,10 +2025,10 @@ async function showClarifyingQuestions(topic) {
       renderClarifyingQuestions(_parsedQuestions);
       document.getElementById('useDefaultsBtn').disabled = false;
     } else {
-      qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${data.error}</div>`;
+      qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${esc(data.error)}</div>`;
     }
   } catch (e) {
-    qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${e.message}</div>`;
+    qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${esc(e.message)}</div>`;
   }
 }
 
@@ -2211,7 +2214,7 @@ async function loadRunFiles(run) {
   const res = await fetch(`/run_files/${encodeURIComponent(run)}`);
   const files = await res.json();
   if (!files.length) { list.innerHTML = '<span class="no-files">(empty)</span>'; return; }
-  list.innerHTML = files.map(f => `<div class="file-entry">${f}</div>`).join('');
+  list.innerHTML = files.map(f => `<div class="file-entry">${esc(f)}</div>`).join('');
 }
 
 // ── Image Gallery ─────────────────────────────────────────────────────────
@@ -2552,7 +2555,7 @@ async function loadProfiles() {
     const profiles = await res.json();
     const sel = document.getElementById('profileSelect');
     sel.innerHTML = profiles.map(p =>
-      `<option value="${p.name}">${p.display}</option>`
+      `<option value="${esc(p.name)}">${esc(p.display)}</option>`
     ).join('');
   } catch (e) {
     console.error('Failed to load profiles:', e);

@@ -111,3 +111,13 @@ def test_characters_block():
     assert "**Test Cat:**" in block
     assert "round head" in block
     assert "**Other Cat:**" in block
+
+
+
+@pytest.mark.parametrize("name", ["../fixtures/test-channel", str(FIXTURES / "test-channel"),
+                                  "test-channel/../test-channel"])
+def test_load_profile_rejects_paths(name):
+    # UI request bodies reach load_profile; only plain profile names may load
+    from profile import load_profile
+    with pytest.raises(ValueError):
+        load_profile(name, profiles_root=FIXTURES)
