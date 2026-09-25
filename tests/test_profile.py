@@ -121,3 +121,29 @@ def test_load_profile_rejects_paths(name):
     from profile import load_profile
     with pytest.raises(ValueError):
         load_profile(name, profiles_root=FIXTURES)
+
+
+@pytest.mark.parametrize("broken,named", [
+    (lambda y: y.pop("image_gen"), "image_gen"),                              # missing section
+    (lambda y: y["voice"].pop("voice_id"), "voice_id"),                       # missing key
+    (lambda y: y["script"].update(section_duration_s=90), "script"),          # must be "lo-hi"
+    (lambda y: y["script"].update(hook_duration_s="35"), "script"),           # must be a number
+])
+def test_broken_profiles_raise_a_readable_valueerror(tmp_path, broken, named):
+    # a bare KeyError after a paid call (or an HTML 500 in the UI) was all you got
+    import yaml
+    from profile import load_profile
+    data = yaml.safe_load((FIXTURES / "test-channel" / "profile.yaml").read_text())
+    broken(data)
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / "profile.yaml").write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match=named):
+        load_profile("bad", profiles_root=tmp_path)
+
+
+def test_empty_profile_yaml_raises_valueerror(tmp_path):
+    from profile import load_profile
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "empty" / "profile.yaml").write_text("")
+    with pytest.raises(ValueError, match="channel"):
+        load_profile("empty", profiles_root=tmp_path)

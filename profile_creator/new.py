@@ -12,7 +12,7 @@ import anthropic
 from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
 from pipeline import ANTHROPIC_KEY
-from profile import PROFILES_ROOT
+from profile import PROFILES_ROOT, load_profile
 
 
 def _read_brain_dump() -> str:
@@ -91,6 +91,10 @@ def run_create(seed_image: str | None = None) -> None:
     (profile_dir / "style-sheet.md").write_text(style_content)
     print(f"✓  Written: {profile_dir / 'profile.yaml'}")
     print(f"✓  Written: {profile_dir / 'style-sheet.md'}")
+    try:   # the pipeline must be able to load it — check before paying for anchors
+        load_profile(profile_name, PROFILES_ROOT)
+    except ValueError as e:
+        sys.exit(f"✗ {e}. Fix {profile_dir / 'profile.yaml'} and run --revise, or start again.")
 
     # Build anchor plan and generate prompts
     plan = build_anchor_plan(profile_yaml)

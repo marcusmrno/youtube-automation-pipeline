@@ -151,14 +151,16 @@ def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     assert (v2_dir / "style-sheet.md").exists()
 
 
-def _run_create_with(tmp_path, monkeypatch, inputs, yaml_text=PROFILE_YAML, seed=None):
-    """run_create with every Claude/Gemini call faked; returns the anchors dir."""
+def _run_create_with(tmp_path, monkeypatch, inputs, yaml_text=PROFILE_YAML, seed=None, prompt_calls=None):
+    """run_create with every Claude/Gemini call faked; anchor-prompt calls land in prompt_calls."""
     import profile_creator.new as m
+    prompt_calls = [] if prompt_calls is None else prompt_calls
     monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
     with patch("profile_creator.new.anthropic.Anthropic"), \
          patch("profile_creator.new.clarification_loop", return_value=[]), \
          patch("profile_creator.new.generate_profile_content", return_value=(yaml_text, "# Style\n")), \
-         patch("profile_creator.new.generate_anchor_prompts", side_effect=lambda c, y, s, plan: ({}, plan)), \
+         patch("profile_creator.new.generate_anchor_prompts",
+               side_effect=lambda c, y, s, plan: prompt_calls.append(plan) or ({}, plan)), \
          patch("profile_creator.new.run_verification_anchors"), \
          patch("profile_creator.new.run_full_anchors", return_value={"ok": [], "failed": []}), \
          patch("builtins.input", side_effect=inputs):
@@ -173,3 +175,13 @@ def test_overwriting_a_profile_starts_from_an_empty_folder(tmp_path, monkeypatch
     (old / "anchor-04.png").write_bytes(b"OLD STYLE")
     _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel", "y"])
     assert not (old / "anchor-04.png").exists()
+
+
+def test_an_invalid_generated_profile_stops_before_anchor_prompts(tmp_path, monkeypatch):
+    import pytest
+    broken = PROFILE_YAML.split("image_gen:")[0]          # Claude left out a section
+    calls = []
+    with pytest.raises(SystemExit):
+        _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel"], yaml_text=broken,
+                         prompt_calls=calls)
+    assert calls == []                                    # no paid anchor-prompt call for a broken profile

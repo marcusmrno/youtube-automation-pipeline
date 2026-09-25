@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import yaml
 
+from prompts import _word_budget
+
 
 PROFILES_ROOT = Path(__file__).parent / "profiles"
 
@@ -44,6 +46,7 @@ def load_profile(name: str, profiles_root: Path = PROFILES_ROOT) -> Profile:
         )
 
     data = yaml.safe_load(yaml_path.read_text())
+    _validate(name, data)
 
     # Resolve ${ENV_VAR} references in voice_id
     voice_id = data["voice"]["voice_id"]
@@ -65,6 +68,22 @@ def load_profile(name: str, profiles_root: Path = PROFILES_ROOT) -> Profile:
         voice=data["voice"],
         image_gen=data["image_gen"],
     )
+
+
+def _validate(name: str, data) -> None:
+    """ValueError naming what's wrong, instead of a bare KeyError/TypeError deep in a run."""
+    data = data if isinstance(data, dict) else {}
+    missing = [k for k in ("channel", "script", "image_style", "voice", "image_gen")
+               if not isinstance(data.get(k), dict)]
+    missing += [key for section, key in (("image_style", "art_style_block"), ("voice", "voice_id"),
+                                         ("image_gen", "default_model"))
+                if isinstance(data.get(section), dict) and key not in data[section]]
+    if missing:
+        raise ValueError(f"Profile '{name}' is missing: {', '.join(missing)}")
+    try:
+        _word_budget(data["script"])   # every script prompt is built from these numbers
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise ValueError(f"Profile '{name}' has an invalid script section: {e!r}") from e
 
 
 def list_profiles(profiles_root: Path = PROFILES_ROOT) -> list[str]:
