@@ -194,7 +194,7 @@ async def _relay_and_finish(app: Application, chat_id: int, lq: queue.Queue) -> 
                 try:
                     await app.bot.send_message(
                         chat_id=chat_id,
-                        text=f"🖼 Images: {milestone}% done ({done}/{total})",
+                        text=f"🖼 Images: {milestone}% started ({done}/{total})",
                     )
                 except Exception:
                     pass

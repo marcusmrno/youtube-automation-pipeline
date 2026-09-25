@@ -8,6 +8,8 @@ import pytest
 
 import bot
 
+_REAL_RELAY = bot._relay_and_finish   # the fixture stubs it for runs
+
 
 async def _noop(*a, **k):
     return None
@@ -285,3 +287,15 @@ def test_help_lists_every_command():
     run(bot.cmd_start(u, _context()))
     for cmd in ("/run", "/script", "/runs", "/resume", "/download", "/metadata", "/profile", "/status", "/stop"):
         assert cmd in u.message.replies[0], cmd
+
+
+def test_image_milestones_say_started_not_done():
+    # the pipeline logs "Generating image i/N" when image i starts, so 150/150 isn't "done"
+    import queue
+    lq = queue.Queue()
+    lq.put({"type": "log", "msg": "🖼  Generating image 150/150 (150)"})
+    lq.put({"type": "done"})
+    sent = []
+    app = SimpleNamespace(bot=SimpleNamespace(send_message=lambda **k: sent.append(k["text"]) or _noop()))
+    run(_REAL_RELAY(app, 1, lq))
+    assert sent == ["🖼 Images: 100% started (150/150)"]
