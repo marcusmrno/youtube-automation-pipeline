@@ -1094,6 +1094,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         # Full generate
+        require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")   # before asking anything
         if not args.regenerate:   # --regenerate must work even when metadata.json is malformed
             try:
                 existing = md_mod.load_metadata(args.run_slug)
@@ -1104,7 +1105,6 @@ if __name__ == "__main__":
                 if answer != "y":
                     print("aborted")
                     sys.exit(0)
-        require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
         saved = OUTPUT_ROOT / args.run_slug / "profile.txt"   # the profile the run was made with
         profile = _resolve_profile(args.profile or (saved.read_text().strip() if saved.exists() else None))
         _or_exit(md_mod.generate_metadata, args.run_slug, profile, log_fn, regenerate=True)

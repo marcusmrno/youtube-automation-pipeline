@@ -13,13 +13,12 @@ import profile
 ROOT = Path(pipeline.__file__).parent
 
 
-def run_cli(tmp_path, monkeypatch, *argv):
+def run_cli(tmp_path, monkeypatch, *argv, keys=True):
     """Run the CLI with argv; return its exit code (None if it returned without sys.exit)."""
     shutil.copy(ROOT / "pipeline.py", tmp_path / "pipeline.py")   # its output/ is tmp_path/output
     monkeypatch.setattr(sys, "argv", ["pipeline.py", *argv])
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    monkeypatch.setenv("GOOGLE_API_KEY", "test")
-    monkeypatch.setenv("ELEVENLABS_API_KEY", "test")
+    for key in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY"):
+        monkeypatch.setenv(key, "test" if keys else "")
     try:
         runpy.run_path(str(tmp_path / "pipeline.py"), run_name="__main__")
     except SystemExit as e:
@@ -116,3 +115,13 @@ def test_bad_input_gets_a_message_not_a_traceback(tmp_path, monkeypatch, argv):
     monkeypatch.setattr(metadata, "OUTPUT_ROOT", out)
     code = run_cli(tmp_path, monkeypatch, *argv)   # a ValueError traceback would escape here
     assert code not in (0, None)
+
+
+def test_metadata_checks_keys_before_asking_to_overwrite(tmp_path, monkeypatch):
+    run = tmp_path / "output" / "r1"
+    run.mkdir(parents=True)
+    (run / "metadata.json").write_text("{}")
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("asked to overwrite before checking keys"))
+    code = run_cli(tmp_path, monkeypatch, "metadata", "r1", keys=False)
+    assert "Missing required env var" in str(code)
