@@ -93,3 +93,14 @@ def test_split_agent_output_no_notes_when_script_only():
 def test_extract(tag, text, expected):
     from prompts import _extract
     assert _extract(tag, text) == expected
+
+
+def test_prompt_parsers_skip_rows_without_a_real_number():
+    # an echoed format row became a billed image called "NNN.png"
+    from pipeline import _expand_short_prompts
+    from types import SimpleNamespace
+    profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
+    raw = "NNN | [exact source sentence] | [character] | [scene]\n- 002 | s | none | b\n**003** | s | none | c\n012b | s | none | d"
+    assert [p["num"] for p in _expand_short_prompts(raw, profile)] == ["002", "003", "012b"]
+    expanded = "NNN | source | prompt\n- 002 | s | b\n**003** | s | c"
+    assert [p["num"] for p in parse_image_prompts(expanded)] == ["002", "003"]

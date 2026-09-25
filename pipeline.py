@@ -231,6 +231,12 @@ def format_image_prompts(prompts: list[dict]) -> str:
     return "\n".join(f"{p['num']} | {p['source']} | {p['prompt']}" for p in prompts)
 
 
+def _prompt_num(field: str) -> str | None:
+    """'001', '- 002', '**003**', '012b' -> the zero-padded number; None for 'NNN' and other junk."""
+    num = field.strip().lstrip("-*• ").strip("*").strip()
+    return num.zfill(3) if re.fullmatch(r"\d+[a-z]?", num) else None
+
+
 def parse_image_prompts(raw: str) -> list[dict]:
     """Parse NNN | source line | prompt lines into list of dicts, deduplicated by number."""
     seen: dict[str, dict] = {}
@@ -240,8 +246,8 @@ def parse_image_prompts(raw: str) -> list[dict]:
             continue
         # Source lines must not contain '|' — the delimiter; narration sentences don't in practice
         parts = line.split("|", 2)
-        if len(parts) == 3:
-            num    = parts[0].strip().zfill(3)
+        num = _prompt_num(parts[0]) if len(parts) == 3 else None   # an echoed "NNN | ..." row isn't an image
+        if num:
             source = parts[1].strip()
             prompt = parts[2].strip()
             seen[num] = {"num": num, "source": source, "prompt": prompt}
@@ -264,14 +270,15 @@ def _expand_short_prompts(raw: str, profile: "Profile") -> list[dict]:
         if len(parts) != 4:
             continue
         num, source, character, scene = (p.strip() for p in parts)
-        if not scene:
+        num = _prompt_num(num)
+        if not (num and scene):
             continue
         # "Orange Cat + White Cat" -> both descriptions, in the order named
         named = [descs.get(n.strip().lower(), "") for n in character.split("+")]
         desc = " and ".join(d for d in named if d)
         body = f"{desc} — {scene}" if desc else scene
-        seen[num.zfill(3)] = {
-            "num": num.zfill(3),
+        seen[num] = {
+            "num": num,
             "source": source,
             "prompt": f"{body} — {style}",
         }
