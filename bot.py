@@ -13,7 +13,6 @@ import threading
 import zipfile
 from pathlib import Path
 
-from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application,
@@ -40,7 +39,6 @@ from pipeline import (
 from writing import generate_approach_pitches, generate_clarifying_questions, revise_script
 from channel_profile import load_profile, list_profiles
 
-load_dotenv()
 
 BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _user_id        = os.getenv("TELEGRAM_USER_ID", "").strip()

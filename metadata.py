@@ -14,11 +14,6 @@ import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from channel_profile import Profile
-
 import anthropic
 
 from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT
