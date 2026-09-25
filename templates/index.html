@@ -1954,12 +1954,17 @@ async function reviseScript() {
   btn.disabled = true;
   btn.textContent = '↻ Revising…';
 
-  const res  = await fetch('/revise', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script, feedback, topic, profile }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/revise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script, feedback, topic, profile }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave Revise stuck disabled
+  }
 
   btn.disabled = false;
   btn.textContent = '↻ Revise';
@@ -2542,12 +2547,17 @@ async function regenAudio() {
   btn.textContent = '⏳ Generating…';
   status.textContent = '';
 
-  const res  = await fetch('/regenerate_audio', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ run_slug: run }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/regenerate_audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_slug: run }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave the button stuck on "Generating…"
+  }
   if (!data.ok) {
     status.textContent = `❌ ${data.error}`;
     btn.disabled = false;

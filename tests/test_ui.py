@@ -6,6 +6,8 @@ import pytest
 
 import ui
 
+_REAL_LOAD_UI_PROFILE = ui._load_ui_profile
+
 
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch):
@@ -147,3 +149,28 @@ def test_reject_with_nothing_awaiting_approval_stops_nothing(monkeypatch, run_di
     assert r["ok"] is False and not ui._state["stop_event"].is_set()
     release.set()
     ui._state["thread"].join(2)
+
+
+def _raise(exc):
+    def f(*a, **k):
+        raise exc
+    return f
+
+
+@pytest.mark.parametrize("route,body,patches", [
+    ("/clarifying_questions", {"topic": "t", "profile_name": "nope"}, {"load_profile": _raise(ValueError("nope"))}),
+    ("/clarifying_questions", {"topic": "t"}, {"list_profiles": lambda: []}),
+    ("/approach_pitches", {"topic": "t", "answers": "a", "profile_name": "nope"}, {"load_profile": _raise(ValueError("nope"))}),
+    ("/revise", {"script": "s", "feedback": "f", "profile": "nope"}, {"load_profile": _raise(ValueError("nope"))}),
+    ("/revise", {"script": "s", "feedback": "f", "profile": "p"}, {"revise_script": _raise(RuntimeError("overloaded"))}),
+    ("/regenerate_audio", {"run_slug": "r1"}, {"load_profile": _raise(ValueError("gone"))}),
+    ("/run", {"topic": "t", "profile": "p"}, {"load_profile": _raise(KeyError("image_gen"))}),
+])
+def test_route_errors_come_back_as_json(monkeypatch, run_dir, route, body, patches):
+    # an HTML 500 makes the page's res.json() throw and leaves its buttons disabled
+    monkeypatch.setattr(ui, "_load_ui_profile", _REAL_LOAD_UI_PROFILE)
+    monkeypatch.setattr(ui, "list_profiles", lambda: ["p"])
+    for name, fn in patches.items():
+        monkeypatch.setattr(ui, name, fn)
+    r = ui.app.test_client().post(route, json=body)
+    assert r.status_code == 200 and r.get_json()["ok"] is False, (r.status_code, r.data[:80])

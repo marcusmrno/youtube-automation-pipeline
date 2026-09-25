@@ -85,7 +85,7 @@ def _load_ui_profile(profile_name: str):
         profile_name = available[0]
     try:
         return load_profile(profile_name), None
-    except ValueError as e:
+    except Exception as e:   # ValueError for a bad name, KeyError/TypeError for a malformed profile.yaml
         return None, str(e)
 
 
@@ -235,7 +235,7 @@ def resume():
     if profile_name:
         try:
             profile = load_profile(profile_name)
-        except ValueError as e:
+        except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
     return _start_run(lambda cb, se, emit: resume_pipeline(
@@ -468,15 +468,12 @@ def save_script(run_name: str):
 def get_clarifying_questions():
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
-    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
-
     if not topic:
         return jsonify({"ok": False, "error": "Topic required"})
 
-    profile = load_profile(profile_name)
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
     try:
+        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         questions = generate_clarifying_questions(topic, profile, client, _noop_log)
         return jsonify({"ok": True, "questions": questions})
     except Exception as e:
@@ -488,15 +485,12 @@ def get_approach_pitches():
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
     answers = (data.get("answers") or "").strip()
-    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
-
     if not topic or not answers:
         return jsonify({"ok": False, "error": "Topic and answers required"})
 
-    profile = load_profile(profile_name)
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
     try:
+        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         pitches = generate_approach_pitches(topic, answers, profile, client, _noop_log)
         return jsonify({"ok": True, "pitches": pitches})
     except Exception as e:
@@ -524,7 +518,10 @@ def regenerate_audio():
     profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
     if not profile_name:
         return jsonify({"ok": False, "error": "No profiles found."})
-    profile = load_profile(profile_name)
+    try:
+        profile = load_profile(profile_name)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
     return _start_run(lambda cb, se, emit: generate_voiceover(tts_path.read_text(), run_dir, profile, cb),
                       stage="voice", done={"type": "audio_done", "run_slug": run_slug})
@@ -545,15 +542,17 @@ def revise():
     available = list_profiles()
     if not profile_name:
         profile_name = available[0] if available else None
-    profile = load_profile(profile_name) if profile_name else None
+    try:
+        profile = load_profile(profile_name) if profile_name else None
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        revised = revise_script(script, feedback, topic, profile, client)
 
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    revised = revise_script(script, feedback, topic, profile, client)
-
-    if VIDIQ_KEY and revised and profile:
-        vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
-        if vetted:
-            revised = vetted
+        if VIDIQ_KEY and revised and profile:
+            vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
+            if vetted:
+                revised = vetted
+    except Exception as e:   # e.g. an Anthropic overload: the page needs JSON to re-enable Revise
+        return jsonify({"ok": False, "error": str(e)})
 
     return jsonify({"ok": True, "script": revised})
 
@@ -605,7 +604,7 @@ def regen():
 
     try:
         profile = load_profile(profile_name)
-    except ValueError as e:
+    except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
     return _start_run(lambda cb, se, emit: regenerate_images(run_slug, image_nums, model_key, profile,
