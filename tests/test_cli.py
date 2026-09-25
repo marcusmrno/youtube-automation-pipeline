@@ -71,3 +71,19 @@ def test_preview_never_overwrites_a_runs_prompts(tmp_path, monkeypatch):
         preview_prompts.main()
     assert exc.value.code not in (0, None)
     assert (run / "image_prompts.txt").read_text() == "001 | s | ORIGINAL prompt"
+
+
+@pytest.fixture
+def unrunnable_profile(monkeypatch):
+    """One profile whose missing voice_id makes check_keys refuse before any paid call."""
+    from types import SimpleNamespace
+    monkeypatch.setattr(profile, "list_profiles", lambda: ["p"])
+    monkeypatch.setattr(profile, "load_profile", lambda name: SimpleNamespace(name="p", voice={"voice_id": ""}))
+
+
+def test_failed_runs_exit_nonzero(tmp_path, monkeypatch, unrunnable_profile):
+    # shell scripts couldn't tell a failed run from a finished one: both exited 0
+    script = tmp_path / "s.txt"
+    script.write_text("TITLE: T\nbody")
+    assert run_cli(tmp_path, monkeypatch, "script", str(script)) == 1
+    assert run_cli(tmp_path, monkeypatch, "run", "some topic") == 1

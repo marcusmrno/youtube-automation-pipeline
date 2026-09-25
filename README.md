@@ -165,6 +165,8 @@ python pipeline.py script my-script.txt           # --profile optional when only
 python pipeline.py script - --profile <name>      # read the script from stdin
 ```
 
+Both exit 0 only when the run completes (1 on an error, a rejected script or a cancel).
+
 ### Metadata & Thumbnail
 
 After a run completes, generate SEO metadata and thumbnails:

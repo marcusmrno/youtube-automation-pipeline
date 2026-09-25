@@ -1062,8 +1062,8 @@ if __name__ == "__main__":
     if args.cmd == "script":
         require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY")
         text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
-        run_from_script(text, _resolve_profile(args.profile), args.topic)
-        sys.exit(0)
+        result = run_from_script(text, _resolve_profile(args.profile), args.topic)
+        sys.exit(0 if result.get("status") == "complete" else 1)   # scripts can tell a failed run
 
     if args.cmd == "metadata":
         import metadata as md_mod
@@ -1104,4 +1104,5 @@ if __name__ == "__main__":
     require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY")
     topic = " ".join(args.topic)
     profile = _resolve_profile(args.profile)
-    run_pipeline(topic, profile)
+    result = run_pipeline(topic, profile)
+    sys.exit(0 if result.get("status") == "complete" else 1)
