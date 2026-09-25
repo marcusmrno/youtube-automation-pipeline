@@ -57,6 +57,11 @@ def _call_vidiq_agent(system_prompt: str, user_prompt: str, max_turns: int, log_
     return asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns, log_fn, model=HAIKU_MODEL))
 
 
+def _json_block(block: str):
+    """json.loads for an agent's block, tolerating the ```json fence LLMs like to add."""
+    return json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", block.strip()))
+
+
 def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     """Use vidIQ MCP to fetch top keywords for the topic.
 
@@ -79,7 +84,11 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
         if not block:
             log_fn("⚠️  vidIQ keyword research returned no KEYWORDS block")
             return []
-        return json.loads(block)
+        kws = _json_block(block)
+        if not isinstance(kws, list):
+            return []
+        # agents sometimes return plain strings instead of {"keyword": ...} objects
+        return [{"keyword": k} if isinstance(k, str) else k for k in kws if isinstance(k, (str, dict))]
     except Exception as e:
         log_fn(f"⚠️  vidIQ keyword research failed: {e}")
         return []
@@ -166,7 +175,7 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
         block = _extract("SCORES", raw)
         if not block:
             raise RuntimeError("vidIQ scores response had no SCORES block")
-        for entry in json.loads(block):
+        for entry in _json_block(block):
             by_title[entry["title"]] = entry
     except Exception as e:
         log_fn(f"⚠️  Title scoring failed: {e}")
@@ -177,7 +186,7 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
         score = entry.get("score") if entry else None
         results.append({
             "text": t,
-            "score": int(score) if score is not None else None,
+            "score": int(score) if isinstance(score, (int, float)) else None,   # "85/100" -> None, not a crash
             "score_breakdown": (entry or {}).get("breakdown", {}),
         })
     log_fn("✅  Scoring complete")

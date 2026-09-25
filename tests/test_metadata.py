@@ -462,3 +462,27 @@ def test_pick_thumbnail_skips_errored_slot(tmp_path, monkeypatch):
     with pytest.raises(ValueError) as exc:
         metadata.pick_thumbnail("abc", 1)
     assert "render_error" in str(exc.value) or "not available" in str(exc.value).lower()
+
+
+@pytest.mark.parametrize("payload,expected", [
+    ('===KEYWORDS===\n["cat purring", "why cats purr"]', [{"keyword": "cat purring"}, {"keyword": "why cats purr"}]),
+    ('===KEYWORDS===\n```json\n[{"keyword": "cat purring"}]\n```', [{"keyword": "cat purring"}]),
+    ('===KEYWORDS===\n{"keyword": "not a list"}', []),
+])
+def test_vidiq_keywords_tolerate_the_agents_json_shape(monkeypatch, payload, expected):
+    # a string list crashed _build_video_tags after the paid session; a ```json fence gave []
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    keywords = metadata._vidiq_keywords("cats", lambda _: None)
+    assert keywords == expected
+    metadata._build_video_tags("cats", keywords)   # must not raise
+
+
+def test_score_titles_tolerates_odd_scores_and_fences(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    payload = ('===SCORES===\n```json\n[{"title": "A", "score": "85/100", "breakdown": {}},'
+               ' {"title": "B", "score": 71, "breakdown": {}}]\n```')
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    assert [t["score"] for t in metadata._score_titles(["A", "B"], lambda _: None)] == [None, 71]
