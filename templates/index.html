@@ -1500,7 +1500,7 @@ async function fillPicker(url, id, placeholder) {
 }
 
 async function refreshResumePicker() {
-  await fillPicker('/runs_with_prompts', 'resumePicker', '— select a stopped run —');
+  await fillPicker('/runs_with_scripts', 'resumePicker', '— select a stopped run —');
   if (!document.getElementById('resumePicker').value) loadResumeStatus('');
 }
 

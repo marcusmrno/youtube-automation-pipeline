@@ -346,3 +346,15 @@ def test_metadata_and_revise_use_the_runs_profile(monkeypatch, tmp_path):
     bot._state.update(running=True, run_slug="r1", revision_mode=True)
     run(bot.on_text(_update(text="shorter"), _context()))
     assert used == ["<profile beta>", "<profile beta>"]
+
+
+def test_resume_lists_incomplete_runs_beyond_the_newest_ten(monkeypatch, tmp_path):
+    import os
+    for i in range(12):                                         # 11 complete runs, then an older incomplete one
+        d = tmp_path / f"run-{i:02d}"
+        d.mkdir()
+        os.utime(d, (1_000_000 - i, 1_000_000 - i))
+    monkeypatch.setattr(bot, "run_status", lambda slug: {"missing": ["voiceover"] if slug == "run-11" else []})
+    u = _update()
+    run(bot.cmd_resume(u, _context()))
+    assert "run-11" in u.message.replies[0]

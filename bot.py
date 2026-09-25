@@ -780,10 +780,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         dirs = _run_dirs()
         incomplete = []
-        for slug in dirs[:10]:
+        for slug in dirs:   # filter every run, then cap the list: an older incomplete run still shows
             s = run_status(slug)
             if s["missing"]:
                 incomplete.append(f"• `{slug}` — missing: {', '.join(s['missing'])}")
+        incomplete = incomplete[:10]
         if not incomplete:
             await update.message.reply_text(
                 "No incomplete runs found.\n\nUse /resume <slug> to force-resume a specific run."
