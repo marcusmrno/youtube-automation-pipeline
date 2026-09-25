@@ -55,12 +55,12 @@ _state: dict = {
 
 STAGE_KEYWORDS: dict[str, list[str]] = {
     "research": ["researching", "research complete", "starting pipeline",
-                 "output directory", "style anchor", "api keys", "missing api"],
+                 "output directory", "api keys", "missing api"],
     "script":   ["writing script", "script written", "generating image prompts", "image prompts parsed",
                  "script ready", "📝", "vidiq script vet", "script vetted", "vet agent", "🔎"],
-    "images":   ["generating image", "images generated", "sending request"],
+    "images":   ["generating image", "sending request"],
     "voice":    ["generating voiceover", "voiceover generated", "voiceover failed", "🎙"],
-    "done":     ["pipeline complete", "pipeline finished", "🎬", "╔", "╚"],
+    "done":     ["pipeline complete"],
 }
 
 
