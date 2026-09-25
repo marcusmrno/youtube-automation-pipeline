@@ -185,3 +185,17 @@ def test_a_failed_voiceover_does_not_leave_the_old_one(monkeypatch, tmp_path):
     r = pipeline._run_production("t", [], "new narration", PROFILE, tmp_path, lambda m: None)
     assert r["audio"] == "failed"
     assert not (tmp_path / "audio" / "voiceover.mp3").exists()      # run_status must not call it done
+
+
+def test_regenerate_rejects_an_unknown_model_key(monkeypatch, run_env):
+    # a typo silently regenerated with the default model
+    calls = []
+    monkeypatch.setattr(pipeline, "generate_image_google", lambda *a, **k: calls.append(k) or True)
+    (run_env / "r1").mkdir()
+    (run_env / "r1" / "image_prompts.txt").write_text("001 | s | p")
+    profile = SimpleNamespace(image_gen={"default_model": "flash", "pro_model": "pro"}, image_style={})
+    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda p: [])
+    assert pipeline.regenerate_images("r1", ["1"], "3-pr0", profile)["status"] == "error"
+    assert calls == []
+    pipeline.regenerate_images("r1", ["1"], "3-pro", profile)
+    assert calls[0]["model"] == "pro"

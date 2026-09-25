@@ -535,7 +535,8 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     def log_fn(msg):
         log(msg, progress_callback)
 
-    model = profile.image_gen.get("pro_model" if model_key == "3-pro" else "default_model")
+    slot  = {"3-pro": "pro_model", "nano-banana-2": "default_model"}.get(model_key)   # the UI's two choices
+    model = profile.image_gen.get(slot) if slot else None
     if not model:
         log_fn(f"❌  Unknown model key '{model_key}' or no matching model configured on this profile")
         return {"status": "error", "reason": "unknown model key"}
