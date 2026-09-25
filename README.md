@@ -164,6 +164,7 @@ TTS, image prompts, images, and voiceover. The run folder is named after the scr
 ```bash
 python pipeline.py script my-script.txt           # --profile optional when only one profile exists
 python pipeline.py script - --profile <name>      # read the script from stdin
+python pipeline.py resume <run-slug>              # finish a stopped run (uses its profile.txt)
 ```
 
 Both exit 0 only when the run completes (1 on an error, a rejected script or a cancel).

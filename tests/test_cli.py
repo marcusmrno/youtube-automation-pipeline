@@ -125,3 +125,9 @@ def test_metadata_checks_keys_before_asking_to_overwrite(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("asked to overwrite before checking keys"))
     code = run_cli(tmp_path, monkeypatch, "metadata", "r1", keys=False)
     assert "Missing required env var" in str(code)
+
+
+def test_resume_is_a_cli_command(tmp_path, monkeypatch, capsys, unrunnable_profile):
+    # a CLI run stopped with Ctrl-C could only be finished from the UI or the bot
+    assert run_cli(tmp_path, monkeypatch, "resume", "missing-run") == 1
+    assert "Output folder not found" in capsys.readouterr().out   # not a new run named "resume missing-run"

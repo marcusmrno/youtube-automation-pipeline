@@ -1029,6 +1029,11 @@ if __name__ == "__main__":
     sc.add_argument("--profile", default=None)
     sc.add_argument("--topic", default="", help="Overrides the slug taken from the script's TITLE line")
 
+    # Finish a stopped run from what its folder already holds
+    rs = sub.add_parser("resume", help="Finish a stopped run: generate only what its folder is missing")
+    rs.add_argument("run_slug")
+    rs.add_argument("--profile", default=None, help="Defaults to the run's saved profile.txt")
+
     # Metadata subcommand
     md = sub.add_parser("metadata", help="Generate or update metadata + thumbnails")
     md.add_argument("run_slug")
@@ -1042,7 +1047,7 @@ if __name__ == "__main__":
     if not argv:
         parser.print_help()
         sys.exit(2)
-    if argv[0] not in {"run", "metadata", "script", "-h", "--help"}:
+    if argv[0] not in {"run", "metadata", "script", "resume", "-h", "--help"}:
         argv = ["run"] + argv
 
     args = parser.parse_args(argv)
@@ -1074,6 +1079,10 @@ if __name__ == "__main__":
         text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
         result = run_from_script(text, _resolve_profile(args.profile), args.topic)
         sys.exit(0 if result.get("status") == "complete" else 1)   # scripts can tell a failed run
+
+    if args.cmd == "resume":
+        result = resume_pipeline(args.run_slug, _resolve_profile(args.profile) if args.profile else None)
+        sys.exit(0 if result.get("status") == "complete" else 1)
 
     if args.cmd == "metadata":
         import metadata as md_mod
