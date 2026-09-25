@@ -161,3 +161,25 @@ def test_requirements_allow_output_config():
     reqs = (Path(pipeline.__file__).parent / "requirements.txt").read_text()
     floor = re.search(r"^anthropic>=([\d.]+)", reqs, re.M)[1]
     assert tuple(map(int, floor.split("."))) >= (0, 77, 0), floor
+
+
+def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
+    # the CLI has no stop_event; Ctrl-C must not leave ~150 queued images billing
+    import _thread
+    import pytest
+    generated: list[str] = []
+
+    def _fake_gen(prompt, path, profile, log_fn, **kw):
+        generated.append(path.name)
+        if len(generated) == 2:
+            _thread.interrupt_main()   # Ctrl-C while image 2 is in flight, 18 still queued
+        time.sleep(0.05)
+        return True
+
+    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    (tmp_path / "images").mkdir()
+    with pytest.raises(KeyboardInterrupt):
+        generate_all_images([{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
+                            tmp_path, P, lambda m: None, max_workers=1)
+    assert len(generated) <= 3, generated

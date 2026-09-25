@@ -485,10 +485,16 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
                 continue
             futures[ex.submit(_one, i, p)] = num
 
-        for fut in as_completed(futures):
-            num, found = fut.result()
-            if found:
-                results[num] = found
+        try:
+            for fut in as_completed(futures):
+                num, found = fut.result()
+                if found:
+                    results[num] = found
+        except BaseException:
+            # Ctrl-C (the CLI's only stop): drop the queue, or the executor's exit bills every image
+            for f in futures:
+                f.cancel()
+            raise
 
     return results
 
