@@ -349,11 +349,8 @@ regenerate selector in the UI picks between the two slots by alias:
 ## Tests
 
 ```bash
-python -m pytest tests/ test_pipeline_helpers.py test_bot_script_mode.py -q
+python -m pytest tests -q
 ```
-
-`tests/` is the pytest suite. The top-level `test_*.py` files are assert-based checks that
-pytest collects but that also run on their own — `python test_pipeline_helpers.py`.
 
 ---
 
@@ -374,8 +371,7 @@ youtube-pipeline/
 ├── profile_creator/      # profile creation subpackage
 ├── profiles/example/     # fully annotated profile schema — copy to get started
 ├── templates/index.html  # web UI (vanilla JS, SSE, gallery, lightbox)
-├── tests/                # pytest suite (pipeline parsing, metadata, profile, create_profile)
-├── test_*.py             # assert-based checks that also run standalone: `python test_<name>.py`
+├── tests/                # pytest suite (pipeline, bot script mode, metadata, profile, create_profile)
 ├── docs/                 # design docs for past features (gitignored)
 └── output/               # generated assets per run (gitignored)
 ```

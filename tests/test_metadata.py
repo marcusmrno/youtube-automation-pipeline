@@ -1,16 +1,7 @@
 import json
-import shutil
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-if "claude_agent_sdk" not in sys.modules:
-    mock_sdk = MagicMock()
-    sys.modules["claude_agent_sdk"] = mock_sdk
-    sys.modules["claude_agent_sdk.types"] = mock_sdk
-
 
 def test_load_metadata_missing(tmp_path, monkeypatch):
     import metadata
