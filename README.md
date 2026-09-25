@@ -134,7 +134,7 @@ python ui.py
 | Command | Description |
 |---------|-------------|
 | `/run <topic>` | Starts the planning flow — clarifying questions → approach pitches → pipeline |
-| `/script` | Produce from a script you already wrote — then paste it, or upload it as a `.txt` |
+| `/script [run name]` | Produce from a script you already wrote — then paste it, or upload it as a `.txt`; the run name overrides its `TITLE:` line |
 | `/resume [slug]` | Resume an incomplete run |
 | `/runs` | List recent runs with status |
 | `/status` | Show status of the current/last run |

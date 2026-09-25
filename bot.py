@@ -58,6 +58,7 @@ _state: dict = {
     "approval_result":   None,
     "revision_mode":     False,
     "script_mode":       False,   # waiting for a premade script (pasted or uploaded)
+    "script_topic":      "",      # optional run name from /script <run name>
     "clarifying_mode":   False,   # waiting for answers to clarifying questions
     "clarifying_topic":  None,    # topic being planned
     "clarifying_questions": None, # parsed list of {question, default} dicts
@@ -372,7 +373,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/run <topic> — plan & start a pipeline run\n"
         "   ↳ asks clarifying questions, pitches 3 approaches, then runs\n"
         "   ↳ reply `default` to auto-fill all suggested answers\n"
-        "/script — produce from a script you already wrote\n"
+        "/script [run name] — produce from a script you already wrote\n"
         "   ↳ then paste it, or upload it as a .txt file\n"
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
@@ -741,11 +742,12 @@ async def cmd_script(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ A pipeline is already running. Use /stop first.")
         return
     _state["script_mode"] = True
+    _state["script_topic"] = " ".join(context.args or []).strip()   # /script <run name>, like CLI --topic
     await update.message.reply_text(
         "📄 Send the script now — paste it, or upload it as a .txt file.\n\n"
         "No research, writing, or approval step: it goes straight to TTS, image prompts, "
-        "images, and voiceover. The run is named after the script's `TITLE:` line, and a run "
-        "folder of that name is overwritten.",
+        "images, and voiceover. The run is named after the script's `TITLE:` line (or "
+        "`/script <run name>`), and a run folder of that name is overwritten.",
         parse_mode="Markdown",
     )
 
@@ -756,7 +758,8 @@ async def _run_premade_script(update, context: ContextTypes.DEFAULT_TYPE, script
         await update.message.reply_text("⚠️ That script is empty — send another, or /stop to cancel.")
         return
     _state["script_mode"] = False
-    await _start_pipeline(update, context, script=script)
+    topic = _state.pop("script_topic", "")
+    await _start_pipeline(update, context, script=script, **({"topic": topic} if topic else {}))
 
 
 @auth
