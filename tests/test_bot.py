@@ -150,3 +150,21 @@ def test_thumbnail_buttons_fit_telegrams_64_byte_limit(monkeypatch):
     u.callback_query.message.chat = chat
     run(bot.on_button(u, _context()))
     assert picked == [(slug, 1)]
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ("2. adults only", ["history", "adults only", "playful"]),            # only Q2 answered
+    ("1: science\n2: kids\n3: serious", ["science", "kids", "serious"]),
+    ("1) science\n3 - serious", ["science", "teens", "serious"]),
+    ("just make it fun", ["just make it fun", "teens", "playful"]),      # unnumbered -> Q1
+])
+def test_answers_pair_with_the_number_typed(monkeypatch, reply, expected):
+    captured = []
+    monkeypatch.setattr(bot, "_send_approach_pitches", lambda u, c, answers: captured.append(answers) or _noop())
+    bot._state.update(clarifying_mode=True, clarifying_questions=[
+        {"question": "Angle?", "default": "history"},
+        {"question": "Audience?", "default": "teens"},
+        {"question": "Tone?", "default": "playful"}])
+    run(bot.on_text(_update(text=reply), _context()))
+    got = [line.split("Answer: ", 1)[1] for line in captured[0].splitlines() if "Answer: " in line]
+    assert got == expected

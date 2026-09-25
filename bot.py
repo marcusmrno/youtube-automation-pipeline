@@ -996,12 +996,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parts.append(f"{i}. {item['question']}\n   Answer: {item['default'] or '(no default)'}")
             answers = '\n\n'.join(parts)
         else:
-            # Pair user's numbered answers back to questions
-            raw_answers = re.split(r'\n(?=\d+[\.\)])', text)
+            # Pair answers with the number typed: "2. adults only" answers Q2, not Q1
+            by_num = {int(m[1]): m[2].strip() for m in
+                      re.finditer(r'(?ms)^\s*(\d+)\s*[.):-]\s*(.*?)(?=^\s*\d+\s*[.):-]|\Z)', text)}
+            by_num = by_num or {1: text}   # an unnumbered reply answers the first question
             parts = []
             for i, item in enumerate(parsed, 1):
-                user_ans = raw_answers[i - 1].strip() if i <= len(raw_answers) else ''
-                user_ans = re.sub(r'^\d+[\.\)]\s*', '', user_ans).strip()
+                user_ans = by_num.get(i, '')
                 parts.append(f"{i}. {item['question']}\n   Answer: {user_ans or item['default'] or '(no answer)'}")
             answers = '\n\n'.join(parts)
 
