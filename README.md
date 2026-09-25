@@ -176,7 +176,7 @@ python pipeline.py metadata <run-slug> --pick-thumb N    # 1-based; pick which t
 python pipeline.py metadata <run-slug> --show         # print current metadata.json
 ```
 
-Also available as `/metadata` in the Telegram bot, and as a "Metadata & Thumbnail" section in the Flask web UI.
+Also available as `/metadata` in the Telegram bot, and as a "Metadata & Thumbnail" section in the Flask web UI. All three use the profile the run was made with (its `profile.txt`); `--profile` overrides it on the CLI.
 
 ### Flicker effect
 

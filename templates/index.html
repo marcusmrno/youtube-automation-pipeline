@@ -1847,12 +1847,11 @@ async function startMetadataRun(slug, regenerate) {
   // Force-open a Metadata log section now so the user sees activity immediately.
   activateStage('metadata');
 
-  const profile = document.getElementById('profileSelect')
-    ? document.getElementById('profileSelect').value : '';
+  // no profile sent: the server uses the one the run was made with (its profile.txt)
   const res = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ regenerate, profile }),
+    body: JSON.stringify({ regenerate }),
   });
 
   if (res.status === 409) {

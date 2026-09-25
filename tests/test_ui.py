@@ -239,3 +239,14 @@ def test_several_profiles_and_none_chosen_is_refused(monkeypatch, run_dir):
         assert r["ok"] is False and "Select a profile" in r["error"], route
     (run_dir / "profile.txt").unlink()                        # a run that never recorded its profile
     assert ui._resolve_run_profile_name("r1", "") is None
+
+
+def test_metadata_uses_the_runs_profile(monkeypatch, run_dir):
+    # thumbnails for a run made with one channel were rendered in another channel's style
+    used = []
+    monkeypatch.setattr(ui, "list_profiles", lambda: ["alpha", "p"])
+    monkeypatch.setattr(ui._metadata_mod, "generate_metadata", lambda slug, profile, **k: used.append(profile))
+    r = ui.app.test_client().post("/metadata/r1/generate", json={"regenerate": True})
+    assert r.status_code == 202
+    ui._state["thread"].join(2)
+    assert used == ["<profile p>"]                             # run_dir's profile.txt says "p"

@@ -500,6 +500,15 @@ def _resolve_profile_for_bot():
     return load_profile(name), name
 
 
+def _profile_for_run(slug):
+    """(profile, name) a run was made with (its profile.txt), else the /profile choice."""
+    saved = OUTPUT_ROOT / slug / "profile.txt"
+    if saved.exists():
+        name = saved.read_text().strip()
+        return load_profile(name), name
+    return _resolve_profile_for_bot()
+
+
 async def _send_metadata_view(chat, data, run_slug):
     titles = data.get("titles") or []
     chosen_th = data.get("chosen_thumbnail_index", 0)
@@ -585,7 +594,7 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"📦 Generating metadata for `{slug}`…", parse_mode="Markdown")
     try:
-        profile, _ = _resolve_profile_for_bot()
+        profile, _ = _profile_for_run(slug)   # thumbnails in the run's own channel style
     except Exception as e:
         _metadata_busy.discard(slug)
         await update.message.reply_text(f"❌ {e}")
@@ -814,11 +823,9 @@ async def _start_pipeline(
     se = threading.Event()
 
     # Resume uses the run's saved profile; everything else the /profile choice (or the only one)
-    saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt" if (run_slug and not (script or topic)) else None
     try:
-        if saved_profile_file and saved_profile_file.exists():
-            profile_name = saved_profile_file.read_text().strip()
-            profile = load_profile(profile_name)
+        if run_slug and not (script or topic):
+            profile, profile_name = _profile_for_run(run_slug)
         else:
             profile, profile_name = _resolve_profile_for_bot()
     except Exception as e:   # several profiles and none chosen, or profile.txt names a renamed one
@@ -1051,9 +1058,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    _available = list_profiles()
-    _profile_name = _state["profile_name"] or (_available[0] if _available else None)
-    _profile = load_profile(_profile_name) if _profile_name else None
+    try:
+        _profile, _ = _profile_for_run(slug)   # the run's own channel context
+    except Exception:
+        _profile = None                        # revise still works without it
 
     try:
         # off the event loop: a 10-20 s Sonnet call would otherwise freeze /stop and the buttons

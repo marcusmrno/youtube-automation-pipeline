@@ -332,13 +332,10 @@ def metadata_generate(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     regenerate = bool(body.get("regenerate", False))
-    profile_name = (body.get("profile") or "").strip()
+    # the run's own profile.txt, as regen and resume use, so thumbnails match its channel
+    profile_name = _resolve_run_profile_name(run_slug, (body.get("profile") or "").strip())
     if not profile_name:
-        available = list_profiles()
-        if len(available) == 1:
-            profile_name = available[0]
-        else:
-            return jsonify({"error": "specify 'profile' in body"}), 400
+        return jsonify({"error": "specify 'profile' in body"}), 400
     try:
         profile = load_profile(profile_name)
     except Exception as e:

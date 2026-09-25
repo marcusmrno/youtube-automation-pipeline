@@ -330,3 +330,19 @@ def test_several_profiles_and_none_chosen_asks_for_profile(monkeypatch, fresh_bo
     run(bot._start_pipeline(_update(), _context(), script="TITLE: T\nbody"))
     _wait_for(fresh_bot)
     assert fresh_bot == ["run_from_script"]
+
+
+def test_metadata_and_revise_use_the_runs_profile(monkeypatch, tmp_path):
+    used = []
+    monkeypatch.setattr(bot, "list_profiles", lambda: ["alpha", "beta"])
+    monkeypatch.setattr(bot._metadata_mod, "load_metadata", lambda slug: None)
+    monkeypatch.setattr(bot._metadata_mod, "generate_metadata", lambda slug, profile, **k: used.append(profile))
+    monkeypatch.setattr(bot, "revise_script", lambda script, fb, topic, profile, client: used.append(profile) or "R")
+    monkeypatch.setattr(bot, "_send_script_for_review", _noop)
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "profile.txt").write_text("beta")
+    (tmp_path / "r1" / "script.txt").write_text("S")
+    run(bot.cmd_metadata(_update(), _context("r1", "regenerate")))
+    bot._state.update(running=True, run_slug="r1", revision_mode=True)
+    run(bot.on_text(_update(text="shorter"), _context()))
+    assert used == ["<profile beta>", "<profile beta>"]
