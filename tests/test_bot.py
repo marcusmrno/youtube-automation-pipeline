@@ -210,3 +210,15 @@ def test_zipping_does_not_freeze_the_bot(monkeypatch, tmp_path):
     for f in ("script.txt", "tts_script.txt"):
         (tmp_path / "r1" / f).write_text("x")
     assert _longest_stall(bot.cmd_download(_update(), _context("r1"))) < 0.3
+
+
+def test_download_parts_fit_telegrams_upload_limit(tmp_path):
+    import os
+    images = tmp_path / "r1" / "images"
+    images.mkdir(parents=True)
+    for i in range(60):                                   # 60 MB of incompressible "images"
+        (images / f"{i:03d}.png").write_bytes(os.urandom(1 << 20))
+    u = _update()
+    run(bot.cmd_download(u, _context("r1")))
+    sizes = [r[2] for r in u.message.replies if isinstance(r, tuple)]
+    assert len(sizes) >= 2 and max(sizes) <= 50_000_000, sizes   # Bot API upload cap: 50 MB

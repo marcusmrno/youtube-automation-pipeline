@@ -624,7 +624,7 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"📦 Zipping `{slug}`…", parse_mode="Markdown")
 
-    LIMIT = 49 * 1_048_576  # 49 MB — Telegram bot limit is 50 MB
+    LIMIT = 45_000_000  # Telegram caps bot uploads at 50 MB (50e6 bytes); leave room for zip overhead
 
     def _make_zip(paths: list) -> io.BytesIO:
         buf = io.BytesIO()
