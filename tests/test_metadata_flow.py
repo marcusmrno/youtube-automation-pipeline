@@ -1,15 +1,8 @@
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-if "claude_agent_sdk" not in sys.modules:
-    mock_sdk = MagicMock()
-    sys.modules["claude_agent_sdk"] = mock_sdk
-    sys.modules["claude_agent_sdk.types"] = mock_sdk
-
 
 def _seed_run_with_script(tmp_path, slug="abc", script="SCRIPT BODY"):
     run = tmp_path / slug

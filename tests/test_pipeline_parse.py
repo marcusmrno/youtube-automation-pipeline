@@ -1,13 +1,3 @@
-import pytest
-import sys
-from unittest.mock import MagicMock
-
-# Ensure claude_agent_sdk is mocked before importing pipeline
-if "claude_agent_sdk" not in sys.modules:
-    mock_sdk = MagicMock()
-    sys.modules["claude_agent_sdk"] = mock_sdk
-    sys.modules["claude_agent_sdk.types"] = mock_sdk
-
 from pipeline import parse_image_prompts
 
 
