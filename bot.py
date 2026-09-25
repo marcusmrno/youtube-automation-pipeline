@@ -668,8 +668,9 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if ae:
         _state["approval_result"] = False
         ae.set()
-    _state["running"]     = False
-    _state["script_mode"] = False
+    # disarm every text mode: otherwise the next message still triggers a paid revise or pitch call
+    _state.update(running=False, script_mode=False, revision_mode=False,
+                  clarifying_mode=False, clarifying_topic=None)
     await update.message.reply_text("🛑 Stop signal sent.")
 
 
@@ -925,6 +926,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await _send_metadata_view(query.message.chat, updated, slug)
         except ValueError as e:
             await query.answer(f"Error: {e}", show_alert=True)
+        return
+
+    if data in ("approve", "reject", "revise") and not (ae and not ae.is_set()):
+        # a review left over from a stopped or finished run
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text("Nothing is waiting for approval.")
         return
 
     if data == "approve":

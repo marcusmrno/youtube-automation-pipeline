@@ -74,3 +74,25 @@ def test_approach_tap_is_refused_while_a_run_is_live(fresh_bot):
     _wait_for(fresh_bot)
     assert fresh_bot == []
     assert any("already running" in m for m in ctx.sent)
+
+
+def test_stop_disarms_revision_and_planning(monkeypatch, tmp_path):
+    paid = []
+    monkeypatch.setattr(bot, "revise_script", lambda *a, **k: paid.append("revise") or "REVISED")
+    monkeypatch.setattr(bot, "_send_approach_pitches", lambda *a, **k: paid.append("pitches") or _noop())
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "script.txt").write_text("ORIGINAL")
+    bot._state.update(running=True, run_slug="r1", revision_mode=True, clarifying_mode=True,
+                      approval_event=threading.Event())
+    run(bot.cmd_stop(_update(), _context()))
+    run(bot.on_text(_update(text="ok thanks, never mind"), _context()))
+    assert paid == []                                              # no paid Sonnet/Haiku call
+    assert (tmp_path / "r1" / "script.txt").read_text() == "ORIGINAL"
+
+
+def test_stale_review_buttons_say_nothing_is_waiting():
+    bot._state["approval_event"] = threading.Event()
+    run(bot.cmd_stop(_update(), _context()))                       # sets the event
+    u = _update(data="approve")
+    run(bot.on_button(u, _context()))
+    assert u.message.replies == ["Nothing is waiting for approval."]
