@@ -160,3 +160,17 @@ def test_empty_image_file_counts_as_missing(run_env):
     (run / "images" / "001.png").write_bytes(b"")      # a crash mid-write
     (run / "images" / "002.png").write_bytes(b"x")
     assert pipeline.run_status("r1")["images_on_disk"] == 1
+
+
+def test_rerunning_a_topic_keeps_the_existing_run(monkeypatch, run_env):
+    old = run_env / "vitamin-d"
+    old.mkdir()
+    (old / "script.txt").write_text("OLD FINISHED SCRIPT")
+    (old / "profile.txt").write_text("other-profile")
+    calls = []
+    monkeypatch.setattr(pipeline, "VIDIQ_KEY", "")
+    monkeypatch.setattr(pipeline, "research_topic", lambda *a: calls.append("research") or "facts")
+    r = pipeline.run_pipeline("Vitamin D?", PROFILE, approval_callback=lambda s: False)
+    assert r["status"] == "error" and calls == []                  # refused before any paid call
+    assert (old / "script.txt").read_text() == "OLD FINISHED SCRIPT"
+    assert (old / "profile.txt").read_text() == "other-profile"

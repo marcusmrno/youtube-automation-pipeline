@@ -885,6 +885,10 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
 
     client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     slug    = slugify(topic)
+    # re-running a topic would overwrite that run's script before the approval gate
+    if (OUTPUT_ROOT / slug / "script.txt").exists():
+        log_fn(f"❌  output/{slug} already has a script — resume that run, or use a different topic")
+        return {"status": "error", "reason": "run already exists"}
     out_dir = make_output_dir(slug)
     (out_dir / "profile.txt").write_text(profile.name)
     log_fn(f"📁  Output directory: {out_dir}")

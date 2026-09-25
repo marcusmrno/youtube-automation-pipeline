@@ -60,7 +60,7 @@ topic → clarifying questions → approach selection → research → script
 
 ## Architecture highlights
 
-- **Checkpoint-based resumability** — every stage writes its output to disk; the pipeline detects what's missing and resumes from that point without re-running earlier work
+- **Checkpoint-based resumability** — every stage writes its output to disk; the pipeline detects what's missing and resumes from that point without re-running earlier work. Starting a topic whose run folder already has a script is refused — resume it instead
 - **Multi-model routing** — Sonnet for creative/long-form tasks, Haiku for extraction and formatting; model selection is per-task not global
 - **Real-time SSE streaming** — the web UI receives live log events from the pipeline thread via Server-Sent Events, with per-stage progress tracking
 - **Approach context propagation** — the angle chosen during planning is injected into the script prompt, so the final script reflects the creator's intent end-to-end
