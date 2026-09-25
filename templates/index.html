@@ -1866,7 +1866,7 @@ async function startMetadataRun(slug, regenerate) {
 }
 
 async function stopPipeline() {
-  await fetch('/stop', { method: 'POST' });
+  await fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine(currentStage, '⏹  Pipeline stopped by user');
   setRunFinished(false);
@@ -1949,7 +1949,7 @@ async function reviseScript() {
 
 async function rejectScript() {
   hideReviewPanel();
-  await fetch('/reject', { method: 'POST' });
+  await fetch('/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   addLogLine('script', '🚫 Script rejected — pipeline stopped');
   setRunFinished(false);
 }

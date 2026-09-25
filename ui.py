@@ -40,6 +40,13 @@ def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
 
 app = Flask(__name__)
 
+
+@app.before_request
+def _require_json_posts():
+    # A text/plain POST needs no CORS preflight, so any web page could start paid jobs here.
+    if request.method == "POST" and not request.is_json:
+        return jsonify({"ok": False, "error": "JSON body required"}), 415
+
 _state: dict = {
     "log_queue":      None,
     "approval_queue": None,

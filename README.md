@@ -119,7 +119,7 @@ python ui.py
 - Mark images for regeneration while browsing, then regen all flagged at once
 
 **Metadata:**
-- "Metadata & Thumbnail" section (or `POST /metadata/<slug>/generate`) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
+- "Metadata & Thumbnail" section (or `POST /metadata/<slug>/generate` with a JSON body) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
 
 ### Telegram bot
 
