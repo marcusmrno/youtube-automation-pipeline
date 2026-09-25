@@ -1047,16 +1047,23 @@ if __name__ == "__main__":
 
     args = parser.parse_args(argv)
 
+    def _or_exit(fn, *a, **kw):
+        """Bad input (a --profile typo, a missing run, --pick-thumb 0) -> a message, not a traceback."""
+        try:
+            return fn(*a, **kw)
+        except ValueError as e:
+            sys.exit(f"❌  {e}")
+
     def _resolve_profile(name: str | None):
         available = list_profiles()
         if not available:
             print("No profiles found. Create profiles/<name>/profile.yaml first.")
             sys.exit(1)
         if name:
-            return load_profile(name)
+            return _or_exit(load_profile, name)
         if len(available) == 1:
             print(f"Using profile: {available[0]}")
-            return load_profile(available[0])
+            return _or_exit(load_profile, available[0])
         print("Multiple profiles found. Specify one with --profile:")
         for p in available:
             print(f"  {p}")
@@ -1074,7 +1081,7 @@ if __name__ == "__main__":
         log_fn = lambda m: print(m)
 
         if args.show:
-            data = md_mod.load_metadata(args.run_slug)
+            data = _or_exit(md_mod.load_metadata, args.run_slug)
             if data is None:
                 print(f"No metadata for run '{args.run_slug}'")
                 sys.exit(1)
@@ -1082,7 +1089,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if args.pick_thumb is not None:
-            data = md_mod.pick_thumbnail(args.run_slug, args.pick_thumb - 1)
+            data = _or_exit(md_mod.pick_thumbnail, args.run_slug, args.pick_thumb - 1)
             print(f"✅ chosen_thumbnail_index = {data['chosen_thumbnail_index']}")
             sys.exit(0)
 
@@ -1100,7 +1107,7 @@ if __name__ == "__main__":
         require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
         saved = OUTPUT_ROOT / args.run_slug / "profile.txt"   # the profile the run was made with
         profile = _resolve_profile(args.profile or (saved.read_text().strip() if saved.exists() else None))
-        md_mod.generate_metadata(args.run_slug, profile, log_fn, regenerate=True)
+        _or_exit(md_mod.generate_metadata, args.run_slug, profile, log_fn, regenerate=True)
         sys.exit(0)
 
     # args.cmd == "run"

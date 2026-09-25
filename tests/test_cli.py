@@ -94,3 +94,25 @@ def test_no_arguments_prints_usage_and_help_lists_every_command(tmp_path, monkey
     assert run_cli(tmp_path, monkeypatch, "--help") == 0
     out = capsys.readouterr().out
     assert all(cmd in out for cmd in ("run", "script", "metadata"))   # --help used to become 'run --help'
+
+
+@pytest.mark.parametrize("argv", [
+    ("run", "t", "--profile", "exampel"),                  # a typo
+    ("metadata", "r1", "--pick-thumb", "0"),               # the index is 1-based
+    ("metadata", "none-yet", "--pick-thumb", "1"),          # no metadata.json
+    ("metadata", "bad", "--show"),                         # malformed metadata.json
+    ("metadata", "missing-run", "--regenerate"),           # no such run
+])
+def test_bad_input_gets_a_message_not_a_traceback(tmp_path, monkeypatch, argv):
+    def load(name):
+        raise ValueError(f"Profile '{name}' not found. Available: ['example']")
+    monkeypatch.setattr(profile, "list_profiles", lambda: ["example"])
+    monkeypatch.setattr(profile, "load_profile", load if argv[0] == "run" else (lambda n: f"<profile {n}>"))
+    out = tmp_path / "output"
+    for run in ("r1", "none-yet", "bad"):
+        (out / run).mkdir(parents=True)
+    (out / "r1" / "metadata.json").write_text('{"thumbnails": [{"filename": "t.png"}]}')
+    (out / "bad" / "metadata.json").write_text('{"titles": [')
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", out)
+    code = run_cli(tmp_path, monkeypatch, *argv)   # a ValueError traceback would escape here
+    assert code not in (0, None)
