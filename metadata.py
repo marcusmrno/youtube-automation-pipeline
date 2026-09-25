@@ -97,8 +97,8 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
 def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
     """Build the YouTube tags-box list from topic + vidIQ keywords.
 
-    Deduped case-insensitively, capped at YouTube's 500-char tags-field limit
-    (tags are joined with ", " there, so that separator counts too).
+    Deduped case-insensitively, capped at YouTube's 500-char tags limit as YouTube counts
+    it: one comma between tags, plus two quote characters around any tag with a space.
     """
     seen: set[str] = set()
     tags: list[str] = []
@@ -108,7 +108,7 @@ def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
         key = tag.lower()
         if not tag or key in seen:
             continue
-        total += len(tag) + (2 if tags else 0)
+        total += len(tag) + (2 if " " in tag else 0) + (1 if tags else 0)
         if total > 500:
             break
         seen.add(key)
@@ -128,7 +128,7 @@ def _parse_titles(raw: str) -> list[str]:
         if not m:
             continue
         text = re.sub(r"(?i)^title\s*:\s*", "", m.group(1).strip("*").strip()).strip("\"'*“”‘’ ")
-        if text:
+        if text and len(text) <= 100:   # YouTube rejects longer titles
             titles.append(text)
     return titles
 
@@ -214,6 +214,8 @@ def _generate_description_hashtags(top_title, script, keywords, profile, client,
     if not hashtags_raw:
         raise ValueError("description generation: missing ===HASHTAGS=== block")
     hashtags = [tok for tok in hashtags_raw.split() if tok.startswith("#")][:5]
+    if len(desc) > 5000:   # not truncated: the subscribe line comes last
+        log_fn(f"⚠️  Description is {len(desc)} chars — YouTube allows 5000; trim it before pasting")
     log_fn("✅  Description and hashtags ready")
     return {"description": desc.strip(), "hashtags": hashtags}
 

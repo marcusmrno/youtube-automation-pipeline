@@ -89,7 +89,8 @@ def test_build_video_tags_caps_at_500_chars():
     import metadata
     keywords = [{"keyword": f"keyword number {i}"} for i in range(50)]
     tags = metadata._build_video_tags("topic", keywords)
-    assert len(", ".join(tags)) <= 500
+    # YouTube counts one comma between tags and quotes around any tag containing a space
+    assert sum(len(t) + 2 * (" " in t) for t in tags) + len(tags) - 1 <= 500
     assert len(tags) < 51  # got truncated, not all 51 candidates fit
 
 
@@ -518,3 +519,25 @@ def test_thumbnail_hook_line_variants(first_line):
     thumbs = metadata._parse_thumbnail_prompts(raw)
     assert [t["hook_text"] for t in thumbs] == ["BIG 1"] * 3
     assert [t["prompt"] for t in thumbs] == ["scene 1", "scene 2", "scene 3"]   # hook not sent to Gemini
+
+
+def test_overlong_titles_are_dropped():
+    import metadata
+    raw = "===TITLES===\n1. " + "x" * 101 + "\n2. Short enough\n===END==="
+    assert metadata._parse_titles(raw) == ["Short enough"]   # YouTube rejects titles over 100 chars
+
+
+def test_overlong_description_is_flagged():
+    import metadata
+    logs = []
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _FakeResponse("===DESCRIPTION===\n" + "word " * 1100 + "\n===HASHTAGS===\n#a #b\n")
+
+    metadata._generate_description_hashtags(
+        "t", "s", [], profile=MagicMock(channel={"niche": "n", "audience": "a", "tone": "t"}),
+        client=FakeClient, log_fn=logs.append)
+    assert any("5000" in m for m in logs)                    # YouTube's description limit
