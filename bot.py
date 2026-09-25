@@ -365,6 +365,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
         "/download [slug] — download run assets as zip (latest if omitted)\n"
+        "/metadata [slug] [regenerate] — titles, description, thumbnails\n"
         "/profile — view or switch the active style profile\n"
         "/status — show current run status\n"
         "/stop — stop the current run",

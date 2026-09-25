@@ -278,3 +278,10 @@ def test_metadata_generation_is_tracked_and_not_duplicated(monkeypatch, tmp_path
     assert calls == ["r1"]                                      # the second request didn't race the first
     assert any("already" in r for r in second.message.replies + first.message.replies)
     assert any("metadata" in r.lower() for r in status.message.replies)   # /status knows about it
+
+
+def test_help_lists_every_command():
+    u = _update()
+    run(bot.cmd_start(u, _context()))
+    for cmd in ("/run", "/script", "/runs", "/resume", "/download", "/metadata", "/profile", "/status", "/stop"):
+        assert cmd in u.message.replies[0], cmd
