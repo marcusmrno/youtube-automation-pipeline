@@ -1769,18 +1769,20 @@ async function runPipeline() {
 
   // Open SSE stream
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(currentStage, '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 function openStream(onMessage) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource('/stream');
   eventSource.onmessage = (e) => onMessage(JSON.parse(e.data));
+  // EventSource reconnects by itself and the server keeps the job's queue, so only give up once
+  // the browser does; closing on the first error would lose the approval prompt.
+  eventSource.onerror = () => {
+    if (running && eventSource && eventSource.readyState === EventSource.CLOSED) {
+      addLogLine(currentStage, '⚠️  Stream closed');
+      setRunFinished(false);
+    }
+  };
   return eventSource;
 }
 
@@ -1794,6 +1796,7 @@ function handleEvent(event) {
   }
 
   else if (event.type === 'review') {
+    _awaitingApproval = true;
     _activeReviewSlug = event.run_slug || null;
     showReviewPanel(event.script);
     addLogLine(currentStage, '📋 Script ready for review');
@@ -1805,15 +1808,17 @@ function handleEvent(event) {
   }
 
   else if (event.type === 'done') {
+    _awaitingApproval = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
+    const ok = !event.status || event.status === 'complete';   // error / rejected / cancelled aren't Done
     if (inputMode === 'metadata') {
       // Don't touch pipeline stage chips for a metadata run.
       if (currentStage) closeLogSection(currentStage);
-      setRunFinished(true);
+      setRunFinished(ok);
       if (typeof loadMetadata === 'function') loadMetadata();
     } else {
-      completeAllStages();
-      setRunFinished(true);
+      if (ok) completeAllStages();
+      setRunFinished(ok);
       refreshRuns();
       refreshScripts();
     }
@@ -1826,10 +1831,15 @@ function handleEvent(event) {
 }
 
 async function startMetadataRun(slug, regenerate) {
+  // The server runs one job at a time; don't wipe a live run's log for a request it will refuse.
+  if (running) {
+    document.getElementById('metadata-status').textContent = 'Wait for the current job to finish';
+    return;
+  }
   // Mirror the main pipeline UI prep so progress streams into the log area.
+  // Stop stays disabled: metadata generation can't be interrupted, so don't claim it was.
   running = true;
   document.getElementById('runBtn').disabled = true;
-  document.getElementById('stopBtn').disabled = false;
   setGlobalStatus('running', regenerate ? 'Regenerating metadata…' : 'Generating metadata…');
   resetStages();
   clearLogSections();
@@ -1860,15 +1870,10 @@ async function startMetadataRun(slug, regenerate) {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine('metadata', '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 async function stopPipeline() {
+  _awaitingApproval = false;
   await fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine(currentStage, '⏹  Pipeline stopped by user');
@@ -1912,12 +1917,26 @@ function hideReviewPanel() {
 async function approveScript() {
   const script = document.getElementById('reviewScript').value;
   hideReviewPanel();
-  await fetch('/approve', {
+  if (!_awaitingApproval) {
+    // Opened via "Load into Review": no run is waiting, so approving means saving the edits.
+    if (!_activeReviewSlug) return;
+    const res = await fetch(`/save_script/${encodeURIComponent(_activeReviewSlug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: script }),
+    });
+    const data = await res.json();
+    addLogLine(null, data.ok ? '💾 Script saved' : `❌ ${data.error}`);
+    return;
+  }
+  _awaitingApproval = false;
+  const res = await fetch('/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, run_slug: _activeReviewSlug }),
   });
-  addLogLine('script', '✅ Script approved — starting production…');
+  const data = await res.json();
+  addLogLine('script', data.ok ? '✅ Script approved — starting production…' : `❌ ${data.error}`);
 }
 
 async function reviseScript() {
@@ -1932,12 +1951,17 @@ async function reviseScript() {
   btn.disabled = true;
   btn.textContent = '↻ Revising…';
 
-  const res  = await fetch('/revise', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script, feedback, topic, profile }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/revise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script, feedback, topic, profile }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave Revise stuck disabled
+  }
 
   btn.disabled = false;
   btn.textContent = '↻ Revise';
@@ -1952,7 +1976,10 @@ async function reviseScript() {
 
 async function rejectScript() {
   hideReviewPanel();
+  if (!_awaitingApproval) return;   // nothing is waiting on this script, so there is nothing to stop
+  _awaitingApproval = false;
   await fetch('/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine('script', '🚫 Script rejected — pipeline stopped');
   setRunFinished(false);
 }
@@ -1964,6 +1991,7 @@ let _planningAnswers = '';
 let _selectedApproach = '';
 let _approachPitchesText = '';
 let _activeReviewSlug = null;
+let _awaitingApproval = false;   // true only while a /run waits at the approval gate
 
 let _parsedQuestions = [];
 
@@ -2143,13 +2171,6 @@ async function continuePipelineExecution() {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(null, '❌ Connection lost');
-      setRunFinished(false);
-    }
-    eventSource.close();
-  };
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
@@ -2516,12 +2537,17 @@ async function regenAudio() {
   btn.textContent = '⏳ Generating…';
   status.textContent = '';
 
-  const res  = await fetch('/regenerate_audio', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ run_slug: run }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/regenerate_audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_slug: run }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave the button stuck on "Generating…"
+  }
   if (!data.ok) {
     status.textContent = `❌ ${data.error}`;
     btn.disabled = false;
@@ -2538,7 +2564,8 @@ async function regenAudio() {
       eventSource.close(); eventSource = null;
       btn.disabled = false;
       btn.textContent = '↻ Regenerate Audio';
-      status.textContent = '✅ Done — reload Voice tab to listen';
+      status.textContent = event.status === 'complete'
+        ? '✅ Done — reload Voice tab to listen' : '❌ Voiceover failed — see the log';
       refreshVoicePicker();
       // If this run is already loaded in the player, hot-swap the src
       const picker = document.getElementById('voicePicker');

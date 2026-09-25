@@ -6,31 +6,12 @@ Usage:
 """
 from __future__ import annotations
 
-import os
 import re
 import sys
 import argparse
 
-from dotenv import load_dotenv
-
+from pipeline import require_keys
 from profile import PROFILES_ROOT
-
-load_dotenv()
-
-ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-GOOGLE_KEY    = (os.getenv("GOOGLE_API_KEY") or "").strip()
-
-
-def check_env() -> None:
-    missing = []
-    if not ANTHROPIC_KEY:
-        missing.append("ANTHROPIC_API_KEY")
-    if not GOOGLE_KEY:
-        missing.append("GOOGLE_API_KEY")
-    if missing:
-        print(f"✗ Missing required env vars: {', '.join(missing)}")
-        print("  Check your .env file.")
-        sys.exit(1)
 
 
 def main() -> None:
@@ -41,7 +22,7 @@ def main() -> None:
                         help="Path to a seed image that anchors the visual style for all generated anchors")
     args = parser.parse_args()
 
-    check_env()
+    require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
 
     if args.revise:
         from profile_creator.revise import run_revise

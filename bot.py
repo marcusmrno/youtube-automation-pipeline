@@ -44,7 +44,8 @@ from profile import load_profile, list_profiles
 load_dotenv()
 
 BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-ALLOWED_USER_ID = int(os.getenv("TELEGRAM_USER_ID", "0"))
+_user_id        = os.getenv("TELEGRAM_USER_ID", "").strip()
+ALLOWED_USER_ID = int(_user_id) if _user_id.isdigit() else 0   # blank or "# comment" -> main() says "not set"
 
 _state: dict = {
     "running":           False,

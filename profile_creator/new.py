@@ -1,7 +1,6 @@
 """New profile creation flow."""
 from __future__ import annotations
 
-import os
 import re
 import sys
 import yaml
@@ -11,9 +10,8 @@ import anthropic
 
 from .claude_helpers import SYSTEM_PROMPT_NEW, clarification_loop, generate_profile_content
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
+from pipeline import ANTHROPIC_KEY
 from profile import PROFILES_ROOT
-
-ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 
 def _read_brain_dump() -> str:

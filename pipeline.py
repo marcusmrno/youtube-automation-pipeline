@@ -7,11 +7,13 @@ Usage: python pipeline.py "your topic here"
 from __future__ import annotations
 
 import functools
+import io
 import json
 import mimetypes
 import os
 import re
 import sys
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,7 +27,7 @@ from google import genai
 from google.genai import types as genai_types
 from PIL import Image, ImageOps
 
-from agents import run_script_agent, run_vet_agent
+from agents import run_script_agent, run_vet_agent, VIDIQ_KEY
 from prompts import (
     _build_clarifying_questions_prompt,
     _build_approach_pitch_prompt,
@@ -46,7 +48,6 @@ OUTPUT_ROOT     = PROJECT_ROOT / "output"
 
 ANTHROPIC_KEY   = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
-VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 
 
@@ -277,9 +278,8 @@ def _expand_short_prompts(raw: str, profile: "Profile") -> list[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
-def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
-    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
-
+def _generate_tts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+    """Haiku call: the finished script -> TTS narration with v3 audio tags."""
     log_fn("✍️  Extracting TTS narration from script...")
     tts_prompt = _build_tts_prompt(script, profile)
     r1 = client.messages.create(
@@ -288,8 +288,14 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
         messages=[{"role": "user", "content": tts_prompt}]
     )
     tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
+    if not tts_script:
+        raise ValueError("TTS reply had no ===TTS_SCRIPT=== block")
     log_fn("✅  TTS narration extracted")
+    return tts_script
 
+
+def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+    """Sonnet call: the finished script -> image_prompts.txt text."""
     log_fn("🖼️  Generating image prompts...")
     msg = (
         _build_image_prompt_instructions(profile)
@@ -306,9 +312,16 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     )
 
     prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
-    image_prompts = format_image_prompts(prompts)
+    if not prompts:
+        raise ValueError("Image-prompt reply had no usable ===IMAGE_PROMPTS=== lines")
     log_fn(f"✅  Image prompts generated — {len(prompts)} total")
-    return tts_script, image_prompts
+    return format_image_prompts(prompts)
+
+
+def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
+    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
+    return (_generate_tts(script, profile, client, log_fn),
+            _generate_image_prompts(script, profile, client, log_fn))
 
 
 def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
@@ -347,7 +360,7 @@ def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitud
 def _find_image(img_dir: Path, num: str) -> Path | None:
     for ext in (".png", ".jpg", ".jpeg"):
         p = img_dir / f"{num}{ext}"
-        if p.exists():
+        if p.exists() and p.stat().st_size:   # a 0-byte file is a crashed write, not an image
             return p
     return None
 
@@ -433,6 +446,8 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
                 if part.inline_data and part.inline_data.mime_type.startswith("image/"):
                     ext        = ".jpg" if "jpeg" in part.inline_data.mime_type else ".png"
                     final_path = output_path.with_suffix(ext)
+                    # decode first: undecodable bytes must not replace a good image or pass as done
+                    Image.open(io.BytesIO(part.inline_data.data)).load()
                     final_path.write_bytes(part.inline_data.data)
                     if final_path != output_path and output_path.exists():
                         output_path.unlink()
@@ -486,10 +501,16 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
                 continue
             futures[ex.submit(_one, i, p)] = num
 
-        for fut in as_completed(futures):
-            num, found = fut.result()
-            if found:
-                results[num] = found
+        try:
+            for fut in as_completed(futures):
+                num, found = fut.result()
+                if found:
+                    results[num] = found
+        except BaseException:
+            # Ctrl-C (the CLI's only stop): drop the queue, or the executor's exit bills every image
+            for f in futures:
+                f.cancel()
+            raise
 
     return results
 
@@ -544,14 +565,18 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
 # ── Phase 2b: Voiceover ────────────────────────────────────────────────────────
 
 def _split_into_chunks(text: str, max_chars: int = 4500) -> list[str]:
+    if not text.strip():
+        return []
     chunks, current = [], []
     length = 0
     for sentence in re.split(r'(?<=[.!?])\s+', text.strip()):
-        if length + len(sentence) + 1 > max_chars and current:
-            chunks.append(" ".join(current))
-            current, length = [], 0
-        current.append(sentence)
-        length += len(sentence) + 1
+        # text with no terminal punctuation (or sentences ending in a quote) splits into one long "sentence"
+        for piece in textwrap.wrap(sentence, max_chars) if len(sentence) > max_chars else [sentence]:
+            if length + len(piece) + 1 > max_chars and current:
+                chunks.append(" ".join(current))
+                current, length = [], 0
+            current.append(piece)
+            length += len(piece) + 1
     if current:
         chunks.append(" ".join(current))
     return chunks
@@ -614,7 +639,8 @@ def _fix_mp3_duration(path: Path, log_fn) -> None:
     path.write_bytes(data)
 
 
-def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn) -> Path | None:
+def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn,
+                      stop_event=None) -> Path | None:
     """Call ElevenLabs TTS API in chunks. Returns path to mp3 or None on failure."""
     log_fn("🎙  Generating voiceover...")
 
@@ -629,10 +655,16 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
     }
 
     chunks = _split_into_chunks(tts_script)
+    if not chunks:
+        log_fn("⚠️  TTS script is empty — skipping voiceover")
+        return None
     log_fn(f"  📄  Script split into {len(chunks)} chunk(s)")
 
     parts = []
     for i, chunk in enumerate(chunks):
+        if stop_event and stop_event.is_set():
+            log_fn("🛑  Voiceover stopped")
+            return None
         log_fn(f"  ⏳  TTS chunk {i+1}/{len(chunks)}...")
         data = _tts_chunk(chunk, headers, voice_settings, log_fn,
                           voice_id=voice_id, model=el_model,
@@ -671,7 +703,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
         if not tts_script:
             log_fn("⚠️  No TTS script available — skipping voiceover")
             return
-        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn)
+        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn, stop_event)
 
     vo_thread = threading.Thread(target=voiceover_thread, daemon=True)
     vo_thread.start()
@@ -798,22 +830,23 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     script = script_file.read_text()
 
-    needs_prompts = not prompts_file.exists()
-    needs_tts     = not tts_file.exists()
+    # an empty file is what an untagged model reply used to leave behind
+    needs_prompts = not prompts_file.exists() or not prompts_file.read_text().strip()
+    needs_tts     = not tts_file.exists() or not tts_file.read_text().strip()
 
     if needs_prompts or needs_tts:
         log_fn("📝  Regenerating missing assets from script.txt:")
         if needs_prompts: log_fn("     • image_prompts.txt")
         if needs_tts:     log_fn("     • tts_script.txt")
-        tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
+        # only pay for what is missing; the voiceover must match the tts_script.txt on disk
         if needs_tts:
-            tts_file.write_text(tts_script)
+            tts_file.write_text(_generate_tts(script, profile, client, log_fn))
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
-            prompts_file.write_text(format_image_prompts(parse_image_prompts(image_prompts_raw)))
+            prompts_file.write_text(format_image_prompts(parse_image_prompts(
+                _generate_image_prompts(script, profile, client, log_fn))))
             log_fn("✅  image_prompts.txt saved")
-    else:
-        tts_script = tts_file.read_text()
+    tts_script = tts_file.read_text()
 
     prompts = parse_image_prompts(prompts_file.read_text())
     log_fn(f"📝  {len(prompts)} image prompts loaded")
@@ -856,23 +889,32 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
     (out_dir / "profile.txt").write_text(profile.name)
     log_fn(f"📁  Output directory: {out_dir}")
 
+    # Stop must also land between the paid writing steps, not just in the image loop
+    stopped   = lambda: bool(stop_event and stop_event.is_set())
+    cancelled = {"status": "cancelled", "out_dir": str(out_dir)}
+
     if VIDIQ_KEY:
         log_fn("🤖  Running vidIQ research + script agent...")
         script, research_notes = run_script_agent(topic, profile, log_fn, approach_context)
         if research_notes:
             (out_dir / "research.txt").write_text(research_notes)
-        if not script:
-            log_fn("❌  Agent did not produce a script — aborting")
-            return {"status": "error", "reason": "agent produced no script"}
     else:
         log_fn("🔬  No vidIQ key — running standard research and script phases...")
         research = research_topic(topic, client, log_fn)
         (out_dir / "research.txt").write_text(research)
+        if stopped():
+            return cancelled
         script = generate_script(topic, research, profile, client, log_fn, approach_context)
+
+    if not script:   # the reply had no ===SCRIPT=== block
+        log_fn("❌  No script was produced — aborting")
+        return {"status": "error", "reason": "no script produced"}
 
     (out_dir / "script.txt").write_text(script)
     log_fn("📝  Script written")
 
+    if stopped():
+        return cancelled
     if VIDIQ_KEY:
         log_fn("🔎  Running vidIQ script vet...")
         vetted = run_vet_agent(topic, script, profile, log_fn)
@@ -882,6 +924,8 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
             log_fn("✅  Script vetted and updated")
         else:
             log_fn("⚠️  Vet agent returned no output — proceeding with original script")
+        if stopped():
+            return cancelled
 
     log_fn("\n" + "─" * 50)
     log_fn("📋  SCRIPT READY FOR REVIEW")

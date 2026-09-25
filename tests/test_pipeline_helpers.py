@@ -152,3 +152,45 @@ def test_stop_halts_queued_images(monkeypatch, tmp_path):
 
     assert generated == ["001.png"], generated   # 19 queued images must not bill
     assert list(results) == ["001"], results
+
+
+def test_requirements_allow_output_config():
+    # every Sonnet call passes output_config=; anthropic < 0.77.0 raises TypeError on it
+    import re
+    from pathlib import Path
+    reqs = (Path(pipeline.__file__).parent / "requirements.txt").read_text()
+    floor = re.search(r"^anthropic>=([\d.]+)", reqs, re.M)[1]
+    assert tuple(map(int, floor.split("."))) >= (0, 77, 0), floor
+
+
+def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
+    # the CLI has no stop_event; Ctrl-C must not leave ~150 queued images billing
+    import _thread
+    import pytest
+    generated: list[str] = []
+
+    def _fake_gen(prompt, path, profile, log_fn, **kw):
+        generated.append(path.name)
+        if len(generated) == 2:
+            _thread.interrupt_main()   # Ctrl-C while image 2 is in flight, 18 still queued
+        time.sleep(0.05)
+        return True
+
+    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    (tmp_path / "images").mkdir()
+    with pytest.raises(KeyboardInterrupt):
+        generate_all_images([{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
+                            tmp_path, P, lambda m: None, max_workers=1)
+    assert len(generated) <= 3, generated
+
+
+def test_tts_chunks_respect_the_limit_and_keep_every_word():
+    from pipeline import _split_into_chunks
+    for text in ("word " * 2000,                                   # no terminal punctuation
+                 'He said "stop." Then more. ' * 400,              # sentences ending in a quote
+                 "Short one. " * 900):
+        chunks = _split_into_chunks(text)
+        assert max(map(len, chunks)) <= 4500, max(map(len, chunks))
+        assert " ".join(chunks).split() == text.split()           # nothing dropped
+    assert _split_into_chunks("   \n ") == []                       # no empty ElevenLabs request
