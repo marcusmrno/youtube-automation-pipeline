@@ -279,3 +279,15 @@ def test_revise_returns_the_revision_without_a_second_vet(monkeypatch, run_dir):
     monkeypatch.setattr(ui, "revise_script", lambda *a: "REVISED")
     r = ui.app.test_client().post("/revise", json={"script": "s", "feedback": "f", "profile": "p"}).get_json()
     assert r == {"ok": True, "script": "REVISED"} and vetted == []
+
+
+def test_serve_image_finds_png_and_jpg(monkeypatch, tmp_path):
+    img = tmp_path / "r1" / "images"
+    img.mkdir(parents=True)
+    (img / "001.png").write_bytes(b"\x89PNG")
+    (img / "002.jpg").write_bytes(b"\xff\xd8JPG")
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    client = ui.app.test_client()
+    assert client.get("/image/r1/001").mimetype == "image/png"
+    assert client.get("/image/r1/002").mimetype == "image/jpeg"
+    assert client.get("/image/r1/003").status_code == 404

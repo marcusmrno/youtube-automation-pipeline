@@ -12,6 +12,7 @@ import threading
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
+from images import find_image
 from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
                       regenerate_images, run_status, ANTHROPIC_KEY)
 from writing import (generate_approach_pitches, generate_clarifying_questions, parse_image_prompts,
@@ -582,12 +583,8 @@ def list_images(run_name: str):
 def serve_image(run_name: str, num: str):
     if not _safe_slug(run_name) or not num.isdigit():
         return "", 400
-    img_dir = OUTPUT_ROOT / run_name / "images"
-    for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg")):
-        img_path = img_dir / f"{num}{ext}"
-        if img_path.exists():
-            return send_file(img_path, mimetype=mime)
-    return "", 404
+    img_path = find_image(OUTPUT_ROOT / run_name / "images", num)   # send_file infers the mimetype
+    return send_file(img_path) if img_path else ("", 404)
 
 
 @app.route("/regenerate", methods=["POST"])
