@@ -19,13 +19,13 @@ def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
         calls.append(contents)
         raise RuntimeError("stop after capture")
 
-    import pipeline
+    import images
     mock_client = MagicMock()
     mock_client.models.generate_content.side_effect = fake_generate
-    # patch the cached client getter itself: patching pipeline.genai misses once it's cached
-    with patch.object(pipeline, "_get_genai_client", return_value=mock_client), \
-         patch.object(pipeline.time, "sleep"):
-        pipeline.generate_image_google("test prompt", tmp_path / "001.png", test_profile, print)
+    # patch the cached client getter itself: patching images.genai misses once it's cached
+    with patch.object(images, "_get_genai_client", return_value=mock_client), \
+         patch.object(images.time, "sleep"):
+        images.generate_image_google("test prompt", tmp_path / "001.png", test_profile, print)
 
     contents = calls[0]
     assert isinstance(contents[0], str) and contents[0].endswith("test prompt")

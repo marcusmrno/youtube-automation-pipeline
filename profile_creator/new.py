@@ -61,7 +61,7 @@ def run_create(seed_image: str | None = None) -> None:
     if seed_image:   # create_profile.py has already checked that it exists
         seed_path = Path(seed_image)
         anchors_dir.mkdir(parents=True, exist_ok=True)
-        from pipeline import _standardize_image
+        from images import _standardize_image
         # always .png: only anchor-*.png/.jpg are sent, and _standardize_image re-encodes by extension
         dest = anchors_dir / "anchor-00.png"
         shutil.copy2(seed_path, dest)

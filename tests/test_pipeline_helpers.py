@@ -5,9 +5,10 @@ import types
 
 import anthropic
 import pytest
+import images
 import pipeline
-from pipeline import (_expand_short_prompts, _stream_text, _topic_from_script, build_preamble,
-                      generate_all_images, slugify, GENERIC_ANCHOR_REFS)
+from images import build_preamble, generate_all_images, GENERIC_ANCHOR_REFS
+from pipeline import _expand_short_prompts, _stream_text, _topic_from_script, slugify
 
 
 class _Profile:
@@ -144,8 +145,8 @@ def test_stop_halts_queued_images(monkeypatch, tmp_path):
         stop.set()         # ...then the user hits stop
         return True
 
-    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
-    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    monkeypatch.setattr(images, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     results = generate_all_images(
         [{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
@@ -178,8 +179,8 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
         time.sleep(0.05)
         return True
 
-    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
-    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    monkeypatch.setattr(images, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     with pytest.raises(KeyboardInterrupt):
         generate_all_images([{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],

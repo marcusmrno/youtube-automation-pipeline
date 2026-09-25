@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import images
 import pipeline
 
 PROFILE = SimpleNamespace(name="p", voice={"voice_id": "v"}, image_gen={}, image_style={})
@@ -134,8 +135,8 @@ def _gemini_returning(data, monkeypatch):
     part = SimpleNamespace(inline_data=SimpleNamespace(mime_type="image/png", data=data))
     response = SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
     client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **k: response))
-    monkeypatch.setattr(pipeline, "_get_genai_client", lambda: client)
-    monkeypatch.setattr(pipeline.time, "sleep", lambda s: None)
+    monkeypatch.setattr(images, "_get_genai_client", lambda: client)
+    monkeypatch.setattr(images.time, "sleep", lambda s: None)
 
 
 def test_undecodable_image_never_replaces_a_good_one(monkeypatch, tmp_path):
@@ -144,11 +145,11 @@ def test_undecodable_image_never_replaces_a_good_one(monkeypatch, tmp_path):
     Image.new("RGB", (4, 4)).save(good)
     before = good.read_bytes()
     _gemini_returning(b"\x89PNG-garbage", monkeypatch)
-    ok = pipeline.generate_image_google("p", good, None, lambda m: None, model="m", anchor_parts=[], preamble="")
+    ok = images.generate_image_google("p", good, None, lambda m: None, model="m", anchor_parts=[], preamble="")
     assert ok is False
     assert good.read_bytes() == before                  # a failed regen keeps the old image
     fresh = tmp_path / "002.png"
-    assert pipeline.generate_image_google("p", fresh, None, lambda m: None, model="m",
+    assert images.generate_image_google("p", fresh, None, lambda m: None, model="m",
                                           anchor_parts=[], preamble="") is False
     assert not fresh.exists()                          # nothing for resume to mistake as done
 

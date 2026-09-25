@@ -6,7 +6,7 @@ import anthropic
 import yaml
 from pathlib import Path
 
-from pipeline import (
+from images import (
     generate_image_google, _load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
 )
 from .claude_helpers import MODEL
