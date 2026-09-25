@@ -84,10 +84,14 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
-VIDIQ_API_KEY=...           # optional — enables agent research + vetting; falls back to standard Claude research
-TELEGRAM_BOT_TOKEN=...      # optional — for bot.py
-TELEGRAM_USER_ID=...        # optional — your Telegram user ID
+# optional — enables agent research + vetting; leave empty for standard Claude research
+VIDIQ_API_KEY=
+# optional — for bot.py: token from @BotFather, your numeric user ID from @userinfobot
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_USER_ID=
 ```
+
+Keep comments on their own line — python-dotenv reads `KEY=   # note` as the value `# note`.
 
 A profile's `voice.voice_id` can also reference an arbitrary env var with `${VAR_NAME}` syntax, resolved at load time — not limited to the fixed list above.
 
