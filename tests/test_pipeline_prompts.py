@@ -7,7 +7,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def test_profile():
-    from profile import load_profile
+    from channel_profile import load_profile
     return load_profile("test-channel", profiles_root=FIXTURES)
 
 

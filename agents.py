@@ -19,7 +19,7 @@ from prompts import (
 )
 
 if TYPE_CHECKING:
-    from profile import Profile
+    from channel_profile import Profile
 
 load_dotenv()
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import anthropic
 from pipeline import _generate_tts_and_prompts, parse_image_prompts, require_keys, ANTHROPIC_KEY
-from profile import load_profile, list_profiles
+from channel_profile import load_profile, list_profiles
 
 
 def main():

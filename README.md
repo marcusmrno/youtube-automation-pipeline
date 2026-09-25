@@ -376,7 +376,7 @@ youtube-pipeline/
 ├── prompts.py            # LLM prompt builders — pure functions, no API calls
 ├── agents.py             # Claude Agent SDK runners connected to vidIQ's MCP server (script + vet)
 ├── metadata.py           # titles/description/hashtags/thumbnail generation, metadata.json
-├── profile.py            # Profile dataclass + YAML loader
+├── channel_profile.py    # Profile dataclass + YAML loader (not profile.py: that shadows the stdlib)
 ├── apply_flicker.py      # standalone CLI — adds/undoes a flicker overlay in a live Palmier project
 ├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, metadata)
 ├── bot.py                # Telegram bot interface

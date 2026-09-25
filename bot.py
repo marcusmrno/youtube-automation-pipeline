@@ -40,7 +40,7 @@ from pipeline import (
     generate_clarifying_questions,
     generate_approach_pitches,
 )
-from profile import load_profile, list_profiles
+from channel_profile import load_profile, list_profiles
 
 load_dotenv()
 

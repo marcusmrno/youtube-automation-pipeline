@@ -13,7 +13,7 @@ from .claude_helpers import MODEL
 
 
 def _roster(profile_yaml: dict) -> list[dict]:
-    """Characters are optional — mirror profile.load_profile's tolerance for a missing block."""
+    """Characters are optional — mirror channel_profile.load_profile's tolerance for a missing block."""
     return (profile_yaml.get("characters") or {}).get("roster") or []
 
 

@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 
 from pipeline import require_keys
-from profile import PROFILES_ROOT
+from channel_profile import PROFILES_ROOT
 
 
 def main() -> None:
@@ -34,7 +34,7 @@ def main() -> None:
         run_revise(args.revise)   # run_revise sanitises the name itself
     else:
         # Interactive: ask create-new or revise existing
-        from profile import list_profiles
+        from channel_profile import list_profiles
         existing = list_profiles(PROFILES_ROOT)
 
         if existing:

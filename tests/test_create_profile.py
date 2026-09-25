@@ -270,14 +270,14 @@ def test_ctrl_d_ends_the_creator_with_a_message(monkeypatch):
     import runpy
     import sys
     from pathlib import Path
-    import profile
+    import channel_profile
     monkeypatch.setattr(sys, "argv", ["create_profile.py"])
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     monkeypatch.setenv("GOOGLE_API_KEY", "test")
-    monkeypatch.setattr(profile, "list_profiles", lambda root=None: [])
+    monkeypatch.setattr(channel_profile, "list_profiles", lambda root=None: [])
     def eof(prompt=""):
         raise EOFError
     monkeypatch.setattr("builtins.input", eof)
     with pytest.raises(SystemExit) as exc:                         # not an EOFError traceback
-        runpy.run_path(str(Path(profile.__file__).parent / "create_profile.py"), run_name="__main__")
+        runpy.run_path(str(Path(channel_profile.__file__).parent / "create_profile.py"), run_name="__main__")
     assert "Aborted" in str(exc.value.code)

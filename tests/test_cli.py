@@ -8,7 +8,7 @@ import pytest
 
 import metadata
 import pipeline
-import profile
+import channel_profile
 
 ROOT = Path(pipeline.__file__).parent
 
@@ -28,8 +28,8 @@ def run_cli(tmp_path, monkeypatch, *argv, keys=True):
 
 @pytest.fixture
 def two_profiles(monkeypatch):
-    monkeypatch.setattr(profile, "list_profiles", lambda: ["alpha", "beta"])
-    monkeypatch.setattr(profile, "load_profile", lambda name: f"<profile {name}>")
+    monkeypatch.setattr(channel_profile, "list_profiles", lambda: ["alpha", "beta"])
+    monkeypatch.setattr(channel_profile, "load_profile", lambda name: f"<profile {name}>")
 
 
 def test_metadata_uses_the_profile_the_run_was_made_with(tmp_path, monkeypatch, two_profiles):
@@ -77,8 +77,8 @@ def test_preview_never_overwrites_a_runs_prompts(tmp_path, monkeypatch):
 def unrunnable_profile(monkeypatch):
     """One profile whose missing voice_id makes check_keys refuse before any paid call."""
     from types import SimpleNamespace
-    monkeypatch.setattr(profile, "list_profiles", lambda: ["p"])
-    monkeypatch.setattr(profile, "load_profile", lambda name: SimpleNamespace(name="p", voice={"voice_id": ""}))
+    monkeypatch.setattr(channel_profile, "list_profiles", lambda: ["p"])
+    monkeypatch.setattr(channel_profile, "load_profile", lambda name: SimpleNamespace(name="p", voice={"voice_id": ""}))
 
 
 def test_failed_runs_exit_nonzero(tmp_path, monkeypatch, unrunnable_profile):
@@ -106,8 +106,8 @@ def test_no_arguments_prints_usage_and_help_lists_every_command(tmp_path, monkey
 def test_bad_input_gets_a_message_not_a_traceback(tmp_path, monkeypatch, argv):
     def load(name):
         raise ValueError(f"Profile '{name}' not found. Available: ['example']")
-    monkeypatch.setattr(profile, "list_profiles", lambda: ["example"])
-    monkeypatch.setattr(profile, "load_profile", load if argv[0] == "run" else (lambda n: f"<profile {n}>"))
+    monkeypatch.setattr(channel_profile, "list_profiles", lambda: ["example"])
+    monkeypatch.setattr(channel_profile, "load_profile", load if argv[0] == "run" else (lambda n: f"<profile {n}>"))
     out = tmp_path / "output"
     for run in ("r1", "none-yet", "bad"):
         (out / run).mkdir(parents=True)

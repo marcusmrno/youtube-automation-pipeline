@@ -41,7 +41,7 @@ from prompts import (
 )
 
 if TYPE_CHECKING:
-    from profile import Profile
+    from channel_profile import Profile
 
 load_dotenv()
 
@@ -816,7 +816,7 @@ def run_status(run_slug: str) -> dict:
 
 def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_callback=None, stop_event=None) -> dict:
     """Resume a stopped pipeline run, regenerating only what is missing."""
-    from profile import load_profile as _load_profile
+    from channel_profile import load_profile as _load_profile
 
     def log_fn(msg):
         log(msg, progress_callback)
@@ -1027,7 +1027,7 @@ def run_from_script(script: str, profile: "Profile", topic: str = "",
 
 if __name__ == "__main__":
     import argparse
-    from profile import load_profile, list_profiles
+    from channel_profile import load_profile, list_profiles
 
     parser = argparse.ArgumentParser(description="YouTube Pipeline")
     sub = parser.add_subparsers(dest="cmd")

@@ -15,7 +15,7 @@ from .claude_helpers import (
 )
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
 from pipeline import ANTHROPIC_KEY
-from profile import PROFILES_ROOT, load_profile
+from channel_profile import PROFILES_ROOT, load_profile
 
 STYLE_SENSITIVE_KEYS = {"art_style_block", "style_constraints"}
 

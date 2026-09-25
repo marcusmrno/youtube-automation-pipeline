@@ -7,7 +7,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from profile import Profile
+    from channel_profile import Profile
 
 
 def _extract(tag: str, text: str) -> str:
