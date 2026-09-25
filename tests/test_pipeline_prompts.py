@@ -117,3 +117,16 @@ def test_script_agent_and_vet_prompts_share_one_word_range(test_profile):
     assert f"under {floor}" in _build_script_prompt("t", "research", test_profile)
     assert f"under {floor}" in _build_agent_script_prompt(test_profile)
     assert f"{floor}-{max_words} words" in _build_vet_prompt(test_profile)
+
+
+def test_prompts_follow_the_profiles_durations(test_profile):
+    from dataclasses import replace
+    from prompts import (_build_script_prompt, _build_agent_script_prompt, _build_tts_prompt,
+                         _build_image_prompt_instructions)
+    p = replace(test_profile, script={**test_profile.script, "hook_duration_s": 75, "target_mins": 8})
+    for hook_prompt in (_build_script_prompt("t", "r", p), _build_agent_script_prompt(p)):
+        assert "0:75" not in hook_prompt and "1:15" in hook_prompt      # a 75 s hook ends at 1:15
+    assert "-02:00]" not in _build_agent_script_prompt(p)              # SECTION 1 no longer ends at 02:00
+    tts, images = _build_tts_prompt("s", p), _build_image_prompt_instructions(p)
+    assert "8-minute" in tts and "12-minute" not in tts
+    assert "8-minute" in images and "14-minute" not in images

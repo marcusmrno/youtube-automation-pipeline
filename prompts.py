@@ -129,6 +129,7 @@ def _build_script_prompt(topic: str, research: str, profile: "Profile", approach
     s = profile.script
     c = profile.channel
     target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    hook_end = f"{s['hook_duration_s'] // 60}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 1:15, not 0:75
 
     approach_section = ""
     if approach_context.strip():
@@ -152,7 +153,7 @@ You are a script writer for a faceless educational YouTube channel.
 - Titles: {c["title_format"]}
 
 ## Script Structure
-- Hook (0:00-0:{s["hook_duration_s"]:02d}): Provocative opening statement or surprising fact. No intro, no "welcome back".
+- Hook (0:00-{hook_end}): Provocative opening statement or surprising fact. No intro, no "welcome back".
 - {s["section_count"]} content sections with clear [MM:SS-MM:SS] timestamps
 - Each section {s["section_duration_s"]} seconds
 - CTA close (last {s["cta_duration_s"]} seconds): Subscribe prompt only — no teasing or referencing a next video
@@ -191,6 +192,7 @@ Return your response in this exact format — no other text:
 
 
 def _build_tts_prompt(script: str, profile: "Profile") -> str:
+    target_words = _word_budget(profile.script)[0]
     template = f"""
 You are preparing a TTS narration for ElevenLabs {profile.voice.get("model", "eleven_v3")} from a finished YouTube video script.
 
@@ -212,7 +214,7 @@ SCRIPT:
 - Exclamation marks add energy; question marks invite the listener to lean in.
 
 ## Audio tags — place immediately before the segment they modify, or after a natural pause mid-sentence
-Target density: 1–2 tags per 200 words (~10–16 tags for a full 12-minute script). Too few is flat; too many is performed.
+Target density: 1–2 tags per 200 words (~{target_words // 200}–{target_words // 100} tags for a full {profile.script["target_mins"]}-minute script). Too few is flat; too many is performed.
 Do not stack two tags back-to-back with no words between them.
 
 Laughter (graduated — pick the right intensity):
@@ -367,7 +369,7 @@ out. It is shown here so your scene descriptions stay compatible with it.
 
 ## Format
 
-Target density: **one image every 3–4 seconds**. A 14-minute video should produce ~210–280 prompts. If you are writing fewer than 15 prompts per minute of narration, you are combining too many sentences — stop and split them.
+Target density: **one image every 3–4 seconds**. A {s["target_mins"]}-minute video should produce ~{s["target_mins"] * 15}–{s["target_mins"] * 20} prompts. If you are writing fewer than 15 prompts per minute of narration, you are combining too many sentences — stop and split them.
 
 Every sentence gets its own image. Every distinct idea, fact, or statement is a separate visual frame — do not combine two sentences into one image. If a sentence contains two distinct claims, split it into two images. A sentence with a list (e.g. "It does A, B, and C") must be split into one image per item if each item is meaningfully different.
 
@@ -417,6 +419,7 @@ def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -
     s = profile.script
     c = profile.channel
     target_words, min_words, _, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    hook_end = f"{s['hook_duration_s'] // 60:02d}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 01:15
 
 
     approach_section = ""
@@ -458,10 +461,10 @@ Use the winning title + vidIQ keyword insights to write a complete script matchi
 TITLE: [winning title]
 KEYWORDS: [3-5 top keywords from vidIQ]
 
-[00:00-00:{s["hook_duration_s"]:02d}] HOOK
+[00:00-{hook_end}] HOOK
 [provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
 
-[00:{s["hook_duration_s"]:02d}-02:00] SECTION 1 — [section title]
+[{hook_end}-MM:SS] SECTION 1 — [section title]
 [narration prose]
 
 ... {s["section_count"]} sections total ...
