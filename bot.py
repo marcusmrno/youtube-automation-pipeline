@@ -47,6 +47,8 @@ BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _user_id        = os.getenv("TELEGRAM_USER_ID", "").strip()
 ALLOWED_USER_ID = int(_user_id) if _user_id.isdigit() else 0   # blank or "# comment" -> main() says "not set"
 
+_metadata_busy: set[str] = set()   # run slugs whose metadata is being generated (not tracked by _state)
+
 _state: dict = {
     "running":           False,
     "run_slug":          None,
@@ -408,6 +410,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 @auth
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if _metadata_busy:
+        await update.message.reply_text(f"📦 Generating metadata: {', '.join(sorted(_metadata_busy))}")
     if _state["running"]:
         slug  = _state["run_slug"] or "?"
         done  = _state["done_images"]
@@ -570,10 +574,16 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _send_metadata_view(update.effective_chat, existing, slug)
         return
 
+    if slug in _metadata_busy:
+        await update.message.reply_text(f"⏳ Metadata for `{slug}` is already being generated.", parse_mode="Markdown")
+        return
+    _metadata_busy.add(slug)   # before any await, so a second request can't slip past the check
+
     await update.message.reply_text(f"📦 Generating metadata for `{slug}`…", parse_mode="Markdown")
     try:
         profile, _ = _resolve_profile_for_bot()
     except Exception as e:
+        _metadata_busy.discard(slug)
         await update.message.reply_text(f"❌ {e}")
         return
 
@@ -585,6 +595,8 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             log_queue.put("__DONE__")
         except Exception as e:
             log_queue.put(f"__ERROR__:{e}")
+        finally:
+            _metadata_busy.discard(slug)
 
     threading.Thread(target=runner, daemon=True).start()
 

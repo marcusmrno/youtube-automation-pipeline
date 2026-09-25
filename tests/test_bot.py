@@ -257,3 +257,24 @@ def test_per_image_retries_are_not_relayed():
     assert not bot._should_relay("  ❌  Image 001.png failed after 3 attempts — skipping")
     assert bot._should_relay("❌  Voiceover failed on chunk 1")
     assert bot._should_relay("✅  148/150 images ready")
+
+
+def test_metadata_generation_is_tracked_and_not_duplicated(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(bot._metadata_mod, "generate_metadata",
+                        lambda slug, *a, **k: calls.append(slug) or time.sleep(0.4))
+    monkeypatch.setattr(bot._metadata_mod, "load_metadata", lambda slug: None)
+    (tmp_path / "r1").mkdir()
+    first, second, status = _update(), _update(), _update()
+
+    async def both():
+        async def check_status():
+            await asyncio.sleep(0.1)
+            await bot.cmd_status(status, _context())
+        await asyncio.gather(bot.cmd_metadata(first, _context("r1", "regenerate")),
+                             bot.cmd_metadata(second, _context("r1", "regenerate")),
+                             check_status())
+    run(both())
+    assert calls == ["r1"]                                      # the second request didn't race the first
+    assert any("already" in r for r in second.message.replies + first.message.replies)
+    assert any("metadata" in r.lower() for r in status.message.replies)   # /status knows about it
