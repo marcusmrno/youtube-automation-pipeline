@@ -11,8 +11,13 @@ if TYPE_CHECKING:
 
 
 def _extract(tag: str, text: str) -> str:
-    m = re.search(rf"==={tag}===(.*?)(?====|\Z)", text, re.DOTALL)
-    return m.group(1).strip() if m else ""
+    """The last ===TAG=== block, up to the next ===TAG=== (spacing, case and **bold** tolerated).
+
+    Only a real tag ends a block, so a '=====' divider or '=== Part 2 ===' inside it survives;
+    taking the last match skips a preamble that merely mentions the tag.
+    """
+    blocks = re.findall(rf"===\s*{tag}\s*===\**(.*?)(?=\**===\s*[A-Z0-9_]+\s*===|\Z)", text, re.S | re.I)
+    return blocks[-1].strip() if blocks else ""
 
 
 def _build_research_prompt(topic: str) -> str:

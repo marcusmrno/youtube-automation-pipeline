@@ -1,3 +1,5 @@
+import pytest
+
 from pipeline import parse_image_prompts
 
 
@@ -75,3 +77,19 @@ def test_split_agent_output_no_notes_when_script_only():
     script, notes = split_agent_output("===SCRIPT===\nTITLE: X")
     assert script == "TITLE: X"
     assert notes == ""
+
+
+@pytest.mark.parametrize("tag,text,expected", [
+    ("SCRIPT", "===SCRIPT===\nA\n=== Part 2 ===\nB", "A\n=== Part 2 ===\nB"),       # section divider in the script
+    ("IMAGE_PROMPTS", "===IMAGE_PROMPTS===\n001 | a\n======\n002 | b", "001 | a\n======\n002 | b"),
+    ("SCRIPT", "I'll put it under ===SCRIPT=== below.\n===SCRIPT===\nbody", "body"),  # tag mentioned first
+    ("SCRIPT", "=== SCRIPT ===\nbody", "body"),                                     # spaced tag
+    ("SCRIPT", "===script===\nbody", "body"),                                       # lower-case tag
+    ("SCRIPT", "**===SCRIPT===**\nTITLE: X", "TITLE: X"),                           # bold tag
+    ("TITLES", "===TITLES===\n1. a\n===END===", "1. a"),
+    ("THUMBNAIL_1", "===THUMBNAIL_1===\nHOOK: x\nbody1\n===THUMBNAIL_2===\nbody2", "HOOK: x\nbody1"),
+    ("SCRIPT", "no tags here", ""),
+])
+def test_extract(tag, text, expected):
+    from prompts import _extract
+    assert _extract(tag, text) == expected

@@ -110,7 +110,7 @@ def test_empty_script_aborts_before_approval(monkeypatch, run_env):
 
 
 def test_untagged_model_replies_are_errors(monkeypatch):
-    reply = SimpleNamespace(content=[SimpleNamespace(text="=== TTS_SCRIPT ===\nspaced tag")])
+    reply = SimpleNamespace(content=[SimpleNamespace(text="Here is the narration, no tag at all.")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: reply))
     monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "p")
     monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "p")
