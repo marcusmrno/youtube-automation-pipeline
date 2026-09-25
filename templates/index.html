@@ -1769,18 +1769,20 @@ async function runPipeline() {
 
   // Open SSE stream
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(currentStage, '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 function openStream(onMessage) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource('/stream');
   eventSource.onmessage = (e) => onMessage(JSON.parse(e.data));
+  // EventSource reconnects by itself and the server keeps the job's queue, so only give up once
+  // the browser does; closing on the first error would lose the approval prompt.
+  eventSource.onerror = () => {
+    if (running && eventSource && eventSource.readyState === EventSource.CLOSED) {
+      addLogLine(currentStage, '⚠️  Stream closed');
+      setRunFinished(false);
+    }
+  };
   return eventSource;
 }
 
@@ -1868,12 +1870,6 @@ async function startMetadataRun(slug, regenerate) {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine('metadata', '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 async function stopPipeline() {
@@ -2175,13 +2171,6 @@ async function continuePipelineExecution() {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(null, '❌ Connection lost');
-      setRunFinished(false);
-    }
-    eventSource.close();
-  };
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────

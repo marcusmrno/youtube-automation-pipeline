@@ -200,3 +200,29 @@ def test_a_crashed_job_reports_error(monkeypatch, run_dir):
     client.post("/metadata/r1/generate", json={"profile": "p", "regenerate": True})
     ui._state["thread"].join(2)
     assert _stream_events(client)[-1] == {"type": "done", "status": "error"}
+
+
+def _drain(client, timeout=4):
+    """Read /stream to its end; None if it never ends (pings forever)."""
+    out = {}
+    t = threading.Thread(target=lambda: out.update(events=_stream_events(client)), daemon=True)
+    t.start()
+    t.join(timeout)
+    return out.get("events")
+
+
+def test_audio_regen_stream_ends(monkeypatch, run_dir):
+    import pipeline   # the route imports generate_voiceover from pipeline when it runs
+    monkeypatch.setattr(pipeline, "generate_voiceover", lambda *a, **k: run_dir / "audio" / "voiceover.mp3")
+    client = ui.app.test_client()
+    client.post("/regenerate_audio", json={"run_slug": "r1"})
+    events = _drain(client)
+    assert events and events[-1]["type"] == "audio_done"
+
+
+def test_stream_after_a_finished_job_ends_at_once(monkeypatch, run_dir):
+    monkeypatch.setattr(ui, "run_from_script", lambda *a, **k: {"status": "complete"})
+    client = ui.app.test_client()
+    client.post("/run_from_script", json={"script": "s"})
+    assert _drain(client)[-1]["type"] == "done"
+    assert _drain(client) == [{"type": "error", "msg": "No pipeline running"}]   # not endless pings

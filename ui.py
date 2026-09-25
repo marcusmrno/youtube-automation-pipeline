@@ -187,7 +187,10 @@ def stream():
                 yield f"data: {json.dumps({'type': 'ping'})}\n\n"
                 continue
             yield f"data: {json.dumps(event)}\n\n"
-            if event.get("type") in ("done", "regen_done"):
+            if event.get("type") in ("done", "regen_done", "audio_done"):
+                # the job is over: later connects get "No pipeline running" instead of endless pings
+                if _state.get("log_queue") is lq:
+                    _state["log_queue"] = None
                 break
 
     return Response(
