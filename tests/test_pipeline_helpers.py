@@ -4,6 +4,7 @@ import time
 import types
 
 import anthropic
+import pytest
 import pipeline
 from pipeline import (_expand_short_prompts, _stream_text, _topic_from_script, build_preamble,
                       generate_all_images, slugify, GENERIC_ANCHOR_REFS)
@@ -194,3 +195,30 @@ def test_tts_chunks_respect_the_limit_and_keep_every_word():
         assert max(map(len, chunks)) <= 4500, max(map(len, chunks))
         assert " ".join(chunks).split() == text.split()           # nothing dropped
     assert _split_into_chunks("   \n ") == []                       # no empty ElevenLabs request
+
+
+@pytest.mark.parametrize("topic", ["Café culture", "¿Por qué soñamos?", "— Why cats", "Why cats —",
+                                   "a" * 59 + " b", "你好世界", "???", "🔥🔥"])
+def test_every_slug_is_one_the_ui_accepts(topic):
+    # the UI silently dropped review edits (and 400'd every route) for runs it couldn't name
+    import ui
+    slug = slugify(topic)
+    assert slug and ui._safe_slug(slug), slug
+
+
+@pytest.mark.parametrize("bad", ["", ".", "..", "../x", "a/b", "/etc", "a\nb"])
+def test_ui_slug_check_still_rejects_paths(bad):
+    import ui
+    assert not ui._safe_slug(bad)
+
+
+@pytest.mark.parametrize("script,topic", [
+    ("TITLE:\nWhy Cats Rule\n", "Why Cats Rule"),                 # empty TITLE: value
+    ("```\nTITLE: Fenced Title\n```", "Fenced Title"),           # pasted from a chat
+    ("**TITLE:** Bold Title\nbody", "Bold Title"),
+    ("1. TITLE: Numbered Title", "Numbered Title"),
+    ("TITLE : Spaced Title", "Spaced Title"),
+    ("Subtitle: not a title line", "Subtitle: not a title line"),
+])
+def test_topic_from_script_finds_the_title(script, topic):
+    assert _topic_from_script(script) == topic

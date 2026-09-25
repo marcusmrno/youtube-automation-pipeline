@@ -22,7 +22,7 @@ import metadata as _metadata_mod
 
 _noop_log = lambda _: None
 
-_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]*$')
+_SLUG_RE = re.compile(r'[\w-]+')   # everything pipeline.slugify makes; never '.', '/' or ''  (fullmatch)
 
 def _safe_slug(run_slug: str) -> bool:
     return bool(_SLUG_RE.fullmatch(run_slug))

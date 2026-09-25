@@ -112,7 +112,7 @@ def slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
-    return text[:60]
+    return text[:60] or "untitled"   # '' would put the run straight into output/
 
 
 def make_output_dir(slug: str) -> Path:
@@ -956,9 +956,14 @@ def _topic_from_script(script: str) -> str:
     """Slug source for a premade script: its TITLE: line, else its first line."""
     for line in script.splitlines():
         line = line.strip()
-        if not line:
+        if not line.strip("`"):   # blank lines and markdown fences from a pasted chat reply
             continue
-        return line[6:].strip() if line[:6].lower() == "title:" else line
+        m = re.match(r"[\W\d]*title\s*:\W*(.*)", line, re.I)   # TITLE:, **TITLE:**, 1. TITLE:, TITLE :
+        if not m:
+            return line
+        if m[1].strip(" *"):
+            return m[1].strip(" *")
+        # an empty TITLE: line; the title is on a later line
     return "untitled"
 
 
