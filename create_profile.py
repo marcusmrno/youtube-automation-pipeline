@@ -6,7 +6,6 @@ Usage:
 """
 from __future__ import annotations
 
-import re
 import sys
 import argparse
 
@@ -26,8 +25,7 @@ def main() -> None:
 
     if args.revise:
         from profile_creator.revise import run_revise
-        revise_name = re.sub(r"[^\w-]", "-", args.revise.lower()).strip("-")
-        run_revise(revise_name)
+        run_revise(args.revise)   # run_revise sanitises the name itself
     else:
         # Interactive: ask create-new or revise existing
         from profile import list_profiles
