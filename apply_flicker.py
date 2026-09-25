@@ -266,6 +266,8 @@ def main():
                         help="Remove the flicker track created by the most recent apply")
     args = parser.parse_args()
 
+    if args.undo and args.dry_run:   # undo() has no dry run; it would really delete the track
+        parser.error("--dry-run can't be combined with --undo")
     if args.undo:
         undo()
         return

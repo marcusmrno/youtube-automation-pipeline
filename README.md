@@ -195,6 +195,8 @@ python apply_flicker.py --interval 6 --dry-run # preview without writing
 python apply_flicker.py --undo                 # remove the flicker layer (uses .flicker_snapshot.json)
 ```
 
+One layer at a time: apply refuses while a previous layer is recorded, and `--undo` only removes the recorded track if it still holds nothing but `NNNb`/`NNNc` clips.
+
 ---
 
 ## Output structure

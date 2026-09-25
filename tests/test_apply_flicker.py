@@ -59,3 +59,14 @@ def test_a_second_apply_is_refused_until_undo(palmier):
         af.apply_flicker(6)
     assert "add_clips" not in palmier["calls"]
     af.apply_flicker(6, dry_run=True)                    # previewing is still fine
+
+
+def test_undo_with_dry_run_deletes_nothing(palmier, monkeypatch):
+    import sys
+    palmier["media"] = [{"id": "b", "name": "001b"}]
+    palmier["tracks"] = [{"label": "V2", "type": "video", "clips": [{"mediaRef": "b"}]}]
+    _snapshot()
+    monkeypatch.setattr(sys, "argv", ["apply_flicker.py", "--undo", "--dry-run"])
+    with pytest.raises(SystemExit) as exc:
+        af.main()
+    assert exc.value.code == 2 and "remove_tracks" not in palmier["calls"] and af.SNAPSHOT_PATH.exists()
