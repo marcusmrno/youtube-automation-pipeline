@@ -251,3 +251,16 @@ def test_revising_twice_makes_v3_and_keeps_v2(tmp_path, monkeypatch):
 def test_fenced_blocks_in_common_variants(text, lang, expected):
     # a miss raised after the paid 8192-token generation call; an inner fence truncated the style sheet
     assert extract_fenced_block(text, lang) == expected
+
+
+@pytest.mark.parametrize("argv", [["--revise", "my-channel", "--seed", "ref.png"],   # silently ignored before
+                                  ["--seed", "does-not-exist.png"]])                # found out after the brain dump
+def test_seed_mistakes_are_caught_before_any_work(monkeypatch, tmp_path, argv):
+    import sys
+    import create_profile
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ref.png").write_bytes(b"x")
+    monkeypatch.setattr(sys, "argv", ["create_profile.py", *argv])
+    with pytest.raises(SystemExit) as exc:
+        create_profile.main()
+    assert exc.value.code == 2                                     # an argparse usage error

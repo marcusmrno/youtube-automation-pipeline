@@ -58,11 +58,8 @@ def run_create(seed_image: str | None = None) -> None:
     profile_dir  = PROFILES_ROOT / profile_name
     anchors_dir  = profile_dir / "anchors"
 
-    if seed_image:
+    if seed_image:   # create_profile.py has already checked that it exists
         seed_path = Path(seed_image)
-        if not seed_path.exists():
-            print(f"✗ Seed image not found: {seed_image}")
-            sys.exit(1)
         anchors_dir.mkdir(parents=True, exist_ok=True)
         from pipeline import _standardize_image
         # always .png: only anchor-*.png/.jpg are sent, and _standardize_image re-encodes by extension

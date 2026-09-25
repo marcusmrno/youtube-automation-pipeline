@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import argparse
+from pathlib import Path
 
 from pipeline import require_keys
 from profile import PROFILES_ROOT
@@ -20,6 +21,11 @@ def main() -> None:
     parser.add_argument("--seed", metavar="IMAGE_PATH",
                         help="Path to a seed image that anchors the visual style for all generated anchors")
     args = parser.parse_args()
+    # catch seed mistakes now, not after the brain dump has been pasted
+    if args.seed and args.revise:
+        parser.error("--seed only applies to new profiles")
+    if args.seed and not Path(args.seed).exists():
+        parser.error(f"seed image not found: {args.seed}")
 
     require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
 
@@ -44,6 +50,8 @@ def main() -> None:
                 except (ValueError, IndexError):
                     print("Invalid choice.")
                     sys.exit(1)
+                if args.seed:
+                    print("--seed only applies to new profiles — ignoring it for this revision.")
                 from profile_creator.revise import run_revise
                 run_revise(name)
                 return
