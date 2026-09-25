@@ -93,10 +93,12 @@ def test_existing_metadata_with_regenerate_overwrites(tmp_path, monkeypatch):
 
     def fake_render(prompts, run_dir, profile, log_fn):
         (run_dir / "thumbnails").mkdir(exist_ok=True)
+        out = []
         for i, p in enumerate(prompts, 1):
             fn = f"thumbnails/thumb-{i:02d}.png"
             (run_dir / fn).write_bytes(b"PNG")
-            return [{**p, "filename": fn} for p in prompts]
+            out.append({**p, "filename": fn})
+        return out
 
     monkeypatch.setattr(metadata, "_render_thumbnails", fake_render)
     monkeypatch.setattr(metadata, "anthropic", MagicMock())
@@ -113,6 +115,8 @@ def test_existing_metadata_with_regenerate_overwrites(tmp_path, monkeypatch):
     data = json.loads((run_dir / "metadata.json").read_text())
     assert "stale" not in data
     assert len(data["titles"]) == 5
+    assert [t["filename"] for t in data["thumbnails"]] == [
+        f"thumbnails/thumb-{i:02d}.png" for i in (1, 2, 3)]
 
 
 def test_missing_script_raises(tmp_path, monkeypatch):
