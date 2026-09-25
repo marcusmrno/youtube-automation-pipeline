@@ -221,3 +221,19 @@ def test_a_punctuation_only_name_is_asked_again(tmp_path, monkeypatch):
     assert (other / "profile.yaml").read_text() == "keep me"
     assert (tmp_path / "my-channel" / "profile.yaml").exists()
     assert not (tmp_path / "profile.yaml").exists()
+
+
+def test_revising_twice_makes_v3_and_keeps_v2(tmp_path, monkeypatch):
+    import profile_creator.revise as m
+    for name in ("my-channel", "my-channel-v2"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "profile.yaml").write_text(PROFILE_YAML)
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+    asked = []
+    with patch("profile_creator.revise.anthropic.Anthropic"), \
+         patch("profile_creator.revise.clarification_loop", return_value=[{"content": "REGENERATE_ANCHORS: false"}]), \
+         patch("profile_creator.revise.generate_profile_content", return_value=(PROFILE_YAML, "# Style\n")), \
+         patch("builtins.input", side_effect=lambda prompt="": asked.append(prompt) or "darker"):
+        m.run_revise("my-channel")
+    assert (tmp_path / "my-channel-v3" / "profile.yaml").exists()
+    assert not any("Overwrite" in p for p in asked)                    # v2 is never offered for overwrite

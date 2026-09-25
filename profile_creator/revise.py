@@ -52,13 +52,11 @@ def run_revise(profile_name: str) -> None:
     old_style_text = (profile_dir / "style-sheet.md").read_text() if (profile_dir / "style-sheet.md").exists() else ""
     old_yaml       = yaml.safe_load(old_yaml_text)
 
+    # the next free version: revising twice makes -v3, never overwrites (or merges into) -v2
     v2_name = next_version_name(profile_name)
+    while (PROFILES_ROOT / v2_name).exists():
+        v2_name = next_version_name(v2_name)
     v2_dir  = PROFILES_ROOT / v2_name
-
-    if v2_dir.exists():
-        overwrite = input(f"Profile '{v2_name}' already exists. Overwrite? [y/N]: ").strip().lower()
-        if overwrite != "y":
-            sys.exit(0)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
