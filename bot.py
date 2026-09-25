@@ -1100,7 +1100,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
 
     print(f"✅ Bot running — authorized user ID: {ALLOWED_USER_ID}")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY])   # no edited messages
 
 
 if __name__ == "__main__":

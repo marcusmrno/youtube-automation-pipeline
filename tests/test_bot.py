@@ -299,3 +299,16 @@ def test_image_milestones_say_started_not_done():
     app = SimpleNamespace(bot=SimpleNamespace(send_message=lambda **k: sent.append(k["text"]) or _noop()))
     run(_REAL_RELAY(app, 1, lq))
     assert sent == ["🖼 Images: 100% started (150/150)"]
+
+
+def test_bot_does_not_poll_for_edited_messages(monkeypatch):
+    # PTB handlers match edited messages, where update.message is None, so editing an old message crashed them
+    polled = {}
+    app = SimpleNamespace(add_handler=lambda h: None, run_polling=lambda **k: polled.update(k))
+    builder = SimpleNamespace(build=lambda: app)
+    builder.token = lambda t: builder
+    builder.concurrent_updates = lambda c: builder
+    monkeypatch.setattr(bot, "BOT_TOKEN", "token")
+    monkeypatch.setattr(bot, "Application", SimpleNamespace(builder=lambda: builder))
+    bot.main()
+    assert set(polled["allowed_updates"]) == {"message", "callback_query"}
