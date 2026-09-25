@@ -374,6 +374,7 @@ python -m pytest tests -q
 youtube-pipeline/
 ├── pipeline.py           # core orchestrator — all stage logic and resumability
 ├── images.py             # Gemini image generation, anchor references, image files on disk
+├── voiceover.py          # ElevenLabs voiceover: chunking, MP3 splicing
 ├── prompts.py            # LLM prompt builders — pure functions, no API calls
 ├── agents.py             # Claude Agent SDK runners connected to vidIQ's MCP server (script + vet)
 ├── metadata.py           # titles/description/hashtags/thumbnail generation, metadata.json

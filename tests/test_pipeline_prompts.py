@@ -88,9 +88,9 @@ def test_generate_voiceover_uses_profile_voice_settings(test_profile, tmp_path):
         mock_resp.content = b"ID3" + b"\x00" * 100
         return mock_resp
 
-    import pipeline
-    with patch("pipeline.requests.post", side_effect=fake_post):
-        pipeline.generate_voiceover("Hello world test.", tmp_path, test_profile, print)
+    import voiceover
+    with patch("voiceover.requests.post", side_effect=fake_post):
+        voiceover.generate_voiceover("Hello world test.", tmp_path, test_profile, print)
 
     assert len(captured_payloads) == 1
     payload = captured_payloads[0]

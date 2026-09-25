@@ -7,6 +7,7 @@ import pytest
 
 import images
 import pipeline
+import voiceover
 
 PROFILE = SimpleNamespace(name="p", voice={"voice_id": "v"}, image_gen={}, image_style={})
 
@@ -29,11 +30,11 @@ def test_stop_halts_the_voiceover(monkeypatch, tmp_path):
         stop.set()                       # user hits Stop during chunk 1
         return b"ID3" + b"\x00" * 20
 
-    monkeypatch.setattr(pipeline, "_tts_chunk", fake_chunk)
+    monkeypatch.setattr(voiceover, "_tts_chunk", fake_chunk)
     monkeypatch.setattr(pipeline, "generate_all_images", lambda *a, **k: {})
     (tmp_path / "audio").mkdir()
     tts = "Every sentence here is billed. " * 600          # several ElevenLabs chunks
-    assert len(pipeline._split_into_chunks(tts)) > 2
+    assert len(voiceover._split_into_chunks(tts)) > 2
     r = pipeline._run_production("t", [], tts, PROFILE, tmp_path, lambda m: None, stop)
     assert r["status"] == "cancelled"
     assert len(calls) == 1

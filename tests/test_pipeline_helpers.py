@@ -189,7 +189,7 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
 
 
 def test_tts_chunks_respect_the_limit_and_keep_every_word():
-    from pipeline import _split_into_chunks
+    from voiceover import _split_into_chunks
     for text in ("word " * 2000,                                   # no terminal punctuation
                  'He said "stop." Then more. ' * 400,              # sentences ending in a quote
                  "Short one. " * 900):

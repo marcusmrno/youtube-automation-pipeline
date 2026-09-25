@@ -512,7 +512,7 @@ def get_approach_pitches():
 
 @app.route("/regenerate_audio", methods=["POST"])
 def regenerate_audio():
-    from pipeline import generate_voiceover
+    from voiceover import generate_voiceover
 
     data     = request.get_json(force=True)
     run_slug = (data.get("run_slug") or "").strip()

@@ -212,8 +212,8 @@ def _drain(client, timeout=4):
 
 
 def test_audio_regen_stream_ends(monkeypatch, run_dir):
-    import pipeline   # the route imports generate_voiceover from pipeline when it runs
-    monkeypatch.setattr(pipeline, "generate_voiceover", lambda *a, **k: run_dir / "audio" / "voiceover.mp3")
+    import voiceover   # the route imports generate_voiceover when it runs
+    monkeypatch.setattr(voiceover, "generate_voiceover", lambda *a, **k: run_dir / "audio" / "voiceover.mp3")
     client = ui.app.test_client()
     client.post("/regenerate_audio", json={"run_slug": "r1"})
     events = _drain(client)
