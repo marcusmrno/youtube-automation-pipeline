@@ -23,9 +23,9 @@ import anthropic
 
 from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT
 from writing import HAIKU_MODEL
-from images import generate_image_google, _load_anchor_parts, _find_image
+from images import generate_image_google, load_anchor_parts, find_image
 from agents import run_vidiq_agent, VIDIQ_KEY
-from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
+from prompts import extract, build_metadata_titles_prompt, build_metadata_desc_hashtags_prompt, build_metadata_thumbnail_prompt
 
 
 def _run_dir(run_slug: str) -> Path:
@@ -82,7 +82,7 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     user = f"Topic: {topic}\n\nReturn 15 keywords as a JSON array, wrapped in ===KEYWORDS=== tags."
     try:
         raw = _call_vidiq_agent(system, user, max_turns=10, log_fn=log_fn)
-        block = _extract("KEYWORDS", raw)
+        block = extract("KEYWORDS", raw)
         if not block:
             log_fn("⚠️  vidIQ keyword research returned no KEYWORDS block")
             return []
@@ -120,7 +120,7 @@ def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
 
 def _parse_titles(raw: str) -> list[str]:
     """Extract numbered titles from a ===TITLES=== block."""
-    block = _extract("TITLES", raw)
+    block = extract("TITLES", raw)
     if not block:
         return []
     titles: list[str] = []
@@ -137,7 +137,7 @@ def _parse_titles(raw: str) -> list[str]:
 
 def _generate_titles(topic, script, research, keywords, profile, client, log_fn) -> list[str]:
     log_fn("✍️  Generating 5 title candidates...")
-    prompt = _build_metadata_titles_prompt(topic, script, research, keywords, profile)
+    prompt = build_metadata_titles_prompt(topic, script, research, keywords, profile)
     r = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=1000,
@@ -179,7 +179,7 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     by_title: dict[str, dict] = {}
     try:
         raw = _call_vidiq_agent(system, user, max_turns=len(titles) * 2 + 4, log_fn=log_fn)
-        block = _extract("SCORES", raw)
+        block = extract("SCORES", raw)
         if not block:
             raise RuntimeError("vidIQ scores response had no SCORES block")
         for entry in _json_block(block):
@@ -202,15 +202,15 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
 
 def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn, audio_secs=None) -> dict:
     log_fn("📝  Generating description and hashtags...")
-    prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs)
+    prompt = build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs)
     r = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
     text = r.content[0].text
-    desc = _extract("DESCRIPTION", text)
-    hashtags_raw = _extract("HASHTAGS", text)
+    desc = extract("DESCRIPTION", text)
+    hashtags_raw = extract("HASHTAGS", text)
     if not desc:
         raise ValueError("description generation: missing ===DESCRIPTION=== block")
     if not hashtags_raw:
@@ -225,7 +225,7 @@ def _generate_description_hashtags(top_title, script, keywords, profile, client,
 def _parse_thumbnail_prompts(raw: str) -> list[dict]:
     out = []
     for n in (1, 2, 3):
-        block = _extract(f"THUMBNAIL_{n}", raw)
+        block = extract(f"THUMBNAIL_{n}", raw)
         if not block:
             return []
         lines = block.strip().splitlines()
@@ -244,7 +244,7 @@ def _parse_thumbnail_prompts(raw: str) -> list[dict]:
 
 def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[dict]:
     log_fn("🎨  Generating 3 thumbnail prompts...")
-    prompt = _build_metadata_thumbnail_prompt(script, topic, profile)
+    prompt = build_metadata_thumbnail_prompt(script, topic, profile)
     for attempt in (1, 2):
         r = client.messages.create(
             model=HAIKU_MODEL,
@@ -263,7 +263,7 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn, max_
     """Render thumbnails concurrently. Returns one entry per input with filename and any error, in input order."""
     thumb_dir = run_dir / "thumbnails"
     thumb_dir.mkdir(exist_ok=True)
-    anchor_parts = _load_anchor_parts(profile)
+    anchor_parts = load_anchor_parts(profile)
     model = profile.image_gen.get("pro_model") or profile.image_gen["default_model"]
 
     def _one(i: int, p: dict) -> dict:
@@ -284,7 +284,7 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn, max_
             return {**p, "filename": requested_filename, "render_error": str(e)}
         if not ok:
             return {**p, "filename": requested_filename, "render_error": "generator returned False"}
-        actual = _find_image(thumb_dir, stem)
+        actual = find_image(thumb_dir, stem)
         if actual is None:
             return {**p, "filename": requested_filename, "render_error": "rendered file missing on disk"}
         return {**p, "filename": f"thumbnails/{actual.name}"}

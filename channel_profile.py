@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import yaml
 
-from prompts import _word_budget
+from prompts import word_budget
 
 
 PROFILES_ROOT = Path(__file__).parent / "profiles"
@@ -81,7 +81,7 @@ def _validate(name: str, data) -> None:
     if missing:
         raise ValueError(f"Profile '{name}' is missing: {', '.join(missing)}")
     try:
-        _word_budget(data["script"])   # every script prompt is built from these numbers
+        word_budget(data["script"])   # every script prompt is built from these numbers
     except (KeyError, TypeError, ValueError, AttributeError) as e:
         raise ValueError(f"Profile '{name}' has an invalid script section: {e!r}") from e
 

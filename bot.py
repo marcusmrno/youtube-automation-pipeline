@@ -33,7 +33,7 @@ from pipeline import (
     run_pipeline,
     resume_pipeline,
     run_from_script,
-    _topic_from_script,
+    topic_from_script,
     run_status,
     slugify,
 )
@@ -835,7 +835,7 @@ async def _start_pipeline(
     loop    = asyncio.get_running_loop()
 
     if script and not topic:
-        topic = _topic_from_script(script)
+        topic = topic_from_script(script)
 
     lq = queue.Queue()
     se = threading.Event()
@@ -1083,7 +1083,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         # off the event loop: a 10-20 s Sonnet call would otherwise freeze /stop and the buttons
-        revised = await asyncio.to_thread(revise_script, script, feedback, _topic_from_script(script), _profile, client)
+        revised = await asyncio.to_thread(revise_script, script, feedback, topic_from_script(script), _profile, client)
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True

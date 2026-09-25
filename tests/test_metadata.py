@@ -343,7 +343,7 @@ def test_render_thumbnails_all_succeed(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [
@@ -370,7 +370,7 @@ def test_render_thumbnails_middle_fails(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [{"prompt": "p1", "hook_text": "A"},
@@ -400,7 +400,7 @@ def test_render_thumbnails_exception_raised(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [{"prompt": "p1", "hook_text": "A"},

@@ -11,14 +11,14 @@ from typing import TYPE_CHECKING
 import anthropic
 
 from prompts import (
-    _build_clarifying_questions_prompt,
-    _build_approach_pitch_prompt,
-    _build_research_prompt,
-    _build_script_prompt,
-    _build_tts_prompt,
-    _build_image_prompt_instructions,
-    _build_agent_system_prompt,
-    _extract,
+    build_clarifying_questions_prompt,
+    build_approach_pitch_prompt,
+    build_research_prompt,
+    build_script_prompt,
+    build_tts_prompt,
+    build_image_prompt_instructions,
+    build_agent_system_prompt,
+    extract,
 )
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ def research_topic(topic: str, client: anthropic.Anthropic, log_fn) -> str:
     response = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=3000,
-        messages=[{"role": "user", "content": _build_research_prompt(topic)}]
+        messages=[{"role": "user", "content": build_research_prompt(topic)}]
     )
     research = response.content[0].text
     log_fn("✅  Research complete")
@@ -72,7 +72,7 @@ def research_topic(topic: str, client: anthropic.Anthropic, log_fn) -> str:
 def generate_clarifying_questions(topic: str, profile: "Profile",
                                   client: anthropic.Anthropic, log_fn) -> str:
     """Generate clarifying questions about the video topic."""
-    prompt = _build_clarifying_questions_prompt(topic, profile)
+    prompt = build_clarifying_questions_prompt(topic, profile)
     log_fn("❓ Generating clarifying questions...")
     r = client.messages.create(
         model=HAIKU_MODEL,
@@ -87,7 +87,7 @@ def generate_clarifying_questions(topic: str, profile: "Profile",
 def generate_approach_pitches(topic: str, answers: str, profile: "Profile",
                               client: anthropic.Anthropic, log_fn) -> str:
     """Generate 3 evidence-based approach pitches based on topic + user answers."""
-    prompt = _build_approach_pitch_prompt(topic, answers, profile)
+    prompt = build_approach_pitch_prompt(topic, answers, profile)
     log_fn("💡 Pitching approaches...")
     r = client.messages.create(
         model=HAIKU_MODEL,
@@ -101,9 +101,9 @@ def generate_approach_pitches(topic: str, answers: str, profile: "Profile",
 
 def generate_script(topic: str, research: str, profile: "Profile",
                     client: anthropic.Anthropic, log_fn, approach_context: str = "") -> str:
-    prompt = _build_script_prompt(topic, research, profile, approach_context)
+    prompt = build_script_prompt(topic, research, profile, approach_context)
     log_fn("✍️  Writing script...")
-    script = _extract("SCRIPT", _stream_text(
+    script = extract("SCRIPT", _stream_text(
         client,
         model=CLAUDE_MODEL,
         max_tokens=SONNET_MAX_TOKENS,
@@ -117,7 +117,7 @@ def generate_script(topic: str, research: str, profile: "Profile",
 def revise_script(script: str, feedback: str, topic: str, profile: "Profile | None",
                   client: anthropic.Anthropic) -> str:
     """Revise a script based on feedback via Sonnet. Returns the revised script."""
-    system_ctx = _build_agent_system_prompt(topic or "video", profile) if profile else ""
+    system_ctx = build_agent_system_prompt(topic or "video", profile) if profile else ""
     prompt = f"""{system_ctx}
 
 ---
@@ -140,7 +140,7 @@ CURRENT SCRIPT:
         output_config={"effort": SONNET_EFFORT},
         messages=[{"role": "user", "content": prompt}],
     )
-    return _extract("SCRIPT", text) or text.strip()
+    return extract("SCRIPT", text) or text.strip()
 
 
 def format_image_prompts(prompts: list[dict]) -> str:
@@ -202,27 +202,27 @@ def _expand_short_prompts(raw: str, profile: "Profile") -> list[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
-def _generate_tts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+def generate_tts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
     """Haiku call: the finished script -> TTS narration with v3 audio tags."""
     log_fn("✍️  Extracting TTS narration from script...")
-    tts_prompt = _build_tts_prompt(script, profile)
+    tts_prompt = build_tts_prompt(script, profile)
     r1 = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=8000,
         messages=[{"role": "user", "content": tts_prompt}]
     )
-    tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
+    tts_script = extract("TTS_SCRIPT", r1.content[0].text)
     if not tts_script:
         raise ValueError("TTS reply had no ===TTS_SCRIPT=== block")
     log_fn("✅  TTS narration extracted")
     return tts_script
 
 
-def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+def generate_image_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
     """Sonnet call: the finished script -> image_prompts.txt text."""
     log_fn("🖼️  Generating image prompts...")
     msg = (
-        _build_image_prompt_instructions(profile)
+        build_image_prompt_instructions(profile)
         + f"\nSCRIPT:\n{script}\n"
     )
     raw = _stream_text(
@@ -233,14 +233,14 @@ def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.A
         messages=[{"role": "user", "content": msg}],
     )
 
-    prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
+    prompts = _expand_short_prompts(extract("IMAGE_PROMPTS", raw), profile)
     if not prompts:
         raise ValueError("Image-prompt reply had no usable ===IMAGE_PROMPTS=== lines")
     log_fn(f"✅  Image prompts generated — {len(prompts)} total")
     return format_image_prompts(prompts)
 
 
-def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
+def generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
     """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
-    return (_generate_tts(script, profile, client, log_fn),
-            _generate_image_prompts(script, profile, client, log_fn))
+    return (generate_tts(script, profile, client, log_fn),
+            generate_image_prompts(script, profile, client, log_fn))

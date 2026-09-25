@@ -18,10 +18,10 @@ import anthropic
 from dotenv import load_dotenv
 
 from agents import run_script_agent, run_vet_agent, VIDIQ_KEY
-from images import (GOOGLE_KEY, _find_image, _load_anchor_parts, generate_all_images,
+from images import (GOOGLE_KEY, find_image, load_anchor_parts, generate_all_images,
                     generate_flicker_frames, generate_image_google)
 from voiceover import EL_KEY, generate_voiceover
-from writing import (_generate_image_prompts, _generate_tts, _generate_tts_and_prompts, format_image_prompts,
+from writing import (generate_image_prompts, generate_tts, generate_tts_and_prompts, format_image_prompts,
                      generate_script, parse_image_prompts, research_topic)
 
 if TYPE_CHECKING:
@@ -111,7 +111,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
     if missing:
         log_fn(f"⚠️  Image numbers not found in prompts: {missing}")
 
-    anchor_parts = _load_anchor_parts(profile)
+    anchor_parts = load_anchor_parts(profile)
     results = {"regenerated": [], "failed": []}
     for num in targets:
         if num not in all_prompts:
@@ -125,7 +125,7 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
             flicker_cfg = profile.image_gen.get("flicker", {})
             if flicker_cfg.get("enabled"):
                 magnitude = flicker_cfg.get("magnitude", 0.004)
-                found = _find_image(out_dir / "images", num) or img_path
+                found = find_image(out_dir / "images", num) or img_path
                 generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
         else:
             log_fn(f"  ❌  {num} failed")
@@ -188,7 +188,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
 def _produce_from_script(script: str, topic: str, profile: "Profile", out_dir: Path,
                          client: anthropic.Anthropic, log_fn, stop_event=None) -> dict:
     """Phases 1b-4: a finished script -> TTS + image prompts -> images + voiceover."""
-    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
+    tts_script, image_prompts_raw = generate_tts_and_prompts(script, profile, client, log_fn)
 
     prompts = parse_image_prompts(image_prompts_raw)
     log_fn(f"📝  {len(prompts)} image prompts parsed")
@@ -223,7 +223,7 @@ def run_status(run_slug: str) -> dict:
     if has_prompts:
         prompts        = parse_image_prompts(prompts_file.read_text())
         total_prompts  = len(prompts)
-        images_on_disk = sum(1 for p in prompts if _find_image(images_dir, p["num"]))
+        images_on_disk = sum(1 for p in prompts if find_image(images_dir, p["num"]))
 
     missing = []
     if not has_script:  missing.append("script")
@@ -292,22 +292,22 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
         if needs_tts:     log_fn("     • tts_script.txt")
         # only pay for what is missing; the voiceover must match the tts_script.txt on disk
         if needs_tts:
-            tts_file.write_text(_generate_tts(script, profile, client, log_fn))
+            tts_file.write_text(generate_tts(script, profile, client, log_fn))
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
             prompts_file.write_text(format_image_prompts(parse_image_prompts(
-                _generate_image_prompts(script, profile, client, log_fn))))
+                generate_image_prompts(script, profile, client, log_fn))))
             log_fn("✅  image_prompts.txt saved")
     tts_script = tts_file.read_text()
 
     prompts = parse_image_prompts(prompts_file.read_text())
     log_fn(f"📝  {len(prompts)} image prompts loaded")
 
-    images_on_disk = sum(1 for p in prompts if _find_image(out_dir / "images", p["num"]))
+    images_on_disk = sum(1 for p in prompts if find_image(out_dir / "images", p["num"]))
     log_fn(f"🖼   {images_on_disk}/{len(prompts)} images already on disk — skipping those")
 
     return _run_production(
-        _topic_from_script(script), prompts, tts_script, profile, out_dir,
+        topic_from_script(script), prompts, tts_script, profile, out_dir,
         log_fn, stop_event, skip_existing_images=True,
     )
 
@@ -408,7 +408,7 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
                                 out_dir, client, log_fn, stop_event)
 
 
-def _topic_from_script(script: str) -> str:
+def topic_from_script(script: str) -> str:
     """Slug source for a premade script: its TITLE: line, else its first line."""
     for line in script.splitlines():
         line = line.strip()
@@ -442,7 +442,7 @@ def run_from_script(script: str, profile: "Profile", topic: str = "",
     if not check_keys(profile, log_fn):
         return {"status": "error", "reason": "missing API keys"}
 
-    topic   = topic.strip() or _topic_from_script(script)
+    topic   = topic.strip() or topic_from_script(script)
     out_dir = make_output_dir(slugify(topic))
     (out_dir / "profile.txt").write_text(profile.name)
     (out_dir / "script.txt").write_text(script)

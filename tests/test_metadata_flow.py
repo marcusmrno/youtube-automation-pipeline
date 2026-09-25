@@ -201,7 +201,7 @@ def _fake_render(prompts, run_dir, profile, log_fn):
 def test_description_is_told_the_real_audio_length(tmp_path, monkeypatch):
     # chapters came from the script's planned times: 3 of 12 started after a real run's audio ended
     import metadata
-    from prompts import _build_metadata_desc_hashtags_prompt
+    from prompts import build_metadata_desc_hashtags_prompt
     _stub_metadata_internals(monkeypatch, metadata)
     monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
     monkeypatch.setattr(metadata, "_render_thumbnails", _fake_render)
@@ -216,7 +216,7 @@ def test_description_is_told_the_real_audio_length(tmp_path, monkeypatch):
     assert seen.get("audio_secs") == 1.0
 
     profile = MagicMock(channel={"niche": "n", "tone": "t"})
-    prompt = _build_metadata_desc_hashtags_prompt("T", "S", [], profile, audio_secs=636.1)
+    prompt = build_metadata_desc_hashtags_prompt("T", "S", [], profile, audio_secs=636.1)
     assert "10:36" in prompt
 
 

@@ -7,7 +7,7 @@ import yaml
 from pathlib import Path
 
 from images import (
-    generate_image_google, _load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
+    generate_image_google, load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
 )
 from .claude_helpers import MODEL
 
@@ -19,7 +19,7 @@ def _roster(profile_yaml: dict) -> list[dict]:
 
 def _generate_anchor(prompt: str, output_path: Path, profile_yaml: dict, anchors_dir: Path) -> bool:
     image_style = profile_yaml["image_style"]
-    anchor_parts = _load_anchors_from_dir(anchors_dir, image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
+    anchor_parts = load_anchors_from_dir(anchors_dir, image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
     return generate_image_google(
         prompt, output_path, profile=None, log_fn=print,
         model=profile_yaml["image_gen"]["default_model"],

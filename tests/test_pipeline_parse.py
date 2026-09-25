@@ -91,8 +91,8 @@ def test_split_agent_output_no_notes_when_script_only():
     ("SCRIPT", "no tags here", ""),
 ])
 def test_extract(tag, text, expected):
-    from prompts import _extract
-    assert _extract(tag, text) == expected
+    from prompts import extract
+    assert extract(tag, text) == expected
 
 
 def test_prompt_parsers_skip_rows_without_a_real_number():

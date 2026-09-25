@@ -17,7 +17,7 @@ from pathlib import Path
 
 import anthropic
 from pipeline import require_keys, ANTHROPIC_KEY
-from writing import _generate_tts_and_prompts, parse_image_prompts
+from writing import generate_tts_and_prompts, parse_image_prompts
 from channel_profile import load_profile, list_profiles
 
 
@@ -62,7 +62,7 @@ def main():
     print(f"🎨  Profile: {args.profile}")
     print(f"📁  Output:  {out_dir}\n")
 
-    tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log)
+    tts_script, image_prompts_raw = generate_tts_and_prompts(script, profile, client, log)
 
     tts_out    = out_dir / "tts_script.txt"
     prompts_out = out_dir / "image_prompts.txt"

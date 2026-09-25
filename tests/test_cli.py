@@ -64,7 +64,7 @@ def test_preview_never_overwrites_a_runs_prompts(tmp_path, monkeypatch):
     (run / "script.txt").write_text("TITLE: T\nbody")
     (run / "image_prompts.txt").write_text("001 | s | ORIGINAL prompt")
     monkeypatch.setattr(preview_prompts, "load_profile", lambda name: f"<profile {name}>")
-    monkeypatch.setattr(preview_prompts, "_generate_tts_and_prompts", lambda *a: ("NEW TTS", "001 | s | NEW"))
+    monkeypatch.setattr(preview_prompts, "generate_tts_and_prompts", lambda *a: ("NEW TTS", "001 | s | NEW"))
     monkeypatch.setattr(sys, "argv", ["preview_prompts.py", str(run / "script.txt"), "--profile", "p"])
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")                  # past the key check, to the guard
     with pytest.raises(SystemExit) as exc:
@@ -140,7 +140,7 @@ def test_preview_checks_its_key_before_doing_anything(tmp_path, monkeypatch):
     (tmp_path / "script.txt").write_text("TITLE: T\nbody")
     called = []
     monkeypatch.setattr(preview_prompts, "load_profile", lambda name: f"<profile {name}>")
-    monkeypatch.setattr(preview_prompts, "_generate_tts_and_prompts", lambda *a: called.append(a) or ("t", "p"))
+    monkeypatch.setattr(preview_prompts, "generate_tts_and_prompts", lambda *a: called.append(a) or ("t", "p"))
     out = tmp_path / "preview"
     monkeypatch.setattr(sys, "argv", ["preview_prompts.py", str(tmp_path / "script.txt"),
                                       "--profile", "p", "--out", str(out)])

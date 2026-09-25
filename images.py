@@ -39,7 +39,7 @@ def _get_genai_client() -> "genai.Client":
     return genai.Client(api_key=GOOGLE_KEY)
 
 
-def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
+def standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
     """Center-crop to `size`'s aspect ratio and resize to `size` in place."""
     ImageOps.fit(Image.open(path).convert("RGB"), size, Image.LANCZOS).save(path)
 
@@ -72,7 +72,7 @@ def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitud
     log_fn(f"  🎞️  Flicker frames saved: flicker/{b_path.name}, flicker/{c_path.name}")
 
 
-def _find_image(img_dir: Path, num: str) -> Path | None:
+def find_image(img_dir: Path, num: str) -> Path | None:
     for ext in (".png", ".jpg", ".jpeg"):
         p = img_dir / f"{num}{ext}"
         if p.exists() and p.stat().st_size:   # a 0-byte file is a crashed write, not an image
@@ -124,7 +124,7 @@ def build_preamble(image_style: dict, anchors_dir: Path | None = None) -> str:
     return f"{refs}\n\nSTYLE CONSTRAINTS: {constraints}\n\n"
 
 
-def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
+def load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
     """Pre-load anchor images from a directory as genai Parts."""
     reference_files = _anchor_files(anchors_dir, max_anchors)
     return [
@@ -133,9 +133,9 @@ def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
     ]
 
 
-def _load_anchor_parts(profile: "Profile") -> list:
+def load_anchor_parts(profile: "Profile") -> list:
     """Pre-load anchor images as genai Parts. Call once per run, not per image."""
-    return _load_anchors_from_dir(profile.anchors_dir, profile.image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
+    return load_anchors_from_dir(profile.anchors_dir, profile.image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
 
 
 def generate_image_google(prompt: str, output_path: Path, profile: "Profile", log_fn,
@@ -147,7 +147,7 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
         model = profile.image_gen["default_model"]
 
     if anchor_parts is None:
-        anchor_parts = _load_anchor_parts(profile)
+        anchor_parts = load_anchor_parts(profile)
 
     if preamble is None:
         preamble = build_preamble(profile.image_style, profile.anchors_dir)
@@ -175,7 +175,7 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
                     final_path.write_bytes(part.inline_data.data)
                     if final_path != output_path and output_path.exists():
                         output_path.unlink()
-                    _standardize_image(final_path, standardize_size)
+                    standardize_image(final_path, standardize_size)
                     return True
             log_fn(f"  ⚠️  Google AI returned no image in response")
             time.sleep(3)
@@ -190,7 +190,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
                         profile: "Profile", log_fn, stop_event=None, skip_existing=False,
                         max_workers: int = 4) -> dict:
     """Generate images concurrently (rate-limited by max_workers). Returns {num: path} for successful images."""
-    anchor_parts = _load_anchor_parts(profile)
+    anchor_parts = load_anchor_parts(profile)
     results = {}
     total = len(prompts)
 
@@ -206,7 +206,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
         if not ok:
             log_fn(f"  ❌ Image {num} failed after 3 attempts — flagged")
             return num, None
-        found = _find_image(out_dir / "images", num) or img_path
+        found = find_image(out_dir / "images", num) or img_path
         flicker_cfg = profile.image_gen.get("flicker", {})
         if flicker_cfg.get("enabled"):
             magnitude = flicker_cfg.get("magnitude", 0.004)
@@ -219,7 +219,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
             if stop_event and stop_event.is_set():
                 break
             num = p["num"]
-            existing = _find_image(out_dir / "images", num)
+            existing = find_image(out_dir / "images", num)
             if skip_existing and existing:
                 results[num] = existing
                 continue

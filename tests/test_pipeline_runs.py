@@ -77,8 +77,8 @@ def resumable(monkeypatch, run_env):
     monkeypatch.setattr(pipeline.anthropic, "Anthropic", lambda **k: client)
     monkeypatch.setattr(writing, "_stream_text",
                         lambda *a, **k: calls.append("sonnet prompts") or "===IMAGE_PROMPTS===\n001 | s | none | scene")
-    monkeypatch.setattr(writing, "_build_tts_prompt", lambda *a: "tts prompt")
-    monkeypatch.setattr(writing, "_build_image_prompt_instructions", lambda *a: "prompt instructions")
+    monkeypatch.setattr(writing, "build_tts_prompt", lambda *a: "tts prompt")
+    monkeypatch.setattr(writing, "build_image_prompt_instructions", lambda *a: "prompt instructions")
     monkeypatch.setattr(pipeline, "_run_production",
                         lambda topic, prompts, tts, *a, **k: produced.update(tts=tts, prompts=prompts) or {"status": "complete"})
     run = run_env / "r1"
@@ -115,14 +115,14 @@ def test_empty_script_aborts_before_approval(monkeypatch, run_env):
 def test_untagged_model_replies_are_errors(monkeypatch):
     reply = SimpleNamespace(content=[SimpleNamespace(text="Here is the narration, no tag at all.")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: reply))
-    monkeypatch.setattr(writing, "_build_tts_prompt", lambda *a: "p")
-    monkeypatch.setattr(writing, "_build_image_prompt_instructions", lambda *a: "p")
+    monkeypatch.setattr(writing, "build_tts_prompt", lambda *a: "p")
+    monkeypatch.setattr(writing, "build_image_prompt_instructions", lambda *a: "p")
     monkeypatch.setattr(writing, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
     profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
     with pytest.raises(ValueError, match="TTS_SCRIPT"):
-        writing._generate_tts("script", profile, client, lambda m: None)
+        writing.generate_tts("script", profile, client, lambda m: None)
     with pytest.raises(ValueError, match="IMAGE_PROMPTS"):
-        writing._generate_image_prompts("script", profile, client, lambda m: None)
+        writing.generate_image_prompts("script", profile, client, lambda m: None)
 
 
 def test_resume_regenerates_an_empty_tts_script(resumable):
@@ -197,7 +197,7 @@ def test_regenerate_rejects_an_unknown_model_key(monkeypatch, run_env):
     (run_env / "r1").mkdir()
     (run_env / "r1" / "image_prompts.txt").write_text("001 | s | p")
     profile = SimpleNamespace(image_gen={"default_model": "flash", "pro_model": "pro"}, image_style={})
-    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(pipeline, "load_anchor_parts", lambda p: [])
     assert pipeline.regenerate_images("r1", ["1"], "3-pr0", profile)["status"] == "error"
     assert calls == []
     pipeline.regenerate_images("r1", ["1"], "3-pro", profile)

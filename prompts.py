@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from channel_profile import Profile
 
 
-def _extract(tag: str, text: str) -> str:
+def extract(tag: str, text: str) -> str:
     """The last ===TAG=== block, up to the next ===TAG=== (spacing, case and **bold** tolerated).
 
     Only a real tag ends a block, so a '=====' divider or '=== Part 2 ===' inside it survives;
@@ -20,7 +20,7 @@ def _extract(tag: str, text: str) -> str:
     return blocks[-1].strip() if blocks else ""
 
 
-def _build_research_prompt(topic: str) -> str:
+def build_research_prompt(topic: str) -> str:
     return f"""
 You are a research assistant preparing verified facts for a YouTube educational video script.
 
@@ -48,7 +48,7 @@ Return your response in this exact format:
 """
 
 
-def _build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:
+def build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:
     c = profile.channel
     template = f"""
 You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
@@ -75,7 +75,7 @@ Return only the numbered questions and defaults, no preamble or closing text."""
     return template
 
 
-def _build_approach_pitch_prompt(topic: str, answers: str, profile: "Profile") -> str:
+def build_approach_pitch_prompt(topic: str, answers: str, profile: "Profile") -> str:
     c = profile.channel
     template = f"""
 You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
@@ -108,7 +108,7 @@ Format as:
     return template
 
 
-def _word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
+def word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
     """wpm-derived word counts for a profile's script config.
 
     Returns (target_words, min_words, max_words, hook_words, cta_words, section_min, section_max).
@@ -125,10 +125,10 @@ def _word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
     )
 
 
-def _build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
+def build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = word_budget(s)
     hook_end = f"{s['hook_duration_s'] // 60}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 1:15, not 0:75
 
     approach_section = ""
@@ -191,8 +191,8 @@ Return your response in this exact format — no other text:
     return template
 
 
-def _build_tts_prompt(script: str, profile: "Profile") -> str:
-    target_words = _word_budget(profile.script)[0]
+def build_tts_prompt(script: str, profile: "Profile") -> str:
+    target_words = word_budget(profile.script)[0]
     template = f"""
 You are preparing a TTS narration for ElevenLabs {profile.voice.get("model", "eleven_v3")} from a finished YouTube video script.
 
@@ -283,7 +283,7 @@ Return only this, no other text:
     return template
 
 
-def _build_image_prompt_instructions(profile: "Profile") -> str:
+def build_image_prompt_instructions(profile: "Profile") -> str:
     s = profile.script
 
     style       = profile.image_style["art_style_block"].strip()
@@ -415,10 +415,10 @@ Return only:
     return template
 
 
-def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
+def build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words, min_words, _, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    target_words, min_words, _, hook_words, cta_words, section_min, section_max = word_budget(s)
     hook_end = f"{s['hook_duration_s'] // 60:02d}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 01:15
 
 
@@ -500,9 +500,9 @@ Return the finished script in this exact format — nothing after it:
 """
 
 
-def _build_vet_prompt(profile: "Profile") -> str:
+def build_vet_prompt(profile: "Profile") -> str:
     s = profile.script
-    _, min_words, max_words, *_ = _word_budget(s)
+    _, min_words, max_words, *_ = word_budget(s)
 
     return f"""
 You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
@@ -533,7 +533,7 @@ Return the vetted script in this exact format — nothing after it:
 """
 
 
-def _build_agent_system_prompt(topic: str, profile: "Profile") -> str:
+def build_agent_system_prompt(topic: str, profile: "Profile") -> str:
     c = profile.channel
     char_block = profile.characters_block()
     style      = profile.image_style["art_style_block"].strip()
@@ -558,7 +558,7 @@ TOPIC: {topic}
 """
 
 
-def _build_metadata_titles_prompt(
+def build_metadata_titles_prompt(
     topic: str,
     script: str,
     research: str,
@@ -602,7 +602,7 @@ Return ONLY this format:
     return template
 
 
-def _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs=None) -> str:
+def build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs=None) -> str:
     c = profile.channel
     kw_line = ", ".join(k.get("keyword", "") for k in keywords if k.get("keyword"))
     kw_section = f"\nTop keywords to weave in naturally: {kw_line}\n" if kw_line else ""
@@ -646,7 +646,7 @@ Return ONLY this format:
     return template
 
 
-def _build_metadata_thumbnail_prompt(script, topic, profile) -> str:
+def build_metadata_thumbnail_prompt(script, topic, profile) -> str:
     c = profile.channel
     chars = profile.characters_block()
     style = profile.image_style["art_style_block"]

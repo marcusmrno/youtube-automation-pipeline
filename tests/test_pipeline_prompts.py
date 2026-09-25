@@ -34,8 +34,8 @@ def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
 
 
 def test_build_script_prompt_injects_channel_identity(test_profile):
-    from prompts import _build_script_prompt
-    prompt = _build_script_prompt("test topic", "fake research", test_profile)
+    from prompts import build_script_prompt
+    prompt = build_script_prompt("test topic", "fake research", test_profile)
     assert test_profile.channel["niche"] in prompt
     assert test_profile.channel["audience"] in prompt
     assert test_profile.channel["tone"] in prompt
@@ -45,15 +45,15 @@ def test_build_script_prompt_injects_channel_identity(test_profile):
 
 
 def test_build_tts_prompt_injects_tone_description(test_profile):
-    from prompts import _build_tts_prompt
-    prompt = _build_tts_prompt("Some script text here.", test_profile)
+    from prompts import build_tts_prompt
+    prompt = build_tts_prompt("Some script text here.", test_profile)
     assert test_profile.voice["tone_description"] in prompt
     assert "Some script text here." in prompt
 
 
 def test_build_image_prompt_instructions_injects_characters(test_profile):
-    from prompts import _build_image_prompt_instructions
-    instructions = _build_image_prompt_instructions(test_profile)
+    from prompts import build_image_prompt_instructions
+    instructions = build_image_prompt_instructions(test_profile)
     assert "Test Cat" in instructions
     assert "round head" in instructions
     assert "Other Cat" in instructions
@@ -61,16 +61,16 @@ def test_build_image_prompt_instructions_injects_characters(test_profile):
 
 
 def test_build_agent_script_prompt_injects_channel_identity(test_profile):
-    from prompts import _build_agent_script_prompt
-    prompt = _build_agent_script_prompt(test_profile)
+    from prompts import build_agent_script_prompt
+    prompt = build_agent_script_prompt(test_profile)
     assert test_profile.channel["niche"] in prompt
     assert test_profile.channel["tone"] in prompt
     assert str(test_profile.script["target_mins"]) in prompt
 
 
 def test_build_agent_system_prompt_uses_profile(test_profile):
-    from prompts import _build_agent_system_prompt
-    prompt = _build_agent_system_prompt("test topic", test_profile)
+    from prompts import build_agent_system_prompt
+    prompt = build_agent_system_prompt("test topic", test_profile)
     assert test_profile.channel["niche"] in prompt
     assert "test topic" in prompt
 
@@ -105,28 +105,28 @@ def test_image_prompt_request_does_not_ask_for_timestamps(test_profile, monkeypa
     sent = []
     monkeypatch.setattr(writing, "_stream_text", lambda client, **k: sent.append(k["messages"][0]["content"])
                         or "===IMAGE_PROMPTS===\n001 | s | none | scene")
-    writing._generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
+    writing.generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
     assert not re.search(r"(?i)timestamps (are|must)|contiguous|segment of the script", sent[0])
 
 
 def test_script_agent_and_vet_prompts_share_one_word_range(test_profile):
     # the vet (Haiku, rewriting Opus's script) capped narration at the target the agent may exceed
-    from prompts import _word_budget, _build_script_prompt, _build_agent_script_prompt, _build_vet_prompt
-    _, min_words, max_words, *_ = _word_budget(test_profile.script)
+    from prompts import word_budget, build_script_prompt, build_agent_script_prompt, build_vet_prompt
+    _, min_words, max_words, *_ = word_budget(test_profile.script)
     floor = round(min_words * 1.1)
-    assert f"under {floor}" in _build_script_prompt("t", "research", test_profile)
-    assert f"under {floor}" in _build_agent_script_prompt(test_profile)
-    assert f"{floor}-{max_words} words" in _build_vet_prompt(test_profile)
+    assert f"under {floor}" in build_script_prompt("t", "research", test_profile)
+    assert f"under {floor}" in build_agent_script_prompt(test_profile)
+    assert f"{floor}-{max_words} words" in build_vet_prompt(test_profile)
 
 
 def test_prompts_follow_the_profiles_durations(test_profile):
     from dataclasses import replace
-    from prompts import (_build_script_prompt, _build_agent_script_prompt, _build_tts_prompt,
-                         _build_image_prompt_instructions)
+    from prompts import (build_script_prompt, build_agent_script_prompt, build_tts_prompt,
+                         build_image_prompt_instructions)
     p = replace(test_profile, script={**test_profile.script, "hook_duration_s": 75, "target_mins": 8})
-    for hook_prompt in (_build_script_prompt("t", "r", p), _build_agent_script_prompt(p)):
+    for hook_prompt in (build_script_prompt("t", "r", p), build_agent_script_prompt(p)):
         assert "0:75" not in hook_prompt and "1:15" in hook_prompt      # a 75 s hook ends at 1:15
-    assert "-02:00]" not in _build_agent_script_prompt(p)              # SECTION 1 no longer ends at 02:00
-    tts, images = _build_tts_prompt("s", p), _build_image_prompt_instructions(p)
+    assert "-02:00]" not in build_agent_script_prompt(p)              # SECTION 1 no longer ends at 02:00
+    tts, images = build_tts_prompt("s", p), build_image_prompt_instructions(p)
     assert "8-minute" in tts and "12-minute" not in tts
     assert "8-minute" in images and "14-minute" not in images

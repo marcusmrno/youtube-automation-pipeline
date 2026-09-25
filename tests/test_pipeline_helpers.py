@@ -9,7 +9,7 @@ import images
 import pipeline
 import writing
 from images import build_preamble, generate_all_images, GENERIC_ANCHOR_REFS
-from pipeline import _topic_from_script, slugify
+from pipeline import topic_from_script, slugify
 from writing import _expand_short_prompts, _stream_text
 
 
@@ -130,11 +130,11 @@ def test_build_preamble(tmp_path):
 
 
 def test_topic_from_script():
-    assert _topic_from_script("TITLE: The Real Reason\nKEYWORDS: a, b\n") == "The Real Reason"
-    assert _topic_from_script("\n\n  title: lower case works\n") == "lower case works"
-    assert _topic_from_script("No title line here\nsecond line") == "No title line here"
-    assert _topic_from_script("   \n\n") == "untitled"
-    assert slugify(_topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
+    assert topic_from_script("TITLE: The Real Reason\nKEYWORDS: a, b\n") == "The Real Reason"
+    assert topic_from_script("\n\n  title: lower case works\n") == "lower case works"
+    assert topic_from_script("No title line here\nsecond line") == "No title line here"
+    assert topic_from_script("   \n\n") == "untitled"
+    assert slugify(topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
 
 
 def test_stop_halts_queued_images(monkeypatch, tmp_path):
@@ -147,7 +147,7 @@ def test_stop_halts_queued_images(monkeypatch, tmp_path):
         stop.set()         # ...then the user hits stop
         return True
 
-    monkeypatch.setattr(images, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "load_anchor_parts", lambda profile: [])
     monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     results = generate_all_images(
@@ -181,7 +181,7 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
         time.sleep(0.05)
         return True
 
-    monkeypatch.setattr(images, "_load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "load_anchor_parts", lambda profile: [])
     monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     with pytest.raises(KeyboardInterrupt):
@@ -225,7 +225,7 @@ def test_ui_slug_check_still_rejects_paths(bad):
     ("Subtitle: not a title line", "Subtitle: not a title line"),
 ])
 def test_topic_from_script_finds_the_title(script, topic):
-    assert _topic_from_script(script) == topic
+    assert topic_from_script(script) == topic
 
 
 def test_preamble_describes_exactly_the_anchors_sent(tmp_path):
