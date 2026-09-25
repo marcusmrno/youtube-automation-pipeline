@@ -199,3 +199,14 @@ def test_a_jpeg_seed_is_installed_where_it_will_be_sent(tmp_path, monkeypatch):
     assert (anchors / "anchor-00.png").exists() and not list(anchors.glob("anchor-00.jp*"))
     manifest = yaml.safe_load((anchors / "manifest.yaml").read_text())
     assert manifest[0]["label"] == "anchor-00"                        # described as the first reference
+
+
+def test_character_free_profiles_get_no_invented_character():
+    # those anchors ride along with every image, pushing a figure into a character-free channel
+    from profile_creator.anchors import build_anchor_plan
+    no_cast = yaml.safe_load(PROFILE_YAML)
+    no_cast.pop("characters")
+    purposes = [s["purpose"].lower() for s in build_anchor_plan(no_cast)]
+    assert not any("one character" in p or "portrait" in p for p in purposes), purposes
+    with_cast = build_anchor_plan(yaml.safe_load(PROFILE_YAML))
+    assert any("portrait" in s["purpose"].lower() for s in with_cast)      # unchanged with a roster
