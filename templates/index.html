@@ -1009,16 +1009,6 @@ html, body {
   flex-direction: column;
   gap: 10px;
 }
-.lightbox-prompt-label {
-  font-family: var(--display);
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--dim);
-  margin-bottom: 6px;
-  display: block;
-}
 .lightbox-prompt-text {
   font-family: var(--mono);
   font-size: 0.68rem;
@@ -1044,16 +1034,6 @@ html, body {
 }
 .lightbox-script-section::-webkit-scrollbar { width: 4px; }
 .lightbox-script-section::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
-.lightbox-script-title {
-  font-family: var(--display);
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--blue);
-  margin-bottom: 5px;
-  display: block;
-}
 
 .lightbox-prompt-details {
   border-top: 1px solid var(--border);
@@ -1804,7 +1784,7 @@ function handleEvent(event) {
 
   else if (event.type === 'metadata_done') {
     // Refresh the metadata results panel as soon as the JSON is on disk.
-    if (typeof loadMetadata === 'function') loadMetadata();
+    loadMetadata();
   }
 
   else if (event.type === 'done') {
@@ -1815,7 +1795,7 @@ function handleEvent(event) {
       // Don't touch pipeline stage chips for a metadata run.
       if (currentStage) closeLogSection(currentStage);
       setRunFinished(ok);
-      if (typeof loadMetadata === 'function') loadMetadata();
+      loadMetadata();
     } else {
       if (ok) completeAllStages();
       setRunFinished(ok);
@@ -2616,7 +2596,7 @@ document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
 
 <script>
 // ── Metadata mode ──────────────────────────────────────────────────────────
-// Hoisted to module scope so setMode() and runPipeline() can call into it.
+// Page-level functions (both script blocks share one scope): setMode() and runPipeline() call into them.
 
 function getMetadataSlug() {
   const picker = document.getElementById('metadataRunPicker');
