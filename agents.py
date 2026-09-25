@@ -64,10 +64,11 @@ async def run_vidiq_agent(
             for block in message.content:
                 if isinstance(block, TextBlock) and block.text.strip():
                     log_fn(f"  {block.text[:120].strip()}")
-                    full_text += block.text
+                    full_text += block.text + "\n"
         elif isinstance(message, ResultMessage):
-            if message.result:
-                full_text += message.result
+            # result repeats the last assistant text; appending it would duplicate the final block
+            if message.result and not full_text:
+                full_text = message.result
     return full_text
 
 
