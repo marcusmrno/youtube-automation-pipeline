@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 
 import anthropic
-from pipeline import _generate_tts_and_prompts, parse_image_prompts, require_keys, ANTHROPIC_KEY
+from pipeline import require_keys, ANTHROPIC_KEY
+from writing import _generate_tts_and_prompts, parse_image_prompts
 from channel_profile import load_profile, list_profiles
 
 

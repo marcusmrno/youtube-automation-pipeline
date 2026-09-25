@@ -8,6 +8,7 @@ import pytest
 import images
 import pipeline
 import voiceover
+import writing
 
 PROFILE = SimpleNamespace(name="p", voice={"voice_id": "v"}, image_gen={}, image_style={})
 
@@ -74,10 +75,10 @@ def resumable(monkeypatch, run_env):
     reply = SimpleNamespace(content=[SimpleNamespace(text="===TTS_SCRIPT===\nNEW TTS")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: calls.append("haiku tts") or reply))
     monkeypatch.setattr(pipeline.anthropic, "Anthropic", lambda **k: client)
-    monkeypatch.setattr(pipeline, "_stream_text",
+    monkeypatch.setattr(writing, "_stream_text",
                         lambda *a, **k: calls.append("sonnet prompts") or "===IMAGE_PROMPTS===\n001 | s | none | scene")
-    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "tts prompt")
-    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "prompt instructions")
+    monkeypatch.setattr(writing, "_build_tts_prompt", lambda *a: "tts prompt")
+    monkeypatch.setattr(writing, "_build_image_prompt_instructions", lambda *a: "prompt instructions")
     monkeypatch.setattr(pipeline, "_run_production",
                         lambda topic, prompts, tts, *a, **k: produced.update(tts=tts, prompts=prompts) or {"status": "complete"})
     run = run_env / "r1"
@@ -114,14 +115,14 @@ def test_empty_script_aborts_before_approval(monkeypatch, run_env):
 def test_untagged_model_replies_are_errors(monkeypatch):
     reply = SimpleNamespace(content=[SimpleNamespace(text="Here is the narration, no tag at all.")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: reply))
-    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "p")
-    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "p")
-    monkeypatch.setattr(pipeline, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
+    monkeypatch.setattr(writing, "_build_tts_prompt", lambda *a: "p")
+    monkeypatch.setattr(writing, "_build_image_prompt_instructions", lambda *a: "p")
+    monkeypatch.setattr(writing, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
     profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
     with pytest.raises(ValueError, match="TTS_SCRIPT"):
-        pipeline._generate_tts("script", profile, client, lambda m: None)
+        writing._generate_tts("script", profile, client, lambda m: None)
     with pytest.raises(ValueError, match="IMAGE_PROMPTS"):
-        pipeline._generate_image_prompts("script", profile, client, lambda m: None)
+        writing._generate_image_prompts("script", profile, client, lambda m: None)
 
 
 def test_resume_regenerates_an_empty_tts_script(resumable):

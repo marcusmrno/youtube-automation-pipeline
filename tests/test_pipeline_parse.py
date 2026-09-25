@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline import parse_image_prompts
+from writing import parse_image_prompts
 
 
 def test_parse_new_format_source_field():
@@ -97,7 +97,7 @@ def test_extract(tag, text, expected):
 
 def test_prompt_parsers_skip_rows_without_a_real_number():
     # an echoed format row became a billed image called "NNN.png"
-    from pipeline import _expand_short_prompts
+    from writing import _expand_short_prompts
     from types import SimpleNamespace
     profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
     raw = "NNN | [exact source sentence] | [character] | [scene]\n- 002 | s | none | b\n**003** | s | none | c\n012b | s | none | d"

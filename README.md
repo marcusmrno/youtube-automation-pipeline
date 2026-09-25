@@ -372,7 +372,8 @@ python -m pytest tests -q
 
 ```
 youtube-pipeline/
-├── pipeline.py           # core orchestrator — all stage logic and resumability
+├── pipeline.py           # run orchestration: run / resume / status / regenerate, run folders, key checks, CLI
+├── writing.py            # Claude text calls (research, planning, script, revise, TTS, image prompts)
 ├── images.py             # Gemini image generation, anchor references, image files on disk
 ├── voiceover.py          # ElevenLabs voiceover: chunking, MP3 splicing
 ├── prompts.py            # LLM prompt builders — pure functions, no API calls

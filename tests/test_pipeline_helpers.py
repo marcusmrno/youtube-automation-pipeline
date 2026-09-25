@@ -7,8 +7,10 @@ import anthropic
 import pytest
 import images
 import pipeline
+import writing
 from images import build_preamble, generate_all_images, GENERIC_ANCHOR_REFS
-from pipeline import _expand_short_prompts, _stream_text, _topic_from_script, slugify
+from pipeline import _topic_from_script, slugify
+from writing import _expand_short_prompts, _stream_text
 
 
 class _Profile:
@@ -92,7 +94,7 @@ class _FakeClient:
 
 
 def test_stream_text_retry(monkeypatch):
-    monkeypatch.setattr(pipeline.time, "sleep", lambda s: None)   # don't actually back off
+    monkeypatch.setattr(writing.time, "sleep", lambda s: None)   # don't actually back off
 
     c = _FakeClient(fails=2)
     assert _stream_text(c, model="m", max_tokens=1, messages=[]) == "OK"

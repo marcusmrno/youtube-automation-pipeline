@@ -13,9 +13,9 @@ import threading
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
 from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
-                      regenerate_images, parse_image_prompts, revise_script,
-                      run_status, ANTHROPIC_KEY,
-                      generate_clarifying_questions, generate_approach_pitches)
+                      regenerate_images, run_status, ANTHROPIC_KEY)
+from writing import (generate_approach_pitches, generate_clarifying_questions, parse_image_prompts,
+                     revise_script)
 from channel_profile import load_profile, list_profiles
 import metadata as _metadata_mod
 

@@ -34,12 +34,10 @@ from pipeline import (
     resume_pipeline,
     run_from_script,
     _topic_from_script,
-    revise_script,
     run_status,
     slugify,
-    generate_clarifying_questions,
-    generate_approach_pitches,
 )
+from writing import generate_approach_pitches, generate_clarifying_questions, revise_script
 from channel_profile import load_profile, list_profiles
 
 load_dotenv()

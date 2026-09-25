@@ -34,7 +34,7 @@ def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
 
 
 def test_build_script_prompt_injects_channel_identity(test_profile):
-    from pipeline import _build_script_prompt
+    from prompts import _build_script_prompt
     prompt = _build_script_prompt("test topic", "fake research", test_profile)
     assert test_profile.channel["niche"] in prompt
     assert test_profile.channel["audience"] in prompt
@@ -45,14 +45,14 @@ def test_build_script_prompt_injects_channel_identity(test_profile):
 
 
 def test_build_tts_prompt_injects_tone_description(test_profile):
-    from pipeline import _build_tts_prompt
+    from prompts import _build_tts_prompt
     prompt = _build_tts_prompt("Some script text here.", test_profile)
     assert test_profile.voice["tone_description"] in prompt
     assert "Some script text here." in prompt
 
 
 def test_build_image_prompt_instructions_injects_characters(test_profile):
-    from pipeline import _build_image_prompt_instructions
+    from prompts import _build_image_prompt_instructions
     instructions = _build_image_prompt_instructions(test_profile)
     assert "Test Cat" in instructions
     assert "round head" in instructions
@@ -69,7 +69,7 @@ def test_build_agent_script_prompt_injects_channel_identity(test_profile):
 
 
 def test_build_agent_system_prompt_uses_profile(test_profile):
-    from pipeline import _build_agent_system_prompt
+    from prompts import _build_agent_system_prompt
     prompt = _build_agent_system_prompt("test topic", test_profile)
     assert test_profile.channel["niche"] in prompt
     assert "test topic" in prompt
@@ -101,11 +101,11 @@ def test_generate_voiceover_uses_profile_voice_settings(test_profile, tmp_path):
 def test_image_prompt_request_does_not_ask_for_timestamps(test_profile, monkeypatch):
     # the line format has no timestamp column; asking for one shifts every field when obeyed
     import re
-    import pipeline
+    import writing
     sent = []
-    monkeypatch.setattr(pipeline, "_stream_text", lambda client, **k: sent.append(k["messages"][0]["content"])
+    monkeypatch.setattr(writing, "_stream_text", lambda client, **k: sent.append(k["messages"][0]["content"])
                         or "===IMAGE_PROMPTS===\n001 | s | none | scene")
-    pipeline._generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
+    writing._generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
     assert not re.search(r"(?i)timestamps (are|must)|contiguous|segment of the script", sent[0])
 
 

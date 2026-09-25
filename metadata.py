@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 
 import anthropic
 
-from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL
+from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT
+from writing import HAIKU_MODEL
 from images import generate_image_google, _load_anchor_parts, _find_image
 from agents import run_vidiq_agent, VIDIQ_KEY
 from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
