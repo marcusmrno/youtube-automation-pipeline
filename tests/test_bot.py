@@ -399,3 +399,14 @@ def test_planning_checks_keys_before_paying_for_questions(monkeypatch):
     u = _update()
     run(bot.cmd_run(u, _context("cats")))
     assert asked == [] and "Missing API keys" in u.message.replies[-1]
+
+
+def test_revise_gets_the_scripts_title_as_topic(monkeypatch, tmp_path):
+    topics = []
+    monkeypatch.setattr(bot, "revise_script", lambda script, fb, topic, profile, client: topics.append(topic) or "R")
+    monkeypatch.setattr(bot, "_send_script_for_review", _noop)
+    (tmp_path / "why-cats-rule").mkdir()
+    (tmp_path / "why-cats-rule" / "script.txt").write_text("TITLE: Why Cats Rule\nbody")
+    bot._state.update(running=True, run_slug="why-cats-rule", revision_mode=True)
+    run(bot.on_text(_update(text="shorter"), _context()))
+    assert topics == ["Why Cats Rule"]                       # not the slug

@@ -14,10 +14,9 @@ from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
 from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
                       regenerate_images, parse_image_prompts, revise_script,
-                      run_status, ANTHROPIC_KEY, VIDIQ_KEY,
+                      run_status, ANTHROPIC_KEY,
                       generate_clarifying_questions, generate_approach_pitches)
 from profile import load_profile, list_profiles
-from agents import run_vet_agent
 import metadata as _metadata_mod
 
 _noop_log = lambda _: None
@@ -557,11 +556,6 @@ def revise():
     try:
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         revised = revise_script(script, feedback, topic, profile, client)
-
-        if VIDIQ_KEY and revised and profile:
-            vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
-            if vetted:
-                revised = vetted
     except Exception as e:   # e.g. an Anthropic overload: the page needs JSON to re-enable Revise
         return jsonify({"ok": False, "error": str(e)})
 

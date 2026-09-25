@@ -1085,7 +1085,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         # off the event loop: a 10-20 s Sonnet call would otherwise freeze /stop and the buttons
-        revised = await asyncio.to_thread(revise_script, script, feedback, slug or "video", _profile, client)
+        revised = await asyncio.to_thread(revise_script, script, feedback, _topic_from_script(script), _profile, client)
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True

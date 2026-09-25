@@ -269,3 +269,13 @@ def test_planning_checks_keys_before_paying_for_questions(monkeypatch, run_dir):
     monkeypatch.setattr(ui, "generate_clarifying_questions", lambda *a: asked.append(a) or "1. Q?")
     r = ui.app.test_client().post("/clarifying_questions", json={"topic": "t"}).get_json()
     assert r["ok"] is False and "Missing API keys" in r["error"] and asked == []
+
+
+def test_revise_returns_the_revision_without_a_second_vet(monkeypatch, run_dir):
+    # the extra paid vidIQ vet pass could undo the feedback; the pipeline already vetted once
+    vetted = []
+    monkeypatch.setattr(ui, "VIDIQ_KEY", "key", raising=False)
+    monkeypatch.setattr(ui, "run_vet_agent", lambda *a: vetted.append(a) or "VETTED", raising=False)
+    monkeypatch.setattr(ui, "revise_script", lambda *a: "REVISED")
+    r = ui.app.test_client().post("/revise", json={"script": "s", "feedback": "f", "profile": "p"}).get_json()
+    assert r == {"ok": True, "script": "REVISED"} and vetted == []
