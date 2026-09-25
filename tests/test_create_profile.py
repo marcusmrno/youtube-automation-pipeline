@@ -149,3 +149,27 @@ def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     assert v2_dir.exists()
     assert (v2_dir / "profile.yaml").exists()
     assert (v2_dir / "style-sheet.md").exists()
+
+
+def _run_create_with(tmp_path, monkeypatch, inputs, yaml_text=PROFILE_YAML, seed=None):
+    """run_create with every Claude/Gemini call faked; returns the anchors dir."""
+    import profile_creator.new as m
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+    with patch("profile_creator.new.anthropic.Anthropic"), \
+         patch("profile_creator.new.clarification_loop", return_value=[]), \
+         patch("profile_creator.new.generate_profile_content", return_value=(yaml_text, "# Style\n")), \
+         patch("profile_creator.new.generate_anchor_prompts", side_effect=lambda c, y, s, plan: ({}, plan)), \
+         patch("profile_creator.new.run_verification_anchors"), \
+         patch("profile_creator.new.run_full_anchors", return_value={"ok": [], "failed": []}), \
+         patch("builtins.input", side_effect=inputs):
+        m.run_create(seed_image=seed)
+    return tmp_path
+
+
+def test_overwriting_a_profile_starts_from_an_empty_folder(tmp_path, monkeypatch):
+    # old-style anchors were skipped ("already exists") and used as references for the new ones
+    old = tmp_path / "my-channel" / "anchors"
+    old.mkdir(parents=True)
+    (old / "anchor-04.png").write_bytes(b"OLD STYLE")
+    _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel", "y"])
+    assert not (old / "anchor-04.png").exists()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import sys
 import yaml
 from pathlib import Path
@@ -40,6 +41,8 @@ def _choose_profile_name() -> str:
             overwrite = input(f"Profile '{name}' already exists. Overwrite? [y/N]: ").strip().lower()
             if overwrite != "y":
                 continue
+            # old anchors would be kept ("already exists") and used as references for the new ones
+            shutil.rmtree(dest)
         return name
 
 
@@ -62,7 +65,6 @@ def run_create(seed_image: str | None = None) -> None:
             sys.exit(1)
         anchors_dir.mkdir(parents=True, exist_ok=True)
         from pipeline import _standardize_image
-        import shutil
         dest = anchors_dir / ("anchor-00" + seed_path.suffix)
         shutil.copy2(seed_path, dest)
         _standardize_image(dest, (1280, 720))
