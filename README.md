@@ -154,6 +154,7 @@ python ui.py
 
 ```bash
 python pipeline.py "why humans sleep"
+python pipeline.py run "script writing tips"      # a topic starting with a command word needs "run"
 ```
 
 Already have a script? Skip research, writing, and the approval gate — go straight to

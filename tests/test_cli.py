@@ -87,3 +87,10 @@ def test_failed_runs_exit_nonzero(tmp_path, monkeypatch, unrunnable_profile):
     script.write_text("TITLE: T\nbody")
     assert run_cli(tmp_path, monkeypatch, "script", str(script)) == 1
     assert run_cli(tmp_path, monkeypatch, "run", "some topic") == 1
+
+
+def test_no_arguments_prints_usage_and_help_lists_every_command(tmp_path, monkeypatch, capsys):
+    assert run_cli(tmp_path, monkeypatch) == 2                       # was an AttributeError traceback
+    assert run_cli(tmp_path, monkeypatch, "--help") == 0
+    out = capsys.readouterr().out
+    assert all(cmd in out for cmd in ("run", "script", "metadata"))   # --help used to become 'run --help'

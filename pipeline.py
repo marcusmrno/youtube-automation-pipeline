@@ -1039,7 +1039,10 @@ if __name__ == "__main__":
 
     # Back-compat: if first arg isn't a known subcommand, treat as run
     argv = sys.argv[1:]
-    if argv and argv[0] not in {"run", "metadata", "script"}:
+    if not argv:
+        parser.print_help()
+        sys.exit(2)
+    if argv[0] not in {"run", "metadata", "script", "-h", "--help"}:
         argv = ["run"] + argv
 
     args = parser.parse_args(argv)
