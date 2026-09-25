@@ -352,8 +352,6 @@ regenerate selector in the UI picks between the two slots by alias:
 python -m pytest tests -q
 ```
 
-`tests/test_bot_script_mode.py` is still an assert-based check that runs when pytest imports it.
-
 ---
 
 ## Project structure
