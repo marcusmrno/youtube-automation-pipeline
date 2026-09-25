@@ -128,3 +128,35 @@ def test_resume_regenerates_an_empty_tts_script(resumable):
     pipeline.resume_pipeline("r1", resumable.profile)
     assert resumable.calls == ["haiku tts"]
     assert resumable.produced["tts"] == "NEW TTS"
+
+
+def _gemini_returning(data, monkeypatch):
+    part = SimpleNamespace(inline_data=SimpleNamespace(mime_type="image/png", data=data))
+    response = SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **k: response))
+    monkeypatch.setattr(pipeline, "_get_genai_client", lambda: client)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda s: None)
+
+
+def test_undecodable_image_never_replaces_a_good_one(monkeypatch, tmp_path):
+    from PIL import Image
+    good = tmp_path / "001.png"
+    Image.new("RGB", (4, 4)).save(good)
+    before = good.read_bytes()
+    _gemini_returning(b"\x89PNG-garbage", monkeypatch)
+    ok = pipeline.generate_image_google("p", good, None, lambda m: None, model="m", anchor_parts=[], preamble="")
+    assert ok is False
+    assert good.read_bytes() == before                  # a failed regen keeps the old image
+    fresh = tmp_path / "002.png"
+    assert pipeline.generate_image_google("p", fresh, None, lambda m: None, model="m",
+                                          anchor_parts=[], preamble="") is False
+    assert not fresh.exists()                          # nothing for resume to mistake as done
+
+
+def test_empty_image_file_counts_as_missing(run_env):
+    run = run_env / "r1"
+    (run / "images").mkdir(parents=True)
+    (run / "image_prompts.txt").write_text("001 | s | a\n002 | s | b")
+    (run / "images" / "001.png").write_bytes(b"")      # a crash mid-write
+    (run / "images" / "002.png").write_bytes(b"x")
+    assert pipeline.run_status("r1")["images_on_disk"] == 1

@@ -7,6 +7,7 @@ Usage: python pipeline.py "your topic here"
 from __future__ import annotations
 
 import functools
+import io
 import json
 import mimetypes
 import os
@@ -358,7 +359,7 @@ def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitud
 def _find_image(img_dir: Path, num: str) -> Path | None:
     for ext in (".png", ".jpg", ".jpeg"):
         p = img_dir / f"{num}{ext}"
-        if p.exists():
+        if p.exists() and p.stat().st_size:   # a 0-byte file is a crashed write, not an image
             return p
     return None
 
@@ -444,6 +445,8 @@ def generate_image_google(prompt: str, output_path: Path, profile: "Profile", lo
                 if part.inline_data and part.inline_data.mime_type.startswith("image/"):
                     ext        = ".jpg" if "jpeg" in part.inline_data.mime_type else ".png"
                     final_path = output_path.with_suffix(ext)
+                    # decode first: undecodable bytes must not replace a good image or pass as done
+                    Image.open(io.BytesIO(part.inline_data.data)).load()
                     final_path.write_bytes(part.inline_data.data)
                     if final_path != output_path and output_path.exists():
                         output_path.unlink()
