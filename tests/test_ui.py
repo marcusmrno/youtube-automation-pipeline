@@ -31,3 +31,13 @@ def test_post_routes_refuse_non_json_bodies(monkeypatch):
         assert r.status_code == 415, (rule, r.status_code)
     assert started == []
     assert client.post("/stop", json={}).get_json() == {"ok": True}   # the page's own calls still work
+
+
+def test_images_lists_each_number_once(monkeypatch, tmp_path):
+    # a regen can leave 001.png next to 001.jpg; the gallery must not get two "001" cards
+    img = tmp_path / "r1" / "images"
+    img.mkdir(parents=True)
+    for f in ("001.png", "001.jpg", "002.png"):
+        (img / f).write_bytes(b"x")
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    assert ui.app.test_client().get("/images/r1").get_json() == ["001", "002"]

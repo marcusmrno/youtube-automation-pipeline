@@ -601,10 +601,10 @@ def list_images(run_name: str):
     img_dir = OUTPUT_ROOT / run_name / "images"
     if not img_dir.exists():
         return jsonify([])
-    imgs = sorted(
+    imgs = sorted({
         p.stem for p in img_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg")
-    )
+    })
     return jsonify(imgs)
 
 
