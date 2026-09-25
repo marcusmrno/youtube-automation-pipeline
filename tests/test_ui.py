@@ -1,7 +1,29 @@
 import ast
+import threading
 from pathlib import Path
 
+import pytest
+
 import ui
+
+
+@pytest.fixture(autouse=True)
+def fresh_state(monkeypatch):
+    # ui keeps one module-level job slot; give every test its own
+    monkeypatch.setattr(ui, "_state", {"log_queue": None, "approval_queue": None, "stop_event": None})
+
+
+@pytest.fixture
+def run_dir(monkeypatch, tmp_path):
+    """output/r1 with a script, TTS and profile.txt; profiles resolve to a stand-in."""
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(ui, "load_profile", lambda name: f"<profile {name}>")
+    monkeypatch.setattr(ui, "_load_ui_profile", lambda name: ("<profile>", None))
+    run = tmp_path / "r1"
+    run.mkdir()
+    for f, text in [("script.txt", "TITLE: T"), ("tts_script.txt", "Hello."), ("profile.txt", "p")]:
+        (run / f).write_text(text)
+    return run
 
 
 def test_ui_binds_localhost_only():
@@ -59,3 +81,38 @@ def test_stage_tracker_never_moves_back_from_images():
              "🖼  Generating image 1/150 (001)"]
     stages = [s for s in map(ui.detect_stage, lines) if s]
     assert stages == sorted(stages, key=["research", "script", "images"].index), stages
+
+
+def test_a_second_job_is_refused_while_a_run_waits_for_approval(monkeypatch, run_dir):
+    answers, regens = [], []
+
+    def fake_run(topic, profile, progress_callback, stop_event, approval_callback, approach_context):
+        answers.append(approval_callback("SCRIPT"))          # blocks until /approve
+        return {"status": "complete"}
+
+    monkeypatch.setattr(ui, "run_pipeline", fake_run)
+    monkeypatch.setattr(ui, "regenerate_images", lambda *a, **k: regens.append(a))
+    client = ui.app.test_client()
+    assert client.post("/run", json={"topic": "t"}).get_json() == {"ok": True}
+    job = ui._state["thread"]
+
+    r = client.post("/regenerate", json={"run_slug": "r1", "image_nums": ["001"]}).get_json()
+    assert r["ok"] is False and "running" in r["error"]
+    assert client.post("/approve", json={"script": "", "run_slug": ""}).get_json() == {"ok": True}
+    job.join(2)
+    assert answers == [True] and regens == []
+
+
+def test_failed_audio_regen_leaves_the_live_job_alone(monkeypatch, run_dir):
+    lq = ui._state["log_queue"] = object()
+    (run_dir / "profile.txt").write_text("deleted-profile")
+    monkeypatch.setattr(ui, "load_profile", lambda name: (_ for _ in ()).throw(ValueError("gone")))
+    ui.app.test_client().post("/regenerate_audio", json={"run_slug": "r1"})
+    assert ui._state["log_queue"] is lq
+
+
+def test_metadata_generate_reports_a_busy_ui(run_dir):
+    ui._state["thread"] = threading.Thread(target=threading.Event().wait, args=(1,), daemon=True)
+    ui._state["thread"].start()
+    r = ui.app.test_client().post("/metadata/r1/generate", json={"profile": "p"})
+    assert r.status_code == 423 and "running" in r.get_json()["error"]

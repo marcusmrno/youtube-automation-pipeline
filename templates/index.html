@@ -1826,6 +1826,11 @@ function handleEvent(event) {
 }
 
 async function startMetadataRun(slug, regenerate) {
+  // The server runs one job at a time; don't wipe a live run's log for a request it will refuse.
+  if (running) {
+    document.getElementById('metadata-status').textContent = 'Wait for the current job to finish';
+    return;
+  }
   // Mirror the main pipeline UI prep so progress streams into the log area.
   running = true;
   document.getElementById('runBtn').disabled = true;

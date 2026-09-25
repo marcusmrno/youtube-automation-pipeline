@@ -89,28 +89,37 @@ def _load_ui_profile(profile_name: str):
         return None, str(e)
 
 
-def _start_run(call):
-    """Wire up the log queue + stop event, then run `call(progress_cb, stop_event)` on a thread."""
-    lq = queue.Queue()
-    se = threading.Event()
+def _start_job(work, stage=None, done=None, approval_queue=None) -> str | None:
+    """Run work(progress_cb, stop_event, emit) as the UI's one job. Returns an error if one is running.
 
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
+    Every job shares the /stream queue, the stop event and the approval queue, so a
+    second job would orphan the first: it could never be approved or stopped again.
+    """
+    running = _state.get("thread")
+    if running is not None and running.is_alive():
+        return "Another job is still running — wait for it to finish or press Stop."
+    lq, se = queue.Queue(), threading.Event()
 
     def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
+        lq.put({"type": "log", "stage": stage or detect_stage(msg), "msg": msg})
 
     def worker():
         try:
-            call(progress_cb, se)
+            work(progress_cb, se, lq.put)
         except Exception as e:
-            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
+            lq.put({"type": "log", "stage": stage, "msg": f"❌  Error: {e}"})
         finally:
-            lq.put({"type": "done"})
+            lq.put(done or {"type": "done"})
 
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    thread = threading.Thread(target=worker, daemon=True)
+    _state.update(log_queue=lq, stop_event=se, approval_queue=approval_queue, thread=thread)
+    thread.start()
+    return None
+
+
+def _start_run(work, **kw):
+    err = _start_job(work, **kw)
+    return jsonify({"ok": False, "error": err} if err else {"ok": True})
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -146,33 +155,16 @@ def run():
     if err:
         return jsonify({"ok": False, "error": err})
 
-    lq = queue.Queue()
     aq = queue.Queue()
-    se = threading.Event()
 
-    _state["log_queue"]      = lq
-    _state["approval_queue"] = aq
-    _state["stop_event"]     = se
+    def work(progress_cb, se, emit):
+        def approval_cb(script_text: str) -> bool:
+            emit({"type": "review", "script": script_text, "run_slug": pipeline.slugify(topic)})
+            return aq.get()
+        return run_pipeline(topic, profile, progress_callback=progress_cb, stop_event=se,
+                            approval_callback=approval_cb, approach_context=approach_context)
 
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
-
-    def approval_cb(script_text: str) -> bool:
-        lq.put({"type": "review", "script": script_text, "run_slug": pipeline.slugify(topic)})
-        return aq.get()
-
-    def worker():
-        try:
-            run_pipeline(topic, profile, progress_callback=progress_cb,
-                         stop_event=se, approval_callback=approval_cb,
-                         approach_context=approach_context)
-        except Exception as e:
-            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "done"})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(work, approval_queue=aq)
 
 
 @app.route("/stream")
@@ -243,7 +235,7 @@ def resume():
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)})
 
-    return _start_run(lambda cb, se: resume_pipeline(
+    return _start_run(lambda cb, se, emit: resume_pipeline(
         run_slug, profile, progress_callback=cb, stop_event=se))
 
 
@@ -261,7 +253,7 @@ def run_from_script_route():
     if err:
         return jsonify({"ok": False, "error": err})
 
-    return _start_run(lambda cb, se: run_from_script(
+    return _start_run(lambda cb, se, emit: run_from_script(
         script, profile, topic, progress_callback=cb, stop_event=se))
 
 
@@ -350,28 +342,15 @@ def metadata_generate(run_slug):
         if existing is not None:
             return jsonify({"error": "metadata already exists; pass regenerate=true to overwrite"}), 409
 
-    # Stream progress on the same /stream SSE endpoint the main pipeline uses.
-    # Structured events so the existing client log routing handles them.
-    lq = queue.Queue()
-    _state["log_queue"] = lq
-    _state["approval_queue"] = None
-    _state["stop_event"] = threading.Event()
+    # Progress streams on the same /stream SSE endpoint the main pipeline uses.
+    def work(progress_cb, se, emit):
+        _metadata_mod.generate_metadata(run_slug, profile, log_fn=progress_cb, regenerate=regenerate)
+        progress_cb("✅  Metadata generation complete")
+        emit({"type": "metadata_done", "run_slug": run_slug})
 
-    def runner():
-        try:
-            _metadata_mod.generate_metadata(
-                run_slug, profile,
-                log_fn=lambda m: lq.put({"type": "log", "stage": "metadata", "msg": m}),
-                regenerate=regenerate,
-            )
-            lq.put({"type": "log", "stage": "metadata", "msg": "✅  Metadata generation complete"})
-            lq.put({"type": "metadata_done", "run_slug": run_slug})
-        except Exception as e:
-            lq.put({"type": "log", "stage": "metadata", "msg": f"❌  Metadata generation failed: {e}"})
-        finally:
-            lq.put({"type": "done"})
-
-    threading.Thread(target=runner, daemon=True).start()
+    err = _start_job(work, stage="metadata")
+    if err:
+        return jsonify({"error": err}), 423   # 409 already means "metadata exists" to the page
     return jsonify({"status": "started"}), 202
 
 
@@ -539,30 +518,13 @@ def regenerate_audio():
     if not tts_path.exists():
         return jsonify({"ok": False, "error": "tts_script.txt not found for this run"})
 
-    lq = queue.Queue()
-    se = threading.Event()
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
-
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": "voice", "msg": msg})
-
     profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
     if not profile_name:
         return jsonify({"ok": False, "error": "No profiles found."})
     profile = load_profile(profile_name)
 
-    def worker():
-        try:
-            generate_voiceover(tts_path.read_text(), run_dir, profile, progress_cb)
-        except Exception as e:
-            lq.put({"type": "log", "stage": "voice", "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "audio_done", "run_slug": run_slug})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(lambda cb, se, emit: generate_voiceover(tts_path.read_text(), run_dir, profile, cb),
+                      stage="voice", done={"type": "audio_done", "run_slug": run_slug})
 
 
 # ── Script revision ───────────────────────────────────────────────────────────
@@ -643,25 +605,9 @@ def regen():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)})
 
-    lq = queue.Queue()
-    se = threading.Event()
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
-
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": "images", "msg": msg})
-
-    def worker():
-        try:
-            regenerate_images(run_slug, image_nums, model_key, profile, progress_callback=progress_cb)
-        except Exception as e:
-            lq.put({"type": "log", "stage": "images", "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "regen_done", "run_slug": run_slug, "nums": image_nums})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(lambda cb, se, emit: regenerate_images(run_slug, image_nums, model_key, profile,
+                                                            progress_callback=cb),
+                      stage="images", done={"type": "regen_done", "run_slug": run_slug, "nums": image_nums})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
