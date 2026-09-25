@@ -1,14 +1,45 @@
-import pytest
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import yaml
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from profile_creator.revise import next_version_name
 from profile_creator.claude_helpers import extract_fenced_block
 from profile_creator.anchors import run_full_anchors
+
+PROFILE_YAML = """channel:
+  name: Test Channel
+  niche: test
+  audience: test
+  tone: test
+  reference_channel: test
+  title_format: test
+script:
+  target_mins: 12
+  min_mins: 9
+  max_mins: 15
+  wpm: 160
+  hook_duration_s: 35
+  cta_duration_s: 30
+  section_count: "10-14"
+  section_duration_s: "60-90"
+characters:
+  roster:
+    - name: Test Cat
+      description: a test cat
+  behavior: alternate
+image_style:
+  art_style_block: flat
+  max_anchors: 2
+voice:
+  voice_id: ${ELEVENLABS_VOICE_ID}
+  model: eleven_v3
+  stability: 0.68
+  similarity_boost: 0.85
+  style: 0.0
+  use_speaker_boost: true
+  tone_description: test
+image_gen:
+  default_model: gemini-3.1-flash-image
+  pro_model: gemini-3-pro-image"""
 
 
 def test_base_name_gets_v2():
@@ -73,45 +104,9 @@ def test_run_create_writes_profile_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
 
-    fake_yaml = """channel:
-  name: Test Channel
-  niche: test
-  audience: test
-  tone: test
-  reference_channel: test
-  title_format: test
-script:
-  target_mins: 12
-  min_mins: 9
-  max_mins: 15
-  wpm: 160
-  hook_duration_s: 35
-  cta_duration_s: 30
-  section_count: "10-14"
-  section_duration_s: "60-90"
-characters:
-  roster:
-    - name: Test Cat
-      description: a test cat
-  behavior: alternate
-image_style:
-  art_style_block: flat
-  max_anchors: 2
-voice:
-  voice_id: ${ELEVENLABS_VOICE_ID}
-  model: eleven_v3
-  stability: 0.68
-  similarity_boost: 0.85
-  style: 0.0
-  use_speaker_boost: true
-  tone_description: test
-image_gen:
-  default_model: gemini-3.1-flash-image
-  pro_model: gemini-3-pro-image"""
-
     with patch("profile_creator.new.anthropic.Anthropic"), \
          patch("profile_creator.new.clarification_loop", return_value=[]), \
-         patch("profile_creator.new.generate_profile_content", return_value=(fake_yaml, "# Style\n")), \
+         patch("profile_creator.new.generate_profile_content", return_value=(PROFILE_YAML, "# Style\n")), \
          patch("profile_creator.new.generate_anchor_prompts", return_value=(
              {"anchor-01": "p1", "anchor-02": "p2"},
              [{"label": "anchor-01", "purpose": "cast sheet", "tier": "verification"},
@@ -137,41 +132,7 @@ def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     src_dir = tmp_path / "my-channel"
     src_dir.mkdir()
     (src_dir / "anchors").mkdir()
-    (src_dir / "profile.yaml").write_text("""channel:
-  name: My Channel
-  niche: test
-  audience: test
-  tone: test
-  reference_channel: test
-  title_format: test
-script:
-  target_mins: 12
-  min_mins: 9
-  max_mins: 15
-  wpm: 160
-  hook_duration_s: 35
-  cta_duration_s: 30
-  section_count: "10-14"
-  section_duration_s: "60-90"
-characters:
-  roster:
-    - name: Test Cat
-      description: a cat
-  behavior: alternate
-image_style:
-  art_style_block: flat
-  max_anchors: 2
-voice:
-  voice_id: ${ELEVENLABS_VOICE_ID}
-  model: eleven_v3
-  stability: 0.68
-  similarity_boost: 0.85
-  style: 0.0
-  use_speaker_boost: true
-  tone_description: test
-image_gen:
-  default_model: gemini-3.1-flash-image
-  pro_model: gemini-3-pro-image""")
+    (src_dir / "profile.yaml").write_text(PROFILE_YAML)
     (src_dir / "style-sheet.md").write_text("# Style")
 
     monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)

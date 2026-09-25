@@ -52,5 +52,4 @@ voice:
 
 image_gen:
   default_model: "gemini-3.1-flash-image"
-  regen_model: "gemini-3.1-flash-image"
   pro_model: "gemini-3-pro-image"
