@@ -226,3 +226,16 @@ def test_stream_after_a_finished_job_ends_at_once(monkeypatch, run_dir):
     client.post("/run_from_script", json={"script": "s"})
     assert _drain(client)[-1]["type"] == "done"
     assert _drain(client) == [{"type": "error", "msg": "No pipeline running"}]   # not endless pings
+
+
+def test_several_profiles_and_none_chosen_is_refused(monkeypatch, run_dir):
+    monkeypatch.setattr(ui, "list_profiles", lambda: ["example", "my-channel"])
+    monkeypatch.setattr(ui, "_load_ui_profile", _REAL_LOAD_UI_PROFILE)
+    client = ui.app.test_client()
+    for route, body in [("/clarifying_questions", {"topic": "t"}),
+                        ("/approach_pitches", {"topic": "t", "answers": "a"}),
+                        ("/revise", {"script": "s", "feedback": "f"})]:
+        r = client.post(route, json=body).get_json()
+        assert r["ok"] is False and "Select a profile" in r["error"], route
+    (run_dir / "profile.txt").unlink()                        # a run that never recorded its profile
+    assert ui._resolve_run_profile_name("r1", "") is None

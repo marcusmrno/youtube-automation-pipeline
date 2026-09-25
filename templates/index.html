@@ -2581,9 +2581,9 @@ async function loadProfiles() {
     const res = await fetch('/profiles');
     const profiles = await res.json();
     const sel = document.getElementById('profileSelect');
-    sel.innerHTML = profiles.map(p =>
-      `<option value="${esc(p.name)}">${esc(p.display)}</option>`
-    ).join('');
+    // With several profiles make the user pick: a preselected first one ran silently in its style
+    sel.innerHTML = (profiles.length > 1 ? '<option value="">— select profile —</option>' : '') +
+      profiles.map(p => `<option value="${esc(p.name)}">${esc(p.display)}</option>`).join('');
   } catch (e) {
     console.error('Failed to load profiles:', e);
   }

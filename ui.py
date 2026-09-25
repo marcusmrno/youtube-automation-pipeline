@@ -29,14 +29,14 @@ def _safe_slug(run_slug: str) -> bool:
 
 
 def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
-    """Requested profile name, else the run's saved profile.txt, else the first available."""
+    """Requested profile name, else the run's saved profile.txt, else the only profile (never a guess)."""
     if requested:
         return requested
     saved = OUTPUT_ROOT / run_slug / "profile.txt"
     if saved.exists():
         return saved.read_text().strip()
     available = list_profiles()
-    return available[0] if available else None
+    return available[0] if len(available) == 1 else None
 
 app = Flask(__name__)
 
@@ -479,8 +479,10 @@ def get_clarifying_questions():
     if not topic:
         return jsonify({"ok": False, "error": "Topic required"})
 
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
-        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         questions = generate_clarifying_questions(topic, profile, client, _noop_log)
         return jsonify({"ok": True, "questions": questions})
@@ -496,8 +498,10 @@ def get_approach_pitches():
     if not topic or not answers:
         return jsonify({"ok": False, "error": "Topic and answers required"})
 
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
-        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         pitches = generate_approach_pitches(topic, answers, profile, client, _noop_log)
         return jsonify({"ok": True, "pitches": pitches})
@@ -525,7 +529,7 @@ def regenerate_audio():
 
     profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile_name\"."})
     try:
         profile = load_profile(profile_name)
     except Exception as e:
@@ -547,11 +551,10 @@ def revise():
     if not script or not feedback:
         return jsonify({"ok": False, "error": "Missing script or feedback"})
 
-    available = list_profiles()
-    if not profile_name:
-        profile_name = available[0] if available else None
+    profile, err = _load_ui_profile(profile_name)
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
-        profile = load_profile(profile_name) if profile_name else None
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         revised = revise_script(script, feedback, topic, profile, client)
 
@@ -608,7 +611,7 @@ def regen():
 
     profile_name = _resolve_run_profile_name(run_slug, profile_name)
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile\"."})
 
     try:
         profile = load_profile(profile_name)

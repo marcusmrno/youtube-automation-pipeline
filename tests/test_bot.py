@@ -312,3 +312,21 @@ def test_bot_does_not_poll_for_edited_messages(monkeypatch):
     monkeypatch.setattr(bot, "Application", SimpleNamespace(builder=lambda: builder))
     bot.main()
     assert set(polled["allowed_updates"]) == {"message", "callback_query"}
+
+
+def test_several_profiles_and_none_chosen_asks_for_profile(monkeypatch, fresh_bot):
+    # with profiles/example shipped, every real user has two; the bot silently used the first
+    asked = []
+    monkeypatch.setattr(bot, "list_profiles", lambda: ["example", "my-channel"])
+    monkeypatch.setattr(bot, "generate_clarifying_questions", lambda *a: asked.append(a) or "1. Q?")
+    u = _update()
+    run(bot.cmd_run(u, _context("cats")))
+    ctx = _context()
+    run(bot._start_pipeline(_update(), ctx, script="TITLE: T\nbody"))
+    _wait_for(fresh_bot, timeout=0.3)
+    assert asked == [] and fresh_bot == []
+    assert "/profile" in u.message.replies[-1] and "/profile" in ctx.sent[-1]
+    bot._state["profile_name"] = "my-channel"                 # an explicit choice works
+    run(bot._start_pipeline(_update(), _context(), script="TITLE: T\nbody"))
+    _wait_for(fresh_bot)
+    assert fresh_bot == ["run_from_script"]

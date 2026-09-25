@@ -140,7 +140,7 @@ python ui.py
 | `/status` | Show status of the current/last run |
 | `/download [slug]` | Download run assets as a zip (splits at 50 MB) |
 | `/metadata [slug] [regenerate]` | Generate or show SEO metadata + thumbnails |
-| `/profile` | List/switch channel profiles |
+| `/profile` | List/switch channel profiles (pick one before /run or /script when several exist) |
 | `/stop` | Cancel the current run |
 | `/help` | Show command help (alias of `/start`) |
 

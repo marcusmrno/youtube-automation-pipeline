@@ -394,7 +394,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Otherwise show current + inline buttons to switch
-    current = _state["profile_name"] or available[0]
+    current = _state["profile_name"] or (available[0] if len(available) == 1 else "none — pick one")
     buttons = [
         [InlineKeyboardButton(
             f"{'✅ ' if p == current else ''}{p}",
@@ -488,12 +488,15 @@ def _resolve_run_slug(arg: str | None) -> str | None:
 
 
 def _resolve_profile_for_bot():
+    """(profile, name): the /profile choice, else the only profile. Several and none chosen: ask."""
     name = _state.get("profile_name")
     available = list_profiles()
     if not (name and name in available):
-        name = available[0] if available else None
-    if not name:
-        raise RuntimeError("No profiles available")
+        if not available:
+            raise RuntimeError("No profiles found. Create profiles/<name>/profile.yaml first.")
+        if len(available) > 1:
+            raise RuntimeError(f"Several profiles — pick one with /profile ({', '.join(available)})")
+        name = available[0]
     return load_profile(name), name
 
 
@@ -810,19 +813,15 @@ async def _start_pipeline(
     lq = queue.Queue()
     se = threading.Event()
 
-    available = list_profiles()
-    if not available:
-        await context.bot.send_message(chat_id, "❌ No profiles found. Create profiles/<name>/profile.yaml first.")
-        return
-    # Resume uses the run's saved profile; everything else the selected (or first) one
+    # Resume uses the run's saved profile; everything else the /profile choice (or the only one)
     saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt" if (run_slug and not (script or topic)) else None
-    if saved_profile_file and saved_profile_file.exists():
-        profile_name = saved_profile_file.read_text().strip()
-    else:
-        profile_name = _state["profile_name"] or available[0]
     try:
-        profile = load_profile(profile_name)
-    except Exception as e:   # e.g. profile.txt names a renamed profile
+        if saved_profile_file and saved_profile_file.exists():
+            profile_name = saved_profile_file.read_text().strip()
+            profile = load_profile(profile_name)
+        else:
+            profile, profile_name = _resolve_profile_for_bot()
+    except Exception as e:   # several profiles and none chosen, or profile.txt names a renamed one
         await context.bot.send_message(chat_id, f"❌ {e}")
         return
 
