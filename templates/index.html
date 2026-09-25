@@ -2276,7 +2276,7 @@ function parseScriptSections(text) {
 
 function findScriptSection(imageNum) {
   // Images are per-beat, not per-section. Match on the source field from
-  // image_prompts.txt: a "MM:SS-MM:SS" range, or (older runs) a narration sentence.
+  // image_prompts.txt: the narration sentence, or (older runs) a "MM:SS-MM:SS" range.
   const secs = galleryScriptSections;
   if (!secs.length) return null;
   const source = (galleryPrompts[imageNum] || {}).source || '';
@@ -2287,7 +2287,7 @@ function findScriptSection(imageNum) {
     return secs.find(s => t >= s.start && t < s.end) || secs[secs.length - 1];
   }
 
-  // ponytail: legacy fallback — source was the narration sentence itself
+  // current format: the source is the narration sentence itself
   const needle = source.slice(0, 40).toLowerCase();
   if (!needle) return null;
   return secs.find(s => s.raw.join(' ').toLowerCase().includes(needle)) || null;

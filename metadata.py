@@ -2,7 +2,7 @@
 Metadata & Thumbnail Generator — standalone post-run step.
 
 Produces YouTube titles, description, hashtags, and thumbnails for a
-completed run. See docs/superpowers/specs/2026-06-29-metadata-thumbnail-generator-design.md.
+completed run.
 """
 from __future__ import annotations
 

@@ -119,11 +119,11 @@ python ui.py
 
 **Image gallery:**
 - Browse all generated images at consistent size with scroll
-- Lightbox shows the matching script section for each image's timestamp; image prompt available as a collapsible dropdown
+- Lightbox shows the matching script section for each image's source sentence; image prompt available as a collapsible dropdown
 - Mark images for regeneration while browsing, then regen all flagged at once
 
 **Metadata:**
-- "Metadata & Thumbnail" section (or `POST /metadata/<slug>/generate` with a JSON body) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
+- The **Metadata** mode (or `POST /metadata/<slug>/generate` with a JSON body) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
 
 ### Telegram bot
 
@@ -183,7 +183,7 @@ python pipeline.py metadata <run-slug> --pick-thumb N    # 1-based; pick which t
 python pipeline.py metadata <run-slug> --show         # print current metadata.json
 ```
 
-Also available as `/metadata` in the Telegram bot, and as a "Metadata & Thumbnail" section in the Flask web UI. All three use the profile the run was made with (its `profile.txt`); `--profile` overrides it on the CLI.
+Also available as `/metadata` in the Telegram bot, and as the **Metadata** mode in the web UI. All three use the profile the run was made with (its `profile.txt`); `--profile` overrides it on the CLI.
 
 ### Flicker effect
 
@@ -234,12 +234,12 @@ A profile is the complete identity spec for a channel — it drives the script t
 ```
 profiles/my-channel/
 ├── profile.yaml          # channel identity, characters, script settings, voice, image style
-├── style-sheet.md        # extended visual rules injected into every image prompt
+├── style-sheet.md        # human-readable style reference; the profile creator writes anchor prompts from it (the pipeline reads profile.yaml)
 └── anchors/
     ├── manifest.yaml     # what each anchor slot is — read back to describe the references
     ├── anchor-01.png     # first reference slot (layout depends on the roster size)
     ├── anchor-02.png
-    └── ...               # additional style anchors (environments, props, lighting)
+    └── ...               # additional style anchors (props, text labels, environments)
 ```
 
 The anchor layout is not fixed: `build_anchor_plan` derives it from the roster, so a two-character
@@ -308,15 +308,15 @@ Paste a free-form description of your channel concept — niche, vibe, character
 Claude asks follow-up questions to pin down anything ambiguous — character appearance details, art style specifics, audience tone. You answer conversationally until it has enough to work with.
 
 **3. Profile generation**
-Claude produces a validated `profile.yaml` and a `style-sheet.md` with detailed visual rules for the image prompt builder.
+Claude produces a `profile.yaml` (checked to load before any anchor is generated) and a `style-sheet.md` with detailed visual rules for the anchor prompts.
 
 **4. Anchor image generation (tiered)**
 The creator builds a structured anchor plan from your profile, then generates images in two passes:
 
 - **Verification tier** — character reference sheets (full body, multiple angles) generated first and shown to you before proceeding. These establish the "ground truth" appearance for every character.
-- **Full tier** — environment anchors, scene style references, prop sheets, and sky/lighting variants generated after you approve the characters.
+- **Full tier** — a prop sheet, a text-and-labels scene, a wide shot, a close-up (with characters), and indoor, outdoor and abstract background anchors, generated after you approve the characters.
 
-All anchors are generated with Gemini and saved to `anchors/`. The image pipeline always sends `anchor-01` first (the cast sheet), followed by the rest in order, so the model has consistent visual context for every image in a run.
+All anchors are generated with Gemini and saved to `anchors/`. The image pipeline sends them in label order, up to `image_style.max_anchors` (`anchor-00`, the seed, first if you gave one), and describes each from `manifest.yaml`, so the model has consistent visual context for every image in a run.
 
 **Seed image** — if you already have a visual reference, pass it as a seed:
 ```bash
@@ -333,13 +333,13 @@ python create_profile.py --revise my-channel
 # or interactively: python create_profile.py → choose [r]evise
 ```
 
-Revision creates a versioned copy (`my-channel-v2`) rather than overwriting the original, so you can always roll back.
+Revision creates a versioned copy (`my-channel-v2`, then `-v3`, …) rather than overwriting the original or an earlier revision, so you can always roll back.
 
 The revise flow:
 1. Describe what you want to change
 2. Claude asks clarifying questions if needed
 3. Updated `profile.yaml` and `style-sheet.md` are written to the versioned folder
-4. **Smart anchor detection** — if characters or core style fields changed, anchors are automatically regenerated. If only metadata changed (title format, script settings, etc.), you're asked whether to regenerate or copy the originals.
+4. **Smart anchor detection** — Claude says whether anchors need regenerating (a `REGENERATE_ANCHORS` line). If it doesn't say, anchors are regenerated when characters or core style fields changed, and otherwise you're asked whether to regenerate or copy the originals.
 
 Versioning follows `my-channel` → `my-channel-v2` → `my-channel-v3` automatically.
 
@@ -353,7 +353,7 @@ regenerate selector in the UI picks between the two slots by alias:
 | Alias | Profile field | Notes |
 |-------|---------------|-------|
 | `nano-banana-2` | `image_gen.default_model` | Default — fast and cost-effective for full runs |
-| `3-pro` | `image_gen.pro_model` | Highest quality — used for hero images, anchors, and thumbnails |
+| `3-pro` | `image_gen.pro_model` | Highest quality — used for thumbnails and for manual regeneration with `3-pro` (anchors use `default_model`) |
 
 `profiles/example` ships with `gemini-3.1-flash-image` and `gemini-3-pro-image` in those slots.
 
@@ -385,7 +385,7 @@ youtube-pipeline/
 ├── profile_creator/      # profile creation subpackage
 ├── profiles/example/     # fully annotated profile schema — copy to get started
 ├── templates/index.html  # web UI (vanilla JS, SSE, gallery, lightbox)
-├── tests/                # pytest suite (pipeline, bot script mode, metadata, profile, create_profile)
+├── tests/                # pytest suite (pipeline, UI, bot, CLI, metadata, profiles, profile creator, apply_flicker)
 ├── docs/                 # design docs for past features (gitignored)
 └── output/               # generated assets per run (gitignored)
 ```
