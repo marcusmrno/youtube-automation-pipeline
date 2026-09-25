@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/a6910944-f411-41ac-9444-8ed1ffc1ff8b
 | Layer | Technology |
 |-------|-----------|
 | **Orchestration** | Python — threaded pipeline with checkpoint-based resumability |
-| **LLM** | Anthropic Claude (Sonnet + Haiku) — research, script writing, script planning, TTS enhancement, revision |
+| **LLM** | Anthropic Claude — Opus writes vidIQ-backed scripts; Sonnet writes scripts without vidIQ, revisions and image prompts; Haiku does research, planning, TTS narration, vetting and metadata (the profile creator uses Sonnet 4.6) |
 | **AI Agents** | Claude Agent SDK, connected to vidIQ's MCP server as a tool source — script generation, SEO vetting, keyword research |
 | **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~130-150 images per 12-minute video with style anchor references, generated in parallel |
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
@@ -45,9 +45,9 @@ topic → clarifying questions → approach selection → research → script
 | Stage | Detail |
 |-------|--------|
 | **Script planning** | Claude generates targeted clarifying questions with evidence-backed defaults, then pitches 3 distinct video angles — creator picks one before anything is written |
-| **Research** | vidIQ agent pulls keyword data, outlier analysis, and title scoring to ground the script in what actually performs |
-| **Script** | Claude Sonnet writes a full structured script (~12 min) shaped by the chosen approach, with timestamps and section markers |
-| **Vet** | Second agent pass fact-checks, closes SEO gaps, and enforces word count targets |
+| **Research** | vidIQ agent pulls keyword data, outlier analysis, and title scoring to ground the script in what actually performs (without `VIDIQ_API_KEY`, Claude Haiku researches the topic instead) |
+| **Script** | Claude writes a full structured script (the profile's target length; 12 min in the example) shaped by the chosen approach, with timestamps and section markers — Opus via the vidIQ agent when `VIDIQ_API_KEY` is set, Sonnet otherwise |
+| **Vet** | With `VIDIQ_API_KEY`, a second agent pass (Haiku + vidIQ) fact-checks, closes SEO gaps, and enforces word count targets |
 | **Approval gate** | Pipeline pauses for human review — script can be edited, revised with feedback, or rejected before any paid generation |
 | **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
 | **Image prompts** | One prompt per ~3–4 seconds of narration. Sonnet writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
@@ -61,7 +61,7 @@ topic → clarifying questions → approach selection → research → script
 ## Architecture highlights
 
 - **Checkpoint-based resumability** — every stage writes its output to disk; the pipeline detects what's missing and resumes from that point without re-running earlier work. Starting a topic whose run folder already has a script is refused — resume it instead
-- **Multi-model routing** — Sonnet for creative/long-form tasks, Haiku for extraction and formatting; model selection is per-task not global
+- **Multi-model routing** — Opus for the vidIQ script agent, Sonnet for long-form writing and image prompts, Haiku for research, planning, TTS narration, vetting and metadata; model selection is per-task not global
 - **Real-time SSE streaming** — the web UI receives live log events from the pipeline thread via Server-Sent Events, with per-stage progress tracking
 - **Approach context propagation** — the angle chosen during planning is injected into the script prompt, so the final script reflects the creator's intent end-to-end
 - **Dual interface parity** — the full planning → script → production flow works identically in the web UI and Telegram bot; no features are UI-only
