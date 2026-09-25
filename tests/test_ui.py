@@ -41,3 +41,10 @@ def test_images_lists_each_number_once(monkeypatch, tmp_path):
         (img / f).write_bytes(b"x")
     monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
     assert ui.app.test_client().get("/images/r1").get_json() == ["001", "002"]
+
+
+def test_pick_thumbnail_rejects_bool_index(monkeypatch):
+    picked = []
+    monkeypatch.setattr(ui._metadata_mod, "pick_thumbnail", lambda slug, i: picked.append(i) or {})
+    r = ui.app.test_client().post("/metadata/r1/pick_thumbnail", json={"index": True})
+    assert r.status_code == 400 and picked == []   # True would be saved as the chosen index

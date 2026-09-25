@@ -47,6 +47,7 @@ def _require_json_posts():
     if request.method == "POST" and not request.is_json:
         return jsonify({"ok": False, "error": "JSON body required"}), 415
 
+
 _state: dict = {
     "log_queue":      None,
     "approval_queue": None,
@@ -380,7 +381,7 @@ def metadata_pick_thumb(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     index = body.get("index")
-    if not isinstance(index, int):
+    if type(index) is not int:   # bool is an int subclass
         return jsonify({"error": "body must include integer 'index'"}), 400
     try:
         return jsonify(_metadata_mod.pick_thumbnail(run_slug, index))
