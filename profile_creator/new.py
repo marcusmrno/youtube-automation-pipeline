@@ -32,10 +32,10 @@ def _read_brain_dump() -> str:
 def _choose_profile_name() -> str:
     while True:
         name = input("\nProfile folder name (e.g. dark-history): ").strip()
+        # sanitize to slug, then check: '!!!' becomes '', and profiles/'' is the profiles folder itself
+        name = re.sub(r"[^\w-]", "-", name.lower()).strip("-")
         if not name:
             continue
-        # sanitize to slug
-        name = re.sub(r"[^\w-]", "-", name.lower()).strip("-")
         dest = PROFILES_ROOT / name
         if dest.exists():
             overwrite = input(f"Profile '{name}' already exists. Overwrite? [y/N]: ").strip().lower()

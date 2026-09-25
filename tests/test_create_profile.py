@@ -210,3 +210,14 @@ def test_character_free_profiles_get_no_invented_character():
     assert not any("one character" in p or "portrait" in p for p in purposes), purposes
     with_cast = build_anchor_plan(yaml.safe_load(PROFILE_YAML))
     assert any("portrait" in s["purpose"].lower() for s in with_cast)      # unchanged with a roster
+
+
+def test_a_punctuation_only_name_is_asked_again(tmp_path, monkeypatch):
+    # '!!!' sanitised to '', and profiles/'' is profiles/ itself: "already exists — overwrite?"
+    other = tmp_path / "other-profile"
+    other.mkdir()
+    (other / "profile.yaml").write_text("keep me")
+    _run_create_with(tmp_path, monkeypatch, ["concept", "---", "!!!", "my-channel"])
+    assert (other / "profile.yaml").read_text() == "keep me"
+    assert (tmp_path / "my-channel" / "profile.yaml").exists()
+    assert not (tmp_path / "profile.yaml").exists()
