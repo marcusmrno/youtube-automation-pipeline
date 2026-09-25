@@ -352,8 +352,7 @@ regenerate selector in the UI picks between the two slots by alias:
 python -m pytest tests -q
 ```
 
-`tests/test_pipeline_helpers.py` and `tests/test_bot_script_mode.py` are assert-based checks
-that run when pytest imports them, or on their own with `python -m tests.test_pipeline_helpers`.
+`tests/test_bot_script_mode.py` is still an assert-based check that runs when pytest imports it.
 
 ---
 
