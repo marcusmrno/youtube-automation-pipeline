@@ -189,3 +189,32 @@ def test_all_thumbnails_fail_no_chosen_file(tmp_path, monkeypatch):
     assert data["chosen_thumbnail_index"] == 0
     # thumbnail.png NOT written because chosen slot has render_error
     assert not (run_dir / "thumbnail.png").exists()
+
+
+def _fake_render(prompts, run_dir, profile, log_fn):
+    (run_dir / "thumbnails").mkdir(exist_ok=True)
+    for i in range(1, len(prompts) + 1):
+        (run_dir / f"thumbnails/thumb-{i:02d}.png").write_bytes(b"PNG")
+    return [{**p, "filename": f"thumbnails/thumb-{i:02d}.png"} for i, p in enumerate(prompts, 1)]
+
+
+def test_description_is_told_the_real_audio_length(tmp_path, monkeypatch):
+    # chapters came from the script's planned times: 3 of 12 started after a real run's audio ended
+    import metadata
+    from prompts import _build_metadata_desc_hashtags_prompt
+    _stub_metadata_internals(monkeypatch, metadata)
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(metadata, "_render_thumbnails", _fake_render)
+    monkeypatch.setattr(metadata, "anthropic", MagicMock())
+    seen = {}
+    monkeypatch.setattr(metadata, "_generate_description_hashtags",
+                        lambda *a, **kw: seen.update(kw) or {"description": "D", "hashtags": []})
+    run_dir = _seed_run_with_script(tmp_path)
+    (run_dir / "audio").mkdir()
+    (run_dir / "audio" / "voiceover.mp3").write_bytes(b"\0" * 24_000)   # 1.0 s at 192 kbps
+    metadata.generate_metadata("abc", MagicMock(image_gen={}), log_fn=lambda _: None)
+    assert seen.get("audio_secs") == 1.0
+
+    profile = MagicMock(channel={"niche": "n", "tone": "t"})
+    prompt = _build_metadata_desc_hashtags_prompt("T", "S", [], profile, audio_secs=636.1)
+    assert "10:36" in prompt

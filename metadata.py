@@ -198,9 +198,9 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     return results
 
 
-def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn) -> dict:
+def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn, audio_secs=None) -> dict:
     log_fn("📝  Generating description and hashtags...")
-    prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile)
+    prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs)
     r = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=1500,
@@ -341,7 +341,11 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
     ]
     top_title = titles_with_idx[0]["text"] if titles_with_idx else topic
 
-    desc_block = _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn)
+    mp3 = run_dir / "audio" / "voiceover.mp3"
+    # ponytail: constant 192 kbps (the pipeline's mp3_44100_192), so size gives the length; parse frames if that changes
+    audio_secs = mp3.stat().st_size * 8 / 192_000 if mp3.exists() else None
+    desc_block = _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn,
+                                                audio_secs=audio_secs)
     thumb_prompts = _generate_thumbnail_prompts(script, topic, profile, client, log_fn)
     rendered = _render_thumbnails(thumb_prompts, run_dir, profile, log_fn)
     thumbs_with_idx = [

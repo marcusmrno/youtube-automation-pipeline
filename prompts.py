@@ -602,10 +602,14 @@ Return ONLY this format:
     return template
 
 
-def _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile) -> str:
+def _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs=None) -> str:
     c = profile.channel
     kw_line = ", ".join(k.get("keyword", "") for k in keywords if k.get("keyword"))
     kw_section = f"\nTop keywords to weave in naturally: {kw_line}\n" if kw_line else ""
+    # the script's timestamps are wpm estimates; chapters must fit the audio that was actually made
+    length = f"{int(audio_secs) // 60}:{int(audio_secs) % 60:02d}" if audio_secs else ""
+    audio_rule = (f"\n- The finished voiceover is {length} long and the script's timestamps are estimates: "
+                  f"scale chapter times to fit, and start none after {length}.") if length else ""
 
     template = f"""
 You are a YouTube metadata writer for a {c["niche"]} channel.
@@ -621,7 +625,7 @@ Write a YouTube description AND a hashtag set.
 DESCRIPTION rules:
 - Start with a 1-2 sentence hook that previews the video without spoiling the payoff.
 - Add a blank line.
-- Then chapter timestamps derived from the script. Format each as "MM:SS Section title" on its own line. If the script has explicit timestamps or [SECTION] markers, use those; otherwise pick natural beats.
+- Then chapter timestamps derived from the script. Format each as "MM:SS Section title" on its own line. If the script has explicit timestamps or [SECTION] markers, use those; otherwise pick natural beats.{audio_rule}
 - Close with one line inviting the viewer to subscribe (tone: {c["tone"]}).
 - Plain text only — no markdown, no emoji.
 
