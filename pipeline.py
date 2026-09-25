@@ -619,7 +619,8 @@ def _fix_mp3_duration(path: Path, log_fn) -> None:
     path.write_bytes(data)
 
 
-def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn) -> Path | None:
+def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_fn,
+                      stop_event=None) -> Path | None:
     """Call ElevenLabs TTS API in chunks. Returns path to mp3 or None on failure."""
     log_fn("🎙  Generating voiceover...")
 
@@ -638,6 +639,9 @@ def generate_voiceover(tts_script: str, out_dir: Path, profile: "Profile", log_f
 
     parts = []
     for i, chunk in enumerate(chunks):
+        if stop_event and stop_event.is_set():
+            log_fn("🛑  Voiceover stopped")
+            return None
         log_fn(f"  ⏳  TTS chunk {i+1}/{len(chunks)}...")
         data = _tts_chunk(chunk, headers, voice_settings, log_fn,
                           voice_id=voice_id, model=el_model,
@@ -676,7 +680,7 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
         if not tts_script:
             log_fn("⚠️  No TTS script available — skipping voiceover")
             return
-        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn)
+        audio_path = generate_voiceover(tts_script, out_dir, profile, log_fn, stop_event)
 
     vo_thread = threading.Thread(target=voiceover_thread, daemon=True)
     vo_thread.start()
@@ -861,6 +865,10 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
     (out_dir / "profile.txt").write_text(profile.name)
     log_fn(f"📁  Output directory: {out_dir}")
 
+    # Stop must also land between the paid writing steps, not just in the image loop
+    stopped   = lambda: bool(stop_event and stop_event.is_set())
+    cancelled = {"status": "cancelled", "out_dir": str(out_dir)}
+
     if VIDIQ_KEY:
         log_fn("🤖  Running vidIQ research + script agent...")
         script, research_notes = run_script_agent(topic, profile, log_fn, approach_context)
@@ -873,11 +881,15 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
         log_fn("🔬  No vidIQ key — running standard research and script phases...")
         research = research_topic(topic, client, log_fn)
         (out_dir / "research.txt").write_text(research)
+        if stopped():
+            return cancelled
         script = generate_script(topic, research, profile, client, log_fn, approach_context)
 
     (out_dir / "script.txt").write_text(script)
     log_fn("📝  Script written")
 
+    if stopped():
+        return cancelled
     if VIDIQ_KEY:
         log_fn("🔎  Running vidIQ script vet...")
         vetted = run_vet_agent(topic, script, profile, log_fn)
@@ -887,6 +899,8 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
             log_fn("✅  Script vetted and updated")
         else:
             log_fn("⚠️  Vet agent returned no output — proceeding with original script")
+        if stopped():
+            return cancelled
 
     log_fn("\n" + "─" * 50)
     log_fn("📋  SCRIPT READY FOR REVIEW")
