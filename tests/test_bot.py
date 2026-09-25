@@ -60,18 +60,18 @@ def fresh_bot(monkeypatch, tmp_path):
     return calls
 
 
-def _wait_for(calls, n=1):
-    for _ in range(40):
-        if len(calls) >= n:
-            return
-        time.sleep(0.05)
+def _wait_for(calls, n=1, timeout=2.0):
+    """Runs start on a worker thread; give it a moment to call the (faked) pipeline."""
+    end = time.monotonic() + timeout
+    while len(calls) < n and time.monotonic() < end:
+        time.sleep(0.02)
 
 
 def test_approach_tap_is_refused_while_a_run_is_live(fresh_bot):
     bot._state.update(running=True, clarifying_topic="cats")
     ctx = _context()
     run(bot.on_button(_update(data="approach:1"), ctx))
-    _wait_for(fresh_bot)
+    _wait_for(fresh_bot, timeout=0.3)
     assert fresh_bot == []
     assert any("already running" in m for m in ctx.sent)
 
@@ -96,3 +96,15 @@ def test_stale_review_buttons_say_nothing_is_waiting():
     u = _update(data="approve")
     run(bot.on_button(u, _context()))
     assert u.message.replies == ["Nothing is waiting for approval."]
+
+
+@pytest.mark.parametrize("arg", ["..", "../..", "/etc", "r1/..", "."])
+def test_slugs_outside_output_are_refused(fresh_bot, tmp_path, arg):
+    # "/download .." zipped the repo, .env included, and uploaded it to Telegram
+    (tmp_path / "r1").mkdir()
+    u = _update()
+    run(bot.cmd_download(u, _context(arg)))
+    assert not any(isinstance(r, tuple) for r in u.message.replies), u.message.replies
+    run(bot.cmd_resume(_update(), _context(arg)))
+    _wait_for(fresh_bot, timeout=0.3)
+    assert fresh_bot == []

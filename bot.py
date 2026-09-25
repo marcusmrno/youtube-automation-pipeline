@@ -471,8 +471,12 @@ def _run_dirs() -> list[str]:
 
 
 def _resolve_run_slug(arg: str | None) -> str | None:
+    """A run folder directly under output/ (the newest when arg is empty); None for anything else."""
     if arg and arg != "regenerate":
-        return arg.strip()
+        arg = arg.strip()
+        # '..' or an absolute path would zip (and upload) anything on disk, .env included
+        inside = (OUTPUT_ROOT / arg).resolve().parent == OUTPUT_ROOT.resolve()
+        return arg if arg and inside else None
     dirs = _run_dirs()
     return dirs[0] if dirs else None
 
@@ -759,7 +763,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    await _start_pipeline(update, context, run_slug=context.args[0].strip())
+    slug = _resolve_run_slug(context.args[0])
+    if not slug:
+        await update.message.reply_text("❌ That isn't a run folder. Use /resume to list incomplete runs.")
+        return
+    await _start_pipeline(update, context, run_slug=slug)
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
