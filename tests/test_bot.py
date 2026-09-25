@@ -129,3 +129,24 @@ def test_a_stale_approach_tap_says_the_plan_expired():
     run(bot.on_button(u, _context()))
     assert bot._state["running"] is False
     assert u.message.replies == ["That plan expired — send /run again."]
+
+
+def test_thumbnail_buttons_fit_telegrams_64_byte_limit(monkeypatch):
+    slug = "a-topic-long-enough-to-hit-slugifys-sixty-character-cap-here"   # 60 chars, the slugify cap
+    markups, picked = [], []
+
+    async def send_message(*a, **k):
+        markups.append(k.get("reply_markup"))
+
+    chat = SimpleNamespace(send_message=send_message, send_media_group=_noop)
+    data = {"titles": [], "thumbnails": [{"filename": f"thumbnails/thumb-0{i}.png"} for i in (1, 2, 3)]}
+    run(bot._send_metadata_view(chat, data, slug))
+    buttons = [b for m in markups if m for row in m.inline_keyboard for b in row]
+    assert len(buttons) == 3
+    assert all(len(b.callback_data.encode()) <= 64 for b in buttons), [b.callback_data for b in buttons]
+
+    monkeypatch.setattr(bot._metadata_mod, "pick_thumbnail", lambda s, i: picked.append((s, i)) or data)
+    u = _update(data=buttons[1].callback_data)
+    u.callback_query.message.chat = chat
+    run(bot.on_button(u, _context()))
+    assert picked == [(slug, 1)]

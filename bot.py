@@ -65,6 +65,7 @@ _state: dict = {
     "done_images":       0,
     "milestone_sent":    set(),
     "profile_name":      None,   # None = use first available
+    "meta_slug":         None,   # run whose thumbnail picker was sent last
 }
 
 
@@ -530,10 +531,13 @@ async def _send_metadata_view(chat, data, run_slug):
             for fh in handles:
                 fh.close()
 
+    # Telegram caps callback_data at 64 bytes and slugs run to 60, so the slug stays here.
+    # ponytail: the newest picker wins; map ids to slugs if older pickers must stay live
+    _state["meta_slug"] = run_slug
     thumb_buttons = [
         InlineKeyboardButton(
             f"{'★' if i == chosen_th else ''}Thumb {i+1}",
-            callback_data=f"meta_thumb:{run_slug}:{i}",
+            callback_data=f"meta_thumb:{i}",
         )
         for i, t in enumerate(thumbs) if "render_error" not in t
     ]
@@ -929,7 +933,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if data.startswith("meta_thumb:"):
-        _, slug, idx = data.split(":", 2)
+        idx, slug = data.split(":", 1)[1], _state.get("meta_slug")
+        if not slug:
+            await query.answer("That picker expired — send /metadata again", show_alert=True)
+            return
         try:
             updated = _metadata_mod.pick_thumbnail(slug, int(idx))
             await query.answer("Thumbnail set")
