@@ -353,6 +353,7 @@ regenerate selector in the UI picks between the two slots by alias:
 ## Tests
 
 ```bash
+pip install pytest
 python -m pytest tests -q
 ```
 
