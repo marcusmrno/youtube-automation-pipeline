@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch
 import yaml
 
@@ -237,3 +238,16 @@ def test_revising_twice_makes_v3_and_keeps_v2(tmp_path, monkeypatch):
         m.run_revise("my-channel")
     assert (tmp_path / "my-channel-v3" / "profile.yaml").exists()
     assert not any("Overwrite" in p for p in asked)                    # v2 is never offered for overwrite
+
+
+@pytest.mark.parametrize("text,lang,expected", [
+    ("```markdown\n# Style\n```text\nLABEL\n```\n## Palette\nnavy\n```", "markdown",
+     "# Style\n```text\nLABEL\n```\n## Palette\nnavy"),                        # inner example fence
+    ("```yml\nkey: value\n```", "yaml", "key: value"),
+    ("```yaml\r\nkey: value\r\n```\r\n", "yaml", "key: value"),                  # CRLF
+    ("```md\n# Title\n```", "markdown", "# Title"),
+    ("```yaml \nkey: value\n```", "yaml", "key: value"),                         # trailing space
+])
+def test_fenced_blocks_in_common_variants(text, lang, expected):
+    # a miss raised after the paid 8192-token generation call; an inner fence truncated the style sheet
+    assert extract_fenced_block(text, lang) == expected
