@@ -168,3 +168,45 @@ def test_answers_pair_with_the_number_typed(monkeypatch, reply, expected):
     run(bot.on_text(_update(text=reply), _context()))
     got = [line.split("Answer: ", 1)[1] for line in captured[0].splitlines() if "Answer: " in line]
     assert got == expected
+
+
+def _longest_stall(coro):
+    """Run coro next to a 20 ms ticker; return the longest gap the event loop left it."""
+    async def main():
+        gaps, last = [0.0], time.monotonic()
+
+        async def ticker():
+            nonlocal last
+            while True:
+                await asyncio.sleep(0.02)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        t = asyncio.create_task(ticker())
+        await asyncio.sleep(0.05)   # let the ticker start...
+        await coro
+        await asyncio.sleep(0.05)   # ...and record the gap the handler caused
+        t.cancel()
+        return max(gaps)
+    return run(main())
+
+
+def test_revision_does_not_freeze_the_bot(monkeypatch, tmp_path):
+    # while Sonnet revises, /stop and the buttons must still be handled
+    monkeypatch.setattr(bot, "revise_script", lambda *a, **k: time.sleep(0.5) or "REVISED")
+    monkeypatch.setattr(bot, "_send_script_for_review", _noop)
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "script.txt").write_text("ORIGINAL")
+    bot._state.update(running=True, run_slug="r1", revision_mode=True)
+    assert _longest_stall(bot.on_text(_update(text="make it punchier"), _context())) < 0.3
+
+
+def test_zipping_does_not_freeze_the_bot(monkeypatch, tmp_path):
+    import zipfile
+    real_write = zipfile.ZipFile.write
+    monkeypatch.setattr(zipfile.ZipFile, "write", lambda self, *a, **k: time.sleep(0.25) or real_write(self, *a, **k))
+    (tmp_path / "r1").mkdir()
+    for f in ("script.txt", "tts_script.txt"):
+        (tmp_path / "r1" / f).write_text("x")
+    assert _longest_stall(bot.cmd_download(_update(), _context("r1"))) < 0.3

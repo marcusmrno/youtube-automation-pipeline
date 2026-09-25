@@ -658,7 +658,7 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     for i, batch in enumerate(batches, 1):
         part_label = f"part {i}/{total}" if total > 1 else "complete"
         filename   = f"{slug}-part{i}.zip" if total > 1 else f"{slug}.zip"
-        buf        = _make_zip(batch)
+        buf        = await asyncio.to_thread(_make_zip, batch)
         size_mb    = buf.getbuffer().nbytes / 1_048_576
         await update.message.reply_document(
             document=buf,
@@ -1041,8 +1041,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _profile = load_profile(_profile_name) if _profile_name else None
 
     try:
-        # This blocks the event loop for ~10-20s — acceptable for a personal single-user bot
-        revised = revise_script(script, feedback, slug or "video", _profile, client)
+        # off the event loop: a 10-20 s Sonnet call would otherwise freeze /stop and the buttons
+        revised = await asyncio.to_thread(revise_script, script, feedback, slug or "video", _profile, client)
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True
