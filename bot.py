@@ -726,9 +726,12 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     doc = update.message.document
+    if not (doc.file_name or "").lower().endswith(".txt"):   # an .rtf/.docx decodes too, into markup
+        await update.message.reply_text("Send the script as a plain .txt file.")
+        return
     try:
         raw = await (await doc.get_file()).download_as_bytearray()
-        script = bytes(raw).decode("utf-8")
+        script = bytes(raw).decode("utf-8-sig")   # Notepad's BOM would hide the TITLE: line
     except UnicodeDecodeError:
         await update.message.reply_text(f"❌ `{doc.file_name}` isn't UTF-8 text — send a .txt file.",
                                         parse_mode="Markdown")

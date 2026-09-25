@@ -222,3 +222,30 @@ def test_download_parts_fit_telegrams_upload_limit(tmp_path):
     run(bot.cmd_download(u, _context("r1")))
     sizes = [r[2] for r in u.message.replies if isinstance(r, tuple)]
     assert len(sizes) >= 2 and max(sizes) <= 50_000_000, sizes   # Bot API upload cap: 50 MB
+
+
+class _Doc:
+    """Telegram Document stand-in."""
+    def __init__(self, data: bytes, name: str):
+        self.data, self.file_name = data, name
+
+    async def get_file(self):
+        async def download_as_bytearray():
+            return bytearray(self.data)
+        return SimpleNamespace(download_as_bytearray=download_as_bytearray)
+
+
+@pytest.mark.parametrize("doc,started_with", [
+    (_Doc("TITLE: Why Cats Rule\nbody".encode("utf-8-sig"), "script.txt"), "TITLE: Why Cats Rule"),  # Notepad BOM
+    (_Doc(b"{\\rtf1\\ansi TITLE: Why Cats Rule}", "script.rtf"), None),                            # TextEdit default
+])
+def test_uploads_must_be_plain_text_scripts(monkeypatch, doc, started_with):
+    started = []
+    monkeypatch.setattr(bot, "_start_pipeline", lambda u, c, **kw: started.append(kw["script"]) or _noop())
+    bot._state["script_mode"] = True
+    u = _update(document=doc)
+    run(bot.on_document(u, _context()))
+    if started_with:
+        assert started and started[0].startswith(started_with)   # the TITLE: line still names the run
+    else:
+        assert started == [] and "txt" in u.message.replies[0]
