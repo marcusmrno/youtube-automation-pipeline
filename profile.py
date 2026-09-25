@@ -31,6 +31,9 @@ class Profile:
 
 
 def load_profile(name: str, profiles_root: Path = PROFILES_ROOT) -> Profile:
+    # names come from UI request bodies too; a path here would load any directory on disk
+    if not re.fullmatch(r"[\w-]+", name):
+        raise ValueError(f"Invalid profile name '{name}'")
     profile_dir = profiles_root / name
     yaml_path = profile_dir / "profile.yaml"
 
