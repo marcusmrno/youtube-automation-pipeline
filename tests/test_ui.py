@@ -48,3 +48,14 @@ def test_pick_thumbnail_rejects_bool_index(monkeypatch):
     monkeypatch.setattr(ui._metadata_mod, "pick_thumbnail", lambda slug, i: picked.append(i) or {})
     r = ui.app.test_client().post("/metadata/r1/pick_thumbnail", json={"index": True})
     assert r.status_code == 400 and picked == []   # True would be saved as the chosen index
+
+
+def test_stage_tracker_never_moves_back_from_images():
+    # the real log lines between approval and the first image, in order
+    lines = ["✅  Script approved — generating TTS and image prompts...",
+             "🖼️  Generating image prompts...",
+             "✅  Image prompts generated — 150 total",
+             "📝  150 image prompts parsed",
+             "🖼  Generating image 1/150 (001)"]
+    stages = [s for s in map(ui.detect_stage, lines) if s]
+    assert stages == sorted(stages, key=["research", "script", "images"].index), stages
