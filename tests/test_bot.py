@@ -108,3 +108,24 @@ def test_slugs_outside_output_are_refused(fresh_bot, tmp_path, arg):
     run(bot.cmd_resume(_update(), _context(arg)))
     _wait_for(fresh_bot, timeout=0.3)
     assert fresh_bot == []
+
+
+def test_a_failed_start_does_not_leave_the_bot_running(monkeypatch, tmp_path):
+    def load(name):
+        if name == "renamed-profile":
+            raise ValueError("Profile 'renamed-profile' not found. Available: ['p']")
+        return f"<profile {name}>"
+    monkeypatch.setattr(bot, "load_profile", load)
+    (tmp_path / "old-run").mkdir()
+    (tmp_path / "old-run" / "profile.txt").write_text("renamed-profile")
+    ctx = _context("old-run")
+    run(bot.cmd_resume(_update(), ctx))
+    assert bot._state["running"] is False
+    assert any("renamed-profile" in m for m in ctx.sent)          # the user is told why
+
+
+def test_a_stale_approach_tap_says_the_plan_expired():
+    u = _update(data="approach:2")                                 # e.g. from before a bot restart
+    run(bot.on_button(u, _context()))
+    assert bot._state["running"] is False
+    assert u.message.replies == ["That plan expired — send /run again."]

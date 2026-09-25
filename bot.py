@@ -790,8 +790,25 @@ async def _start_pipeline(
     lq = queue.Queue()
     se = threading.Event()
 
-    # One guard for every caller (the Approach buttons bypassed the per-command checks);
-    # no await between this check and setting running, so two taps can't both pass.
+    available = list_profiles()
+    if not available:
+        await context.bot.send_message(chat_id, "❌ No profiles found. Create profiles/<name>/profile.yaml first.")
+        return
+    # Resume uses the run's saved profile; everything else the selected (or first) one
+    saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt" if (run_slug and not (script or topic)) else None
+    if saved_profile_file and saved_profile_file.exists():
+        profile_name = saved_profile_file.read_text().strip()
+    else:
+        profile_name = _state["profile_name"] or available[0]
+    try:
+        profile = load_profile(profile_name)
+    except Exception as e:   # e.g. profile.txt names a renamed profile
+        await context.bot.send_message(chat_id, f"❌ {e}")
+        return
+
+    # One guard for every caller (the Approach buttons bypassed the per-command checks).
+    # running is set only after the last step that can fail, with no await in between,
+    # so two taps can't both pass and a failed start can't leave the bot "running".
     if _state["running"]:
         await context.bot.send_message(chat_id, "⚠️ A pipeline is already running. Use /stop first.")
         return
@@ -815,15 +832,7 @@ async def _start_pipeline(
     def progress_cb(msg: str):
         lq.put({"type": "log", "msg": msg})
 
-    available = list_profiles()
-    if not available:
-        await context.bot.send_message(chat_id, "❌ No profiles found. Create profiles/<name>/profile.yaml first.")
-        _state["running"] = False
-        return
-
     if script:
-        profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         label = f"▶️ Producing from script: *{topic}*\nProfile: `{profile_name}`"
         fn    = lambda: run_from_script(
             script,
@@ -833,8 +842,6 @@ async def _start_pipeline(
             stop_event=se,
         )
     elif topic:
-        profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
         label = f"▶️ Starting pipeline: *{topic}*\nProfile: `{profile_name}`"
         fn    = lambda: run_pipeline(
@@ -846,13 +853,6 @@ async def _start_pipeline(
             approach_context=approach_context,
         )
     else:
-        # Resume: load profile from saved run folder; fall back to selected state
-        saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt"
-        if saved_profile_file.exists():
-            profile_name = saved_profile_file.read_text().strip()
-        else:
-            profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         label = f"▶️ Resuming: *{run_slug}*\nProfile: `{profile_name}`"
         fn    = lambda: resume_pipeline(
             run_slug,
@@ -860,8 +860,6 @@ async def _start_pipeline(
             progress_callback=progress_cb,
             stop_event=se,
         )
-
-    await context.bot.send_message(chat_id, label, parse_mode="Markdown")
 
     def worker():
         try:
@@ -882,6 +880,7 @@ async def _start_pipeline(
 
     threading.Thread(target=worker, daemon=True).start()
     asyncio.create_task(_relay_and_finish(app, chat_id, lq))
+    await context.bot.send_message(chat_id, label, parse_mode="Markdown")
 
 
 # ── Inline button callback ─────────────────────────────────────────────────────
@@ -908,6 +907,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         answers = _state.get("approach_answers") or ""
         pitches = _state.get("approach_pitches") or ""
         topic   = _state["clarifying_topic"]
+        if not topic:   # buttons from a cancelled plan or from before a bot restart
+            await query.message.reply_text("That plan expired — send /run again.")
+            return
         approach_context = f"{answers}\n\nApproach pitches:\n{pitches}\n\nUser chose Approach {choice}."
         _state["clarifying_topic"]  = None
         _state["approach_answers"]  = None
