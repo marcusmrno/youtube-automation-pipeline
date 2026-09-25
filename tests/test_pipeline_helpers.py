@@ -152,3 +152,12 @@ def test_stop_halts_queued_images(monkeypatch, tmp_path):
 
     assert generated == ["001.png"], generated   # 19 queued images must not bill
     assert list(results) == ["001"], results
+
+
+def test_requirements_allow_output_config():
+    # every Sonnet call passes output_config=; anthropic < 0.77.0 raises TypeError on it
+    import re
+    from pathlib import Path
+    reqs = (Path(pipeline.__file__).parent / "requirements.txt").read_text()
+    floor = re.search(r"^anthropic>=([\d.]+)", reqs, re.M)[1]
+    assert tuple(map(int, floor.split("."))) >= (0, 77, 0), floor
