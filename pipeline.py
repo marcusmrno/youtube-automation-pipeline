@@ -276,9 +276,8 @@ def _expand_short_prompts(raw: str, profile: "Profile") -> list[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
-def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
-    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
-
+def _generate_tts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+    """Haiku call: the finished script -> TTS narration with v3 audio tags."""
     log_fn("✍️  Extracting TTS narration from script...")
     tts_prompt = _build_tts_prompt(script, profile)
     r1 = client.messages.create(
@@ -288,7 +287,11 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     )
     tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
     log_fn("✅  TTS narration extracted")
+    return tts_script
 
+
+def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> str:
+    """Sonnet call: the finished script -> image_prompts.txt text."""
     log_fn("🖼️  Generating image prompts...")
     msg = (
         _build_image_prompt_instructions(profile)
@@ -305,9 +308,14 @@ def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic
     )
 
     prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
-    image_prompts = format_image_prompts(prompts)
     log_fn(f"✅  Image prompts generated — {len(prompts)} total")
-    return tts_script, image_prompts
+    return format_image_prompts(prompts)
+
+
+def _generate_tts_and_prompts(script: str, profile: "Profile", client: anthropic.Anthropic, log_fn) -> tuple[str, str]:
+    """Given a finished script, generate TTS narration and image prompts. Returns (tts_script, image_prompts_raw)."""
+    return (_generate_tts(script, profile, client, log_fn),
+            _generate_image_prompts(script, profile, client, log_fn))
 
 
 def _standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
@@ -814,15 +822,15 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
         log_fn("📝  Regenerating missing assets from script.txt:")
         if needs_prompts: log_fn("     • image_prompts.txt")
         if needs_tts:     log_fn("     • tts_script.txt")
-        tts_script, image_prompts_raw = _generate_tts_and_prompts(script, profile, client, log_fn)
+        # only pay for what is missing; the voiceover must match the tts_script.txt on disk
         if needs_tts:
-            tts_file.write_text(tts_script)
+            tts_file.write_text(_generate_tts(script, profile, client, log_fn))
             log_fn("✅  tts_script.txt saved")
         if needs_prompts:
-            prompts_file.write_text(format_image_prompts(parse_image_prompts(image_prompts_raw)))
+            prompts_file.write_text(format_image_prompts(parse_image_prompts(
+                _generate_image_prompts(script, profile, client, log_fn))))
             log_fn("✅  image_prompts.txt saved")
-    else:
-        tts_script = tts_file.read_text()
+    tts_script = tts_file.read_text()
 
     prompts = parse_image_prompts(prompts_file.read_text())
     log_fn(f"📝  {len(prompts)} image prompts loaded")

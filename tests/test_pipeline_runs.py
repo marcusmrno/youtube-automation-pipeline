@@ -63,3 +63,38 @@ def test_stop_during_research_skips_script_writing(monkeypatch, run_env):
                               approval_callback=lambda s: calls.append("approval") or True)
     assert r["status"] == "cancelled"
     assert calls == []
+
+
+@pytest.fixture
+def resumable(monkeypatch, run_env):
+    """A run folder with script.txt; model calls recorded; production captured."""
+    calls, produced = [], {}
+    reply = SimpleNamespace(content=[SimpleNamespace(text="===TTS_SCRIPT===\nNEW TTS")])
+    client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: calls.append("haiku tts") or reply))
+    monkeypatch.setattr(pipeline.anthropic, "Anthropic", lambda **k: client)
+    monkeypatch.setattr(pipeline, "_stream_text",
+                        lambda *a, **k: calls.append("sonnet prompts") or "===IMAGE_PROMPTS===\n001 | s | none | scene")
+    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "tts prompt")
+    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "prompt instructions")
+    monkeypatch.setattr(pipeline, "_run_production",
+                        lambda topic, prompts, tts, *a, **k: produced.update(tts=tts, prompts=prompts) or {"status": "complete"})
+    run = run_env / "r1"
+    run.mkdir()
+    (run / "script.txt").write_text("TITLE: T\nbody")
+    return SimpleNamespace(run=run, calls=calls, produced=produced,
+                           profile=SimpleNamespace(**{**vars(PROFILE), "characters": [], "image_style": {"art_style_block": "STYLE"}}))
+
+
+def test_resume_with_prompts_kept_skips_the_image_prompt_call(resumable):
+    (resumable.run / "image_prompts.txt").write_text("001 | s | USER-EDITED PROMPT")
+    pipeline.resume_pipeline("r1", resumable.profile)
+    assert resumable.calls == ["haiku tts"]              # the 64k Sonnet call is not paid for
+    assert (resumable.run / "tts_script.txt").read_text() == "NEW TTS"
+    assert (resumable.run / "image_prompts.txt").read_text() == "001 | s | USER-EDITED PROMPT"
+
+
+def test_resume_voices_the_saved_tts_script(resumable):
+    (resumable.run / "tts_script.txt").write_text("SAVED TTS")
+    pipeline.resume_pipeline("r1", resumable.profile)
+    assert resumable.calls == ["sonnet prompts"]
+    assert resumable.produced["tts"] == "SAVED TTS"      # audio must match tts_script.txt on disk
