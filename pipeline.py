@@ -700,6 +700,8 @@ def _run_production(topic: str, prompts: list[dict], tts_script: str,
             log_fn("🎙  Voiceover already exists — skipping")
             audio_path = existing_mp3
             return
+        # a new production replaces the audio: a stale file would pass run_status if TTS fails
+        existing_mp3.unlink(missing_ok=True)
         if not tts_script:
             log_fn("⚠️  No TTS script available — skipping voiceover")
             return

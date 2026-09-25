@@ -174,3 +174,14 @@ def test_rerunning_a_topic_keeps_the_existing_run(monkeypatch, run_env):
     assert r["status"] == "error" and calls == []                  # refused before any paid call
     assert (old / "script.txt").read_text() == "OLD FINISHED SCRIPT"
     assert (old / "profile.txt").read_text() == "other-profile"
+
+
+def test_a_failed_voiceover_does_not_leave_the_old_one(monkeypatch, tmp_path):
+    # a premade-script run overwrites its folder; the old audio belongs to a different script
+    (tmp_path / "audio").mkdir()
+    (tmp_path / "audio" / "voiceover.mp3").write_bytes(b"OLD VOICEOVER")
+    monkeypatch.setattr(pipeline, "generate_voiceover", lambda *a, **k: None)   # ElevenLabs failed
+    monkeypatch.setattr(pipeline, "generate_all_images", lambda *a, **k: {})
+    r = pipeline._run_production("t", [], "new narration", PROFILE, tmp_path, lambda m: None)
+    assert r["audio"] == "failed"
+    assert not (tmp_path / "audio" / "voiceover.mp3").exists()      # run_status must not call it done
