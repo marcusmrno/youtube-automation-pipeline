@@ -250,3 +250,12 @@ def test_metadata_uses_the_runs_profile(monkeypatch, run_dir):
     assert r.status_code == 202
     ui._state["thread"].join(2)
     assert used == ["<profile p>"]                             # run_dir's profile.txt says "p"
+
+
+def test_runs_are_listed_newest_first(monkeypatch, tmp_path):
+    import os
+    for name, mtime in [("aaa-newest", 2_000_000), ("zzz-oldest", 1_000_000)]:
+        (tmp_path / name).mkdir()
+        os.utime(tmp_path / name, (mtime, mtime))
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    assert ui.app.test_client().get("/runs").get_json() == ["aaa-newest", "zzz-oldest"]

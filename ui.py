@@ -286,14 +286,14 @@ def stop():
 # ── Data endpoints ────────────────────────────────────────────────────────────
 
 def _list_runs(required_file: str | None = None):
-    """Run slugs, newest name first, optionally filtered to those holding `required_file`."""
+    """Run slugs, most recently modified first (as the bot lists them), optionally filtered to those holding `required_file`."""
     if not OUTPUT_ROOT.exists():
         return jsonify([])
-    return jsonify(sorted(
-        (d.name for d in OUTPUT_ROOT.iterdir()
+    return jsonify([d.name for d in sorted(
+        (d for d in OUTPUT_ROOT.iterdir()
          if d.is_dir() and (required_file is None or (d / required_file).exists())),
-        reverse=True,
-    ))
+        key=lambda d: d.stat().st_mtime, reverse=True,
+    )])
 
 
 @app.route("/runs")
