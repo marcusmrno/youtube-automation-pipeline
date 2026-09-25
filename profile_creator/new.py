@@ -65,7 +65,8 @@ def run_create(seed_image: str | None = None) -> None:
             sys.exit(1)
         anchors_dir.mkdir(parents=True, exist_ok=True)
         from pipeline import _standardize_image
-        dest = anchors_dir / ("anchor-00" + seed_path.suffix)
+        # always .png: only anchor-*.png/.jpg are sent, and _standardize_image re-encodes by extension
+        dest = anchors_dir / "anchor-00.png"
         shutil.copy2(seed_path, dest)
         _standardize_image(dest, (1280, 720))
         print(f"✓  Seed image installed as {dest.name}")
@@ -100,7 +101,8 @@ def run_create(seed_image: str | None = None) -> None:
     plan = build_anchor_plan(profile_yaml)
     print(f"\n⏳  Generating {len(plan)} anchor prompts ({sum(1 for s in plan if s['tier'] == 'verification')} verification, {sum(1 for s in plan if s['tier'] == 'full')} full)...")
     prompts, plan = generate_anchor_prompts(client, profile_yaml, style_content, plan)
-    write_manifest(anchors_dir, plan)
+    seed_slot = [{"label": "anchor-00", "purpose": "User-supplied seed image — the style target"}]
+    write_manifest(anchors_dir, (seed_slot if seed_image else []) + plan)
 
     # Verification anchors (character sheets — shown to user before continuing)
     run_verification_anchors(profile_yaml, anchors_dir, prompts, plan)

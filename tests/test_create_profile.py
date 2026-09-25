@@ -185,3 +185,17 @@ def test_an_invalid_generated_profile_stops_before_anchor_prompts(tmp_path, monk
         _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel"], yaml_text=broken,
                          prompt_calls=calls)
     assert calls == []                                    # no paid anchor-prompt call for a broken profile
+
+
+def test_a_jpeg_seed_is_installed_where_it_will_be_sent(tmp_path, monkeypatch):
+    # only anchor-*.png / *.jpg are sent, so a .jpeg seed was installed and silently ignored
+    from PIL import Image
+    seed = tmp_path / "ref.jpeg"
+    Image.new("RGB", (64, 36), "red").save(seed, "JPEG")
+    root = tmp_path / "profiles"
+    root.mkdir()
+    _run_create_with(root, monkeypatch, ["concept", "---", "my-channel"], seed=str(seed))
+    anchors = root / "my-channel" / "anchors"
+    assert (anchors / "anchor-00.png").exists() and not list(anchors.glob("anchor-00.jp*"))
+    manifest = yaml.safe_load((anchors / "manifest.yaml").read_text())
+    assert manifest[0]["label"] == "anchor-00"                        # described as the first reference

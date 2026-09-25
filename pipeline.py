@@ -373,17 +373,32 @@ def _find_image(img_dir: Path, num: str) -> Path | None:
 GENERIC_ANCHOR_REFS = "Reference images define the art style and characters — match them precisely."
 
 
-def _anchor_manifest(anchors_dir: Path) -> str:
+def _anchor_files(anchors_dir: Path, max_anchors: int) -> list[Path]:
+    """The anchor images sent with every image, in send order: by label, one per label, capped."""
+    anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
+    seen = set()
+    reference_files = []
+    for f in sorted(anchor_files, key=lambda p: p.stem):
+        if f.stem not in seen:
+            seen.add(f.stem)
+            reference_files.append(f)
+    return reference_files[:max_anchors]
+
+
+def _anchor_manifest(anchors_dir: Path, max_anchors: int = DEFAULT_MAX_ANCHORS) -> str:
     """Per-anchor descriptions from anchors/manifest.yaml, written at profile creation.
 
     Empty when absent — GENERIC_ANCHOR_REFS covers it. Never describe anchor slots
-    inline here: the layout depends on the profile's roster size.
+    inline here: the layout depends on the profile's roster size. Only the files actually
+    sent are described, in send order, so a seed (anchor-00) or a failed anchor can't
+    shift every description by one.
     """
     f = anchors_dir / "manifest.yaml"
     if not f.exists():
         return ""
-    slots = yaml.safe_load(f.read_text()) or []
-    lines = "\n".join(f"  {s['label']}: {s['purpose']}" for s in slots if s.get("label"))
+    purposes = {s["label"]: s["purpose"] for s in (yaml.safe_load(f.read_text()) or []) if s.get("label")}
+    lines = "\n".join(f"  {p.stem}: {purposes[p.stem]}"
+                      for p in _anchor_files(anchors_dir, max_anchors) if p.stem in purposes)
     return f"Reference images are provided in this order:\n{lines}" if lines else ""
 
 
@@ -394,20 +409,14 @@ def build_preamble(image_style: dict, anchors_dir: Path | None = None) -> str:
     art_style_block when a profile doesn't define one.
     """
     constraints = (image_style.get("style_constraints") or image_style["art_style_block"]).strip()
-    refs = (_anchor_manifest(anchors_dir) if anchors_dir else "") or GENERIC_ANCHOR_REFS
+    max_anchors = image_style.get("max_anchors", DEFAULT_MAX_ANCHORS)
+    refs = (_anchor_manifest(anchors_dir, max_anchors) if anchors_dir else "") or GENERIC_ANCHOR_REFS
     return f"{refs}\n\nSTYLE CONSTRAINTS: {constraints}\n\n"
 
 
 def _load_anchors_from_dir(anchors_dir: Path, max_anchors: int) -> list:
     """Pre-load anchor images from a directory as genai Parts."""
-    anchor_files = sorted(anchors_dir.glob("anchor-*.png")) + sorted(anchors_dir.glob("anchor-*.jpg"))
-    seen = set()
-    reference_files = []
-    for f in sorted(anchor_files, key=lambda p: p.stem):
-        if f.stem not in seen:
-            seen.add(f.stem)
-            reference_files.append(f)
-    reference_files = reference_files[:max_anchors]
+    reference_files = _anchor_files(anchors_dir, max_anchors)
     return [
         genai_types.Part.from_bytes(data=ref.read_bytes(), mime_type=mimetypes.guess_type(ref.name)[0] or "image/png")
         for ref in reference_files

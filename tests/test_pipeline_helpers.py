@@ -121,6 +121,7 @@ def test_build_preamble(tmp_path):
     # missing manifest -> generic line, never a crash
     assert GENERIC_ANCHOR_REFS in build_preamble({"art_style_block": "x"}, tmp_path)
     (tmp_path / "manifest.yaml").write_text("- label: anchor-01\n  purpose: cast sheet\n")
+    (tmp_path / "anchor-01.png").write_bytes(b"x")          # only anchors actually sent are described
     pre = build_preamble({"art_style_block": "x"}, tmp_path)
     assert "anchor-01: cast sheet" in pre and GENERIC_ANCHOR_REFS not in pre, pre
 
@@ -222,3 +223,15 @@ def test_ui_slug_check_still_rejects_paths(bad):
 ])
 def test_topic_from_script_finds_the_title(script, topic):
     assert _topic_from_script(script) == topic
+
+
+def test_preamble_describes_exactly_the_anchors_sent(tmp_path):
+    # a seed (anchor-00) or a failed anchor shifted every description by one
+    for label in ("anchor-00", "anchor-01", "anchor-03"):               # anchor-02 failed to generate
+        (tmp_path / f"{label}.png").write_bytes(b"x")
+    (tmp_path / "manifest.yaml").write_text(
+        "- {label: anchor-00, purpose: seed}\n- {label: anchor-01, purpose: cast sheet}\n"
+        "- {label: anchor-02, purpose: props}\n- {label: anchor-03, purpose: wide shot}\n")
+    pre = build_preamble({"art_style_block": "x", "max_anchors": 3}, tmp_path)
+    described = [line.split(":")[0].strip() for line in pre.splitlines() if line.startswith("  anchor-")]
+    assert described == ["anchor-00", "anchor-01", "anchor-03"]
