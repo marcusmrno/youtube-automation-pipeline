@@ -109,6 +109,9 @@ def find_track_by_label(timeline: dict, label: str):
 
 
 def apply_flicker(interval_frames: int, dry_run: bool = False) -> None:
+    if SNAPSHOT_PATH.exists() and not dry_run:
+        # a second layer would replace the snapshot and orphan the first one beyond --undo
+        sys.exit("A flicker layer from a previous run is still recorded — run --undo first.")
     print(f"Connecting to Palmier Pro at {PALMIER_URL} ...")
     initialize()
 

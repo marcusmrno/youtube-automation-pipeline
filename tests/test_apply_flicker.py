@@ -47,3 +47,15 @@ def test_undo_removes_the_flicker_layer(palmier):
     _snapshot()
     af.undo()
     assert "remove_tracks" in palmier["calls"] and not af.SNAPSHOT_PATH.exists()
+
+
+def test_a_second_apply_is_refused_until_undo(palmier):
+    # it overwrote the snapshot, orphaning the first layer where --undo can't reach it
+    palmier["media"] = [{"id": "o", "name": "001"}, {"id": "b", "name": "001b"}, {"id": "c", "name": "001c"}]
+    palmier["tracks"] = [{"label": "V1", "type": "video",
+                          "clips": [{"mediaRef": "o", "startFrame": 0, "durationFrames": 12}]}]
+    _snapshot()
+    with pytest.raises(SystemExit):
+        af.apply_flicker(6)
+    assert "add_clips" not in palmier["calls"]
+    af.apply_flicker(6, dry_run=True)                    # previewing is still fine
