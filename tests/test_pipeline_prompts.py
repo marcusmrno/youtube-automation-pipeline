@@ -107,3 +107,13 @@ def test_image_prompt_request_does_not_ask_for_timestamps(test_profile, monkeypa
                         or "===IMAGE_PROMPTS===\n001 | s | none | scene")
     pipeline._generate_image_prompts("SCRIPT BODY", test_profile, None, lambda m: None)
     assert not re.search(r"(?i)timestamps (are|must)|contiguous|segment of the script", sent[0])
+
+
+def test_script_agent_and_vet_prompts_share_one_word_range(test_profile):
+    # the vet (Haiku, rewriting Opus's script) capped narration at the target the agent may exceed
+    from prompts import _word_budget, _build_script_prompt, _build_agent_script_prompt, _build_vet_prompt
+    _, min_words, max_words, *_ = _word_budget(test_profile.script)
+    floor = round(min_words * 1.1)
+    assert f"under {floor}" in _build_script_prompt("t", "research", test_profile)
+    assert f"under {floor}" in _build_agent_script_prompt(test_profile)
+    assert f"{floor}-{max_words} words" in _build_vet_prompt(test_profile)

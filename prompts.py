@@ -164,7 +164,7 @@ The voiceover is delivered at ~{s["wpm"]} words per minute.
 - {s["max_mins"]}-minute maximum = ~{max_words} words of narration
 - Each {s["section_duration_s"]} second section needs {section_min}-{section_max} words of narration
 - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA close ({s["cta_duration_s"]}s) = ~{cta_words} words.
-After writing, count your narration words. If under {round(target_words * 0.9)}, expand sections before returning.
+After writing, count your narration words. If under {round(min_words * 1.1)}, expand sections before returning.
 
 ---
 TOPIC: {topic}
@@ -499,7 +499,7 @@ Return the finished script in this exact format — nothing after it:
 
 def _build_vet_prompt(profile: "Profile") -> str:
     s = profile.script
-    target_words, min_words, *_ = _word_budget(s)
+    _, min_words, max_words, *_ = _word_budget(s)
 
     return f"""
 You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
@@ -515,7 +515,7 @@ STEP 2 — Review the script against the data:
 - MISSING ANGLES: if the script misses the strongest outlier hook angle, note it
 - KEYWORD GAPS: if the top keywords are absent from the first 60 seconds, flag them
 - TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative
-- WORD COUNT: narration must be {round(min_words * 1.1)}-{target_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
+- WORD COUNT: narration must be {round(min_words * 1.1)}-{max_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
 - IDEA REPETITION: flag any core idea explained more than once. Each mechanism or concept must appear only once — callbacks are only allowed if they add new information. Remove or rewrite any section that re-explains something already stated.
 
 STEP 3 — Rewrite the script with all fixes applied:
