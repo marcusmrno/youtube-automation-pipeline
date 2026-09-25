@@ -1,7 +1,6 @@
 """Profile revision flow — creates a versioned copy of an existing profile."""
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import sys
@@ -15,9 +14,8 @@ from .claude_helpers import (
     generate_profile_content,
 )
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
+from pipeline import ANTHROPIC_KEY
 from profile import PROFILES_ROOT
-
-ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 STYLE_SENSITIVE_KEYS = {"art_style_block", "style_constraints"}
 

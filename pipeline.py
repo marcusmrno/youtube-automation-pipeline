@@ -25,7 +25,7 @@ from google import genai
 from google.genai import types as genai_types
 from PIL import Image, ImageOps
 
-from agents import run_script_agent, run_vet_agent
+from agents import run_script_agent, run_vet_agent, VIDIQ_KEY
 from prompts import (
     _build_clarifying_questions_prompt,
     _build_approach_pitch_prompt,
@@ -46,7 +46,6 @@ OUTPUT_ROOT     = PROJECT_ROOT / "output"
 
 ANTHROPIC_KEY   = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 EL_KEY          = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
-VIDIQ_KEY       = (os.getenv("VIDIQ_API_KEY") or "").strip()
 GOOGLE_KEY      = (os.getenv("GOOGLE_API_KEY") or "").strip()
 
 
