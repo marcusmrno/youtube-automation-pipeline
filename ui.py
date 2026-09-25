@@ -89,7 +89,7 @@ def _load_ui_profile(profile_name: str):
         return None, str(e)
 
 
-def _start_job(work, stage=None, done=None, approval_queue=None) -> str | None:
+def _start_job(work, stage=None, done=None, approval_queue=None, stoppable=True) -> str | None:
     """Run work(progress_cb, stop_event, emit) as the UI's one job. Returns an error if one is running.
 
     Every job shares the /stream queue, the stop event and the approval queue, so a
@@ -112,7 +112,8 @@ def _start_job(work, stage=None, done=None, approval_queue=None) -> str | None:
             lq.put(done or {"type": "done"})
 
     thread = threading.Thread(target=worker, daemon=True)
-    _state.update(log_queue=lq, stop_event=se, approval_queue=approval_queue, thread=thread)
+    _state.update(log_queue=lq, stop_event=se if stoppable else None,
+                  approval_queue=approval_queue, thread=thread)
     thread.start()
     return None
 
@@ -348,7 +349,7 @@ def metadata_generate(run_slug):
         progress_cb("✅  Metadata generation complete")
         emit({"type": "metadata_done", "run_slug": run_slug})
 
-    err = _start_job(work, stage="metadata")
+    err = _start_job(work, stage="metadata", stoppable=False)   # generate_metadata can't be interrupted
     if err:
         return jsonify({"error": err}), 423   # 409 already means "metadata exists" to the page
     return jsonify({"status": "started"}), 202

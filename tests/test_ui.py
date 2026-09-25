@@ -116,3 +116,13 @@ def test_metadata_generate_reports_a_busy_ui(run_dir):
     ui._state["thread"].start()
     r = ui.app.test_client().post("/metadata/r1/generate", json={"profile": "p"})
     assert r.status_code == 423 and "running" in r.get_json()["error"]
+
+
+def test_metadata_job_offers_no_stop_it_cannot_honour(monkeypatch, run_dir):
+    release = threading.Event()
+    monkeypatch.setattr(ui._metadata_mod, "generate_metadata", lambda *a, **k: release.wait(2))
+    r = ui.app.test_client().post("/metadata/r1/generate", json={"profile": "p", "regenerate": True})
+    assert r.status_code == 202
+    assert ui._state["stop_event"] is None    # generate_metadata takes no stop signal
+    release.set()
+    ui._state["thread"].join(2)

@@ -1832,9 +1832,9 @@ async function startMetadataRun(slug, regenerate) {
     return;
   }
   // Mirror the main pipeline UI prep so progress streams into the log area.
+  // Stop stays disabled: metadata generation can't be interrupted, so don't claim it was.
   running = true;
   document.getElementById('runBtn').disabled = true;
-  document.getElementById('stopBtn').disabled = false;
   setGlobalStatus('running', regenerate ? 'Regenerating metadata…' : 'Generating metadata…');
   resetStages();
   clearLogSections();
