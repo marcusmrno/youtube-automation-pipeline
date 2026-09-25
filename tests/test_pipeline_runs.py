@@ -98,3 +98,33 @@ def test_resume_voices_the_saved_tts_script(resumable):
     pipeline.resume_pipeline("r1", resumable.profile)
     assert resumable.calls == ["sonnet prompts"]
     assert resumable.produced["tts"] == "SAVED TTS"      # audio must match tts_script.txt on disk
+
+
+def test_empty_script_aborts_before_approval(monkeypatch, run_env):
+    calls = []
+    monkeypatch.setattr(pipeline, "VIDIQ_KEY", "")
+    monkeypatch.setattr(pipeline, "research_topic", lambda *a: "facts")
+    monkeypatch.setattr(pipeline, "generate_script", lambda *a, **k: "")   # reply had no ===SCRIPT===
+    r = pipeline.run_pipeline("t", PROFILE, approval_callback=lambda s: calls.append(s) or True)
+    assert r["status"] == "error" and calls == []
+
+
+def test_untagged_model_replies_are_errors(monkeypatch):
+    reply = SimpleNamespace(content=[SimpleNamespace(text="=== TTS_SCRIPT ===\nspaced tag")])
+    client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: reply))
+    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "p")
+    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "p")
+    monkeypatch.setattr(pipeline, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
+    profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
+    with pytest.raises(ValueError, match="TTS_SCRIPT"):
+        pipeline._generate_tts("script", profile, client, lambda m: None)
+    with pytest.raises(ValueError, match="IMAGE_PROMPTS"):
+        pipeline._generate_image_prompts("script", profile, client, lambda m: None)
+
+
+def test_resume_regenerates_an_empty_tts_script(resumable):
+    (resumable.run / "image_prompts.txt").write_text("001 | s | prompt")
+    (resumable.run / "tts_script.txt").write_text("")      # left by an untagged reply
+    pipeline.resume_pipeline("r1", resumable.profile)
+    assert resumable.calls == ["haiku tts"]
+    assert resumable.produced["tts"] == "NEW TTS"

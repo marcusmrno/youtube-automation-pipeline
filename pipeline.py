@@ -286,6 +286,8 @@ def _generate_tts(script: str, profile: "Profile", client: anthropic.Anthropic, 
         messages=[{"role": "user", "content": tts_prompt}]
     )
     tts_script = _extract("TTS_SCRIPT", r1.content[0].text)
+    if not tts_script:
+        raise ValueError("TTS reply had no ===TTS_SCRIPT=== block")
     log_fn("✅  TTS narration extracted")
     return tts_script
 
@@ -308,6 +310,8 @@ def _generate_image_prompts(script: str, profile: "Profile", client: anthropic.A
     )
 
     prompts = _expand_short_prompts(_extract("IMAGE_PROMPTS", raw), profile)
+    if not prompts:
+        raise ValueError("Image-prompt reply had no usable ===IMAGE_PROMPTS=== lines")
     log_fn(f"✅  Image prompts generated — {len(prompts)} total")
     return format_image_prompts(prompts)
 
@@ -815,8 +819,9 @@ def resume_pipeline(run_slug: str, profile: "Profile | None" = None, progress_ca
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     script = script_file.read_text()
 
-    needs_prompts = not prompts_file.exists()
-    needs_tts     = not tts_file.exists()
+    # an empty file is what an untagged model reply used to leave behind
+    needs_prompts = not prompts_file.exists() or not prompts_file.read_text().strip()
+    needs_tts     = not tts_file.exists() or not tts_file.read_text().strip()
 
     if needs_prompts or needs_tts:
         log_fn("📝  Regenerating missing assets from script.txt:")
@@ -882,9 +887,6 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
         script, research_notes = run_script_agent(topic, profile, log_fn, approach_context)
         if research_notes:
             (out_dir / "research.txt").write_text(research_notes)
-        if not script:
-            log_fn("❌  Agent did not produce a script — aborting")
-            return {"status": "error", "reason": "agent produced no script"}
     else:
         log_fn("🔬  No vidIQ key — running standard research and script phases...")
         research = research_topic(topic, client, log_fn)
@@ -892,6 +894,10 @@ def run_pipeline(topic: str, profile: "Profile", progress_callback=None,
         if stopped():
             return cancelled
         script = generate_script(topic, research, profile, client, log_fn, approach_context)
+
+    if not script:   # the reply had no ===SCRIPT=== block
+        log_fn("❌  No script was produced — aborting")
+        return {"status": "error", "reason": "no script produced"}
 
     (out_dir / "script.txt").write_text(script)
     log_fn("📝  Script written")
