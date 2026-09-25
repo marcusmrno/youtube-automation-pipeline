@@ -218,3 +218,16 @@ def test_description_is_told_the_real_audio_length(tmp_path, monkeypatch):
     profile = MagicMock(channel={"niche": "n", "tone": "t"})
     prompt = _build_metadata_desc_hashtags_prompt("T", "S", [], profile, audio_secs=636.1)
     assert "10:36" in prompt
+
+
+def test_topic_comes_from_the_scripts_title(tmp_path, monkeypatch):
+    # the slug is cut at 60 chars and loses apostrophes; it became tag #1 and the vidIQ query
+    import metadata
+    _stub_metadata_internals(monkeypatch, metadata)
+    monkeypatch.setattr(metadata, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(metadata, "_render_thumbnails", _fake_render)
+    monkeypatch.setattr(metadata, "anthropic", MagicMock())
+    _seed_run_with_script(tmp_path, slug="why-cats-purr-heals",
+                          script="**TITLE:** Why Your Cat's Purr Heals\n[00:00-00:30] HOOK\nbody")
+    data = metadata.generate_metadata("why-cats-purr-heals", MagicMock(image_gen={}), log_fn=lambda _: None)
+    assert data["topic"] == "Why Your Cat's Purr Heals" and data["tags"][0] == "Why Your Cat's Purr Heals"

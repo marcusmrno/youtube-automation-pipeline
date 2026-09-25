@@ -300,7 +300,9 @@ def _read_run_inputs(run_slug: str) -> tuple[str, str, str]:
     script = script_path.read_text()
     research_path = run_dir / "research.txt"
     research = research_path.read_text() if research_path.exists() else ""
-    topic = run_slug.replace("-", " ").title()
+    # the script's TITLE: line; the slug is cut at 60 chars and has lost its punctuation
+    m = re.search(r"(?im)^\W*title\s*:\W*(.+)$", script)
+    topic = m.group(1).strip(" *") if m else run_slug.replace("-", " ").title()
     return script, research, topic
 
 
