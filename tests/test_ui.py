@@ -126,3 +126,24 @@ def test_metadata_job_offers_no_stop_it_cannot_honour(monkeypatch, run_dir):
     assert ui._state["stop_event"] is None    # generate_metadata takes no stop signal
     release.set()
     ui._state["thread"].join(2)
+
+
+def test_approve_after_the_run_ended_changes_nothing(monkeypatch, run_dir):
+    monkeypatch.setattr(ui, "run_pipeline", lambda *a, **k: {"status": "rejected"})
+    client = ui.app.test_client()
+    client.post("/run", json={"topic": "t"})
+    ui._state["thread"].join(2)
+    r = client.post("/approve", json={"script": "EDITED", "run_slug": "r1"}).get_json()
+    assert r["ok"] is False
+    assert (run_dir / "script.txt").read_text() == "TITLE: T"    # not written into a dead queue's run
+
+
+def test_reject_with_nothing_awaiting_approval_stops_nothing(monkeypatch, run_dir):
+    release = threading.Event()
+    monkeypatch.setattr(ui, "resume_pipeline", lambda *a, stop_event, **k: release.wait(2))
+    client = ui.app.test_client()
+    client.post("/resume", json={"run_slug": "r1"})
+    r = client.post("/reject", json={}).get_json()          # e.g. a script opened from the Scripts tab
+    assert r["ok"] is False and not ui._state["stop_event"].is_set()
+    release.set()
+    ui._state["thread"].join(2)

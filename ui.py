@@ -109,6 +109,7 @@ def _start_job(work, stage=None, done=None, approval_queue=None, stoppable=True)
         except Exception as e:
             lq.put({"type": "log", "stage": stage, "msg": f"❌  Error: {e}"})
         finally:
+            _state["approval_queue"] = None   # a finished run can't be approved or rejected
             lq.put(done or {"type": "done"})
 
     thread = threading.Thread(target=worker, daemon=True)
@@ -210,8 +211,9 @@ def approve():
 @app.route("/reject", methods=["POST"])
 def reject():
     aq = _state.get("approval_queue")
-    if aq:
-        aq.put(False)
+    if not aq:   # e.g. a script opened from the Scripts tab: don't stop an unrelated job
+        return jsonify({"ok": False, "error": "No pipeline waiting for approval"})
+    aq.put(False)
     se = _state.get("stop_event")
     if se:
         se.set()

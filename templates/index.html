@@ -1794,6 +1794,7 @@ function handleEvent(event) {
   }
 
   else if (event.type === 'review') {
+    _awaitingApproval = true;
     _activeReviewSlug = event.run_slug || null;
     showReviewPanel(event.script);
     addLogLine(currentStage, '📋 Script ready for review');
@@ -1805,6 +1806,7 @@ function handleEvent(event) {
   }
 
   else if (event.type === 'done') {
+    _awaitingApproval = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
     if (inputMode === 'metadata') {
       // Don't touch pipeline stage chips for a metadata run.
@@ -1874,6 +1876,7 @@ async function startMetadataRun(slug, regenerate) {
 }
 
 async function stopPipeline() {
+  _awaitingApproval = false;
   await fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine(currentStage, '⏹  Pipeline stopped by user');
@@ -1917,12 +1920,26 @@ function hideReviewPanel() {
 async function approveScript() {
   const script = document.getElementById('reviewScript').value;
   hideReviewPanel();
-  await fetch('/approve', {
+  if (!_awaitingApproval) {
+    // Opened via "Load into Review": no run is waiting, so approving means saving the edits.
+    if (!_activeReviewSlug) return;
+    const res = await fetch(`/save_script/${encodeURIComponent(_activeReviewSlug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: script }),
+    });
+    const data = await res.json();
+    addLogLine(null, data.ok ? '💾 Script saved' : `❌ ${data.error}`);
+    return;
+  }
+  _awaitingApproval = false;
+  const res = await fetch('/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, run_slug: _activeReviewSlug }),
   });
-  addLogLine('script', '✅ Script approved — starting production…');
+  const data = await res.json();
+  addLogLine('script', data.ok ? '✅ Script approved — starting production…' : `❌ ${data.error}`);
 }
 
 async function reviseScript() {
@@ -1957,7 +1974,10 @@ async function reviseScript() {
 
 async function rejectScript() {
   hideReviewPanel();
+  if (!_awaitingApproval) return;   // nothing is waiting on this script, so there is nothing to stop
+  _awaitingApproval = false;
   await fetch('/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine('script', '🚫 Script rejected — pipeline stopped');
   setRunFinished(false);
 }
@@ -1969,6 +1989,7 @@ let _planningAnswers = '';
 let _selectedApproach = '';
 let _approachPitchesText = '';
 let _activeReviewSlug = null;
+let _awaitingApproval = false;   // true only while a /run waits at the approval gate
 
 let _parsedQuestions = [];
 
