@@ -30,7 +30,7 @@ https://github.com/user-attachments/assets/a6910944-f411-41ac-9444-8ed1ffc1ff8b
 | **Image generation** | Google Gemini (`gemini-3.1-flash-image` / `gemini-3-pro-image`) — ~130-150 images per 12-minute video with style anchor references, generated in parallel |
 | **Text-to-speech** | ElevenLabs v3 — chunked MP3 generation with custom audio tags for emotion and pacing |
 | **Web UI** | Flask + vanilla JS — real-time SSE log streaming, image gallery, lightbox, script review modal |
-| **Bot interface** | python-telegram-bot — full pipeline control via Telegram with inline keyboard interactions |
+| **Bot interface** | python-telegram-bot — planning, production, resume, metadata and downloads via Telegram with inline keyboard interactions |
 
 ---
 
@@ -44,11 +44,11 @@ topic → clarifying questions → approach selection → research → script
 
 | Stage | Detail |
 |-------|--------|
-| **Script planning** | Claude generates targeted clarifying questions with evidence-backed defaults, then pitches 3 distinct video angles — creator picks one before anything is written |
+| **Script planning** | Claude generates targeted clarifying questions with evidence-backed defaults, then pitches 3 distinct video angles — creator picks one before anything is written (web UI and bot; the CLI starts at research) |
 | **Research** | vidIQ agent pulls keyword data, outlier analysis, and title scoring to ground the script in what actually performs (without `VIDIQ_API_KEY`, Claude Haiku researches the topic instead) |
 | **Script** | Claude writes a full structured script (the profile's target length; 12 min in the example) shaped by the chosen approach, with timestamps and section markers — Opus via the vidIQ agent when `VIDIQ_API_KEY` is set, Sonnet otherwise |
 | **Vet** | With `VIDIQ_API_KEY`, a second agent pass (Haiku + vidIQ) fact-checks, closes SEO gaps, and enforces word count targets |
-| **Approval gate** | Pipeline pauses for human review — script can be edited, revised with feedback, or rejected before any paid generation |
+| **Approval gate** | Pipeline pauses for human review before any paid generation — the script can be edited (web UI), revised with feedback (web UI and bot), approved or rejected (all three; the CLI asks y/N) |
 | **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
 | **Image prompts** | One prompt per ~3–4 seconds of narration. Sonnet writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
 | **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
@@ -64,7 +64,7 @@ topic → clarifying questions → approach selection → research → script
 - **Multi-model routing** — Opus for the vidIQ script agent, Sonnet for long-form writing and image prompts, Haiku for research, planning, TTS narration, vetting and metadata; model selection is per-task not global
 - **Real-time SSE streaming** — the web UI receives live log events from the pipeline thread via Server-Sent Events, with per-stage progress tracking
 - **Approach context propagation** — the angle chosen during planning is injected into the script prompt, so the final script reflects the creator's intent end-to-end
-- **Dual interface parity** — the full planning → script → production flow works identically in the web UI and Telegram bot; no features are UI-only
+- **Three front ends, one core** — the web UI, Telegram bot and CLI share the same pipeline: topic runs, premade-script runs, resume, stop and metadata work in all three. Planning (questions + pitches) and revise are web UI and bot only; image/audio regeneration and direct script editing are web UI only; `/download` and `/status` are bot only
 - **Channel profiles** — a YAML-driven profile system defines channel identity, character descriptions, voice settings, and image style rules; multiple profiles can be maintained and switched per run
 
 ---
@@ -107,7 +107,7 @@ python ui.py
 ```
 
 **Starting a run:**
-1. Enter your topic and click **Run Pipeline**
+1. Pick a channel profile (required when there are several), enter your topic and click **Run Pipeline**
 2. Answer 4-5 clarifying questions (each has a suggested default — click **↓ Use All Defaults** to fill them all at once)
 3. Pick one of 3 pitched approaches
 4. Pipeline runs, then pauses at the script approval gate before any paid generation
@@ -138,7 +138,7 @@ python ui.py
 | `/resume [slug]` | Resume an incomplete run |
 | `/runs` | List recent runs with status |
 | `/status` | Show status of the current/last run |
-| `/download [slug]` | Download run assets as a zip (splits at 50 MB) |
+| `/download [slug]` | Download run assets as a zip (split into parts under Telegram's 50 MB limit) |
 | `/metadata [slug] [regenerate]` | Generate or show SEO metadata + thumbnails |
 | `/profile` | List/switch channel profiles (pick one before /run or /script when several exist) |
 | `/stop` | Cancel the current run |
@@ -156,6 +156,9 @@ python ui.py
 python pipeline.py "why humans sleep"
 python pipeline.py run "script writing tips"      # a topic starting with a command word needs "run"
 ```
+
+The CLI skips the clarifying questions and approach pitches. At the approval gate it prints the
+script and asks y/N — edit `script.txt` before answering to change it.
 
 Already have a script? Skip research, writing, and the approval gate — go straight to
 TTS, image prompts, images, and voiceover. The run folder is named after the script's
