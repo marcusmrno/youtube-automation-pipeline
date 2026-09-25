@@ -240,8 +240,8 @@ def generate_anchor_prompts(
     profile_yaml: dict,
     style_sheet: str,
     plan: list[dict],
-) -> dict[str, str]:
-    """Ask Claude to write one targeted prompt per anchor slot. Returns {label: prompt}.
+) -> tuple[dict[str, str], list[dict]]:
+    """Ask Claude to write one targeted prompt per anchor slot. Returns ({label: prompt}, trimmed plan).
 
     Respects image_style.max_anchors — verification slots fill the budget first,
     then full-tier slots fill the remainder in order.

@@ -18,6 +18,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import anthropic
 import requests
@@ -38,6 +39,9 @@ from prompts import (
     _build_agent_system_prompt,
     _extract,
 )
+
+if TYPE_CHECKING:
+    from profile import Profile
 
 load_dotenv()
 
