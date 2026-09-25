@@ -13,29 +13,24 @@ def test_profile():
 
 def test_generate_image_google_uses_profile_anchors(test_profile, tmp_path):
     """generate_image_google should load anchors from profile.anchors_dir, not style-anchors/."""
-    # Create fake anchor files in the test profile anchors dir
-    anchors_dir = FIXTURES / "test-channel" / "anchors"
-    anchors_dir.mkdir(exist_ok=True)
-    (anchors_dir / "anchor-01.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-    (anchors_dir / "anchor-02.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-
-    captured_contents = []
+    calls = []
 
     def fake_generate(model, contents, config):
-        captured_contents.extend(contents)
+        calls.append(contents)
         raise RuntimeError("stop after capture")
 
     import pipeline
-    with patch.object(pipeline, "genai") as mock_genai:
-        mock_client = MagicMock()
-        mock_genai.Client.return_value = mock_client
-        mock_client.models.generate_content.side_effect = fake_generate
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = fake_generate
+    # patch the cached client getter itself: patching pipeline.genai misses once it's cached
+    with patch.object(pipeline, "_get_genai_client", return_value=mock_client), \
+         patch.object(pipeline.time, "sleep"):
+        pipeline.generate_image_google("test prompt", tmp_path / "001.png", test_profile, print)
 
-        output = tmp_path / "001.png"
-        pipeline.generate_image_google("test prompt", output, test_profile, print)
-
-    # The first content element should be the prompt string
-    assert any(isinstance(c, str) and "test prompt" in c for c in captured_contents)
+    contents = calls[0]
+    assert isinstance(contents[0], str) and contents[0].endswith("test prompt")
+    # the fixture's two anchors ride along as image parts
+    assert len(contents) == 3 and not any(isinstance(c, str) for c in contents[1:])
 
 
 def test_build_script_prompt_injects_channel_identity(test_profile):
