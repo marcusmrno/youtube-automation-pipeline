@@ -1009,16 +1009,6 @@ html, body {
   flex-direction: column;
   gap: 10px;
 }
-.lightbox-prompt-label {
-  font-family: var(--display);
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--dim);
-  margin-bottom: 6px;
-  display: block;
-}
 .lightbox-prompt-text {
   font-family: var(--mono);
   font-size: 0.68rem;
@@ -1044,16 +1034,6 @@ html, body {
 }
 .lightbox-script-section::-webkit-scrollbar { width: 4px; }
 .lightbox-script-section::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
-.lightbox-script-title {
-  font-family: var(--display);
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--blue);
-  margin-bottom: 5px;
-  display: block;
-}
 
 .lightbox-prompt-details {
   border-top: 1px solid var(--border);
@@ -1500,7 +1480,7 @@ async function fillPicker(url, id, placeholder) {
 }
 
 async function refreshResumePicker() {
-  await fillPicker('/runs_with_prompts', 'resumePicker', '— select a stopped run —');
+  await fillPicker('/runs_with_scripts', 'resumePicker', '— select a stopped run —');
   if (!document.getElementById('resumePicker').value) loadResumeStatus('');
 }
 
@@ -1804,7 +1784,7 @@ function handleEvent(event) {
 
   else if (event.type === 'metadata_done') {
     // Refresh the metadata results panel as soon as the JSON is on disk.
-    if (typeof loadMetadata === 'function') loadMetadata();
+    loadMetadata();
   }
 
   else if (event.type === 'done') {
@@ -1815,7 +1795,7 @@ function handleEvent(event) {
       // Don't touch pipeline stage chips for a metadata run.
       if (currentStage) closeLogSection(currentStage);
       setRunFinished(ok);
-      if (typeof loadMetadata === 'function') loadMetadata();
+      loadMetadata();
     } else {
       if (ok) completeAllStages();
       setRunFinished(ok);
@@ -1847,12 +1827,11 @@ async function startMetadataRun(slug, regenerate) {
   // Force-open a Metadata log section now so the user sees activity immediately.
   activateStage('metadata');
 
-  const profile = document.getElementById('profileSelect')
-    ? document.getElementById('profileSelect').value : '';
+  // no profile sent: the server uses the one the run was made with (its profile.txt)
   const res = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ regenerate, profile }),
+    body: JSON.stringify({ regenerate }),
   });
 
   if (res.status === 409) {
@@ -1995,15 +1974,17 @@ let _awaitingApproval = false;   // true only while a /run waits at the approval
 
 let _parsedQuestions = [];
 
+// Same rules as bot._parse_clarifying_questions: '1)', **bold**, any-case Default:, preamble skipped.
 function parseClarifyingQuestions(text) {
   const items = [];
-  const blocks = text.trim().split(/\n(?=\d+\.)/);
-  for (const block of blocks) {
+  const strip = s => s.trim().replace(/^\*+|\*+$/g, '').trim();
+  for (const block of text.trim().split(/\n(?=\s*\**\d+[.)])/)) {
     const lines = block.trim().split('\n');
-    const questionLine = lines[0].replace(/^\d+\.\s*/, '').trim();
-    const defaultLine = lines.find(l => l.trim().startsWith('Default:'));
-    const defaultText = defaultLine ? defaultLine.replace(/^\s*Default:\s*/i, '').trim() : '';
-    if (questionLine) items.push({ question: questionLine, default: defaultText });
+    const first = lines[0].trim().match(/^\**\d+[.)]\**\s*(.*)/);
+    if (!first) continue;   // a preamble line, not a question
+    const question = strip(first[1]);
+    const def = lines.map(l => l.match(/^\s*\**default\**\s*:\**\s*(.*)/i)).find(Boolean);
+    if (question) items.push({ question, default: def ? strip(def[1]) : '' });
   }
   return items;
 }
@@ -2275,7 +2256,7 @@ function parseScriptSections(text) {
 
 function findScriptSection(imageNum) {
   // Images are per-beat, not per-section. Match on the source field from
-  // image_prompts.txt: a "MM:SS-MM:SS" range, or (older runs) a narration sentence.
+  // image_prompts.txt: the narration sentence, or (older runs) a "MM:SS-MM:SS" range.
   const secs = galleryScriptSections;
   if (!secs.length) return null;
   const source = (galleryPrompts[imageNum] || {}).source || '';
@@ -2286,7 +2267,7 @@ function findScriptSection(imageNum) {
     return secs.find(s => t >= s.start && t < s.end) || secs[secs.length - 1];
   }
 
-  // ponytail: legacy fallback — source was the narration sentence itself
+  // current format: the source is the narration sentence itself
   const needle = source.slice(0, 40).toLowerCase();
   if (!needle) return null;
   return secs.find(s => s.raw.join(' ').toLowerCase().includes(needle)) || null;
@@ -2581,9 +2562,9 @@ async function loadProfiles() {
     const res = await fetch('/profiles');
     const profiles = await res.json();
     const sel = document.getElementById('profileSelect');
-    sel.innerHTML = profiles.map(p =>
-      `<option value="${esc(p.name)}">${esc(p.display)}</option>`
-    ).join('');
+    // With several profiles make the user pick: a preselected first one ran silently in its style
+    sel.innerHTML = (profiles.length > 1 ? '<option value="">— select profile —</option>' : '') +
+      profiles.map(p => `<option value="${esc(p.name)}">${esc(p.display)}</option>`).join('');
   } catch (e) {
     console.error('Failed to load profiles:', e);
   }
@@ -2611,11 +2592,9 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeLightbox();
 });
-</script>
 
-<script>
 // ── Metadata mode ──────────────────────────────────────────────────────────
-// Hoisted to module scope so setMode() and runPipeline() can call into it.
+// Page-level functions: setMode() and runPipeline() call into them.
 
 function getMetadataSlug() {
   const picker = document.getElementById('metadataRunPicker');

@@ -109,6 +109,9 @@ def find_track_by_label(timeline: dict, label: str):
 
 
 def apply_flicker(interval_frames: int, dry_run: bool = False) -> None:
+    if SNAPSHOT_PATH.exists() and not dry_run:
+        # a second layer would replace the snapshot and orphan the first one beyond --undo
+        sys.exit("A flicker layer from a previous run is still recorded — run --undo first.")
     print(f"Connecting to Palmier Pro at {PALMIER_URL} ...")
     initialize()
 
@@ -236,6 +239,15 @@ def undo() -> None:
         SNAPSHOT_PATH.unlink()
         return
 
+    # The snapshot only has a generic label like "V2": in another project, or after the layer
+    # was deleted by hand, that's the user's own track. Remove it only if it's all b/c frames.
+    names = {a["id"]: a.get("name", "") for a in call_tool("get_media", {}).get("entries", [])}
+    clips = timeline["tracks"][idx].get("clips", [])
+    if not clips or any(classify_asset(names.get(c.get("mediaRef"), ""))[1] is None for c in clips):
+        print(f"Track '{label}' holds clips that aren't flicker frames — not removing it.")
+        print(f"If the flicker layer is already gone, delete {SNAPSHOT_PATH.name}.")
+        sys.exit(1)
+
     print(f"Removing track '{label}' (index {idx}) ...")
     call_tool("remove_tracks", {"trackIndexes": [idx]})
     SNAPSHOT_PATH.unlink()
@@ -254,6 +266,8 @@ def main():
                         help="Remove the flicker track created by the most recent apply")
     args = parser.parse_args()
 
+    if args.undo and args.dry_run:   # undo() has no dry run; it would really delete the track
+        parser.error("--dry-run can't be combined with --undo")
     if args.undo:
         undo()
         return

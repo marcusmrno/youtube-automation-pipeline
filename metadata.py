@@ -2,7 +2,7 @@
 Metadata & Thumbnail Generator — standalone post-run step.
 
 Produces YouTube titles, description, hashtags, and thumbnails for a
-completed run. See docs/superpowers/specs/2026-06-29-metadata-thumbnail-generator-design.md.
+completed run.
 """
 from __future__ import annotations
 
@@ -14,16 +14,13 @@ import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from profile import Profile
-
 import anthropic
 
-from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT, HAIKU_MODEL, generate_image_google, _load_anchor_parts, _find_image
+from pipeline import ANTHROPIC_KEY, OUTPUT_ROOT
+from writing import HAIKU_MODEL
+from images import generate_image_google, load_anchor_parts, find_image
 from agents import run_vidiq_agent, VIDIQ_KEY
-from prompts import _extract, _build_metadata_titles_prompt, _build_metadata_desc_hashtags_prompt, _build_metadata_thumbnail_prompt
+from prompts import extract, build_metadata_titles_prompt, build_metadata_desc_hashtags_prompt, build_metadata_thumbnail_prompt
 
 
 def _run_dir(run_slug: str) -> Path:
@@ -57,6 +54,11 @@ def _call_vidiq_agent(system_prompt: str, user_prompt: str, max_turns: int, log_
     return asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns, log_fn, model=HAIKU_MODEL))
 
 
+def _json_block(block: str):
+    """json.loads for an agent's block, tolerating the ```json fence LLMs like to add."""
+    return json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", block.strip()))
+
+
 def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     """Use vidIQ MCP to fetch top keywords for the topic.
 
@@ -75,11 +77,15 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
     user = f"Topic: {topic}\n\nReturn 15 keywords as a JSON array, wrapped in ===KEYWORDS=== tags."
     try:
         raw = _call_vidiq_agent(system, user, max_turns=10, log_fn=log_fn)
-        block = _extract("KEYWORDS", raw)
+        block = extract("KEYWORDS", raw)
         if not block:
             log_fn("⚠️  vidIQ keyword research returned no KEYWORDS block")
             return []
-        return json.loads(block)
+        kws = _json_block(block)
+        if not isinstance(kws, list):
+            return []
+        # agents sometimes return plain strings instead of {"keyword": ...} objects
+        return [{"keyword": k} if isinstance(k, str) else k for k in kws if isinstance(k, (str, dict))]
     except Exception as e:
         log_fn(f"⚠️  vidIQ keyword research failed: {e}")
         return []
@@ -88,8 +94,8 @@ def _vidiq_keywords(topic: str, log_fn) -> list[dict]:
 def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
     """Build the YouTube tags-box list from topic + vidIQ keywords.
 
-    Deduped case-insensitively, capped at YouTube's 500-char tags-field limit
-    (tags are joined with ", " there, so that separator counts too).
+    Deduped case-insensitively, capped at YouTube's 500-char tags limit as YouTube counts
+    it: one comma between tags, plus two quote characters around any tag with a space.
     """
     seen: set[str] = set()
     tags: list[str] = []
@@ -99,7 +105,7 @@ def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
         key = tag.lower()
         if not tag or key in seen:
             continue
-        total += len(tag) + (2 if tags else 0)
+        total += len(tag) + (2 if " " in tag else 0) + (1 if tags else 0)
         if total > 500:
             break
         seen.add(key)
@@ -109,23 +115,24 @@ def _build_video_tags(topic: str, keywords: list[dict]) -> list[str]:
 
 def _parse_titles(raw: str) -> list[str]:
     """Extract numbered titles from a ===TITLES=== block."""
-    block = _extract("TITLES", raw)
+    block = extract("TITLES", raw)
     if not block:
         return []
     titles: list[str] = []
     for line in block.splitlines():
-        m = re.match(r"^\s*\d+[\.\)]\s+(.+?)\s*$", line)
+        # "1.", "1)", "1:" or a bullet; markdown bold, a "Title:" label and quotes are not part of it
+        m = re.match(r"^\s*\**(?:\d+[.):]|[-*•])\**\s+(.+?)\s*$", line)
         if not m:
             continue
-        text = m.group(1).strip().strip('"').strip("'")
-        if text:
+        text = re.sub(r"(?i)^title\s*:\s*", "", m.group(1).strip("*").strip()).strip("\"'*“”‘’ ")
+        if text and len(text) <= 100:   # YouTube rejects longer titles
             titles.append(text)
     return titles
 
 
 def _generate_titles(topic, script, research, keywords, profile, client, log_fn) -> list[str]:
     log_fn("✍️  Generating 5 title candidates...")
-    prompt = _build_metadata_titles_prompt(topic, script, research, keywords, profile)
+    prompt = build_metadata_titles_prompt(topic, script, research, keywords, profile)
     r = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=1000,
@@ -144,6 +151,8 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     Returns one entry per input title in input order:
     {"text": str, "score": int | None, "score_breakdown": dict}.
     """
+    if not titles:
+        return []   # don't pay for an agent session that scores nothing
     if not VIDIQ_KEY:
         log_fn("⚠️  vidIQ key not set — scores will be null")
         return [{"text": t, "score": None, "score_breakdown": {}} for t in titles]
@@ -160,46 +169,50 @@ def _score_titles(titles: list[str], log_fn) -> list[dict]:
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
     user = f"Score these {len(titles)} titles:\n{numbered}\n\nReturn the JSON array inside ===SCORES=== tags."
 
+    # the agent echoes titles back with small changes (curly apostrophe, trailing period, case)
+    key = lambda s: re.sub(r"\W+", "", s).casefold()
     by_title: dict[str, dict] = {}
     try:
         raw = _call_vidiq_agent(system, user, max_turns=len(titles) * 2 + 4, log_fn=log_fn)
-        block = _extract("SCORES", raw)
+        block = extract("SCORES", raw)
         if not block:
             raise RuntimeError("vidIQ scores response had no SCORES block")
-        for entry in json.loads(block):
-            by_title[entry["title"]] = entry
+        for entry in _json_block(block):
+            by_title[key(entry["title"])] = entry
     except Exception as e:
         log_fn(f"⚠️  Title scoring failed: {e}")
 
     results = []
     for t in titles:
-        entry = by_title.get(t)
+        entry = by_title.get(key(t))
         score = entry.get("score") if entry else None
         results.append({
             "text": t,
-            "score": int(score) if score is not None else None,
+            "score": int(score) if isinstance(score, (int, float)) else None,   # "85/100" -> None, not a crash
             "score_breakdown": (entry or {}).get("breakdown", {}),
         })
     log_fn("✅  Scoring complete")
     return results
 
 
-def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn) -> dict:
+def _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn, audio_secs=None) -> dict:
     log_fn("📝  Generating description and hashtags...")
-    prompt = _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile)
+    prompt = build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs)
     r = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
     text = r.content[0].text
-    desc = _extract("DESCRIPTION", text)
-    hashtags_raw = _extract("HASHTAGS", text)
+    desc = extract("DESCRIPTION", text)
+    hashtags_raw = extract("HASHTAGS", text)
     if not desc:
         raise ValueError("description generation: missing ===DESCRIPTION=== block")
     if not hashtags_raw:
         raise ValueError("description generation: missing ===HASHTAGS=== block")
     hashtags = [tok for tok in hashtags_raw.split() if tok.startswith("#")][:5]
+    if len(desc) > 5000:   # not truncated: the subscribe line comes last
+        log_fn(f"⚠️  Description is {len(desc)} chars — YouTube allows 5000; trim it before pasting")
     log_fn("✅  Description and hashtags ready")
     return {"description": desc.strip(), "hashtags": hashtags}
 
@@ -207,13 +220,14 @@ def _generate_description_hashtags(top_title, script, keywords, profile, client,
 def _parse_thumbnail_prompts(raw: str) -> list[dict]:
     out = []
     for n in (1, 2, 3):
-        block = _extract(f"THUMBNAIL_{n}", raw)
+        block = extract(f"THUMBNAIL_{n}", raw)
         if not block:
             return []
         lines = block.strip().splitlines()
         hook = ""
-        if lines and lines[0].upper().startswith("HOOK:"):
-            hook = lines[0].split(":", 1)[1].strip()
+        m = re.match(r"\W*hook\s*[:\-–—]\W*(.+)", lines[0], re.I) if lines else None   # HOOK:, **HOOK:**, Hook -
+        if m:
+            hook = m[1].strip(' *"')
             body = "\n".join(lines[1:]).strip()
         else:
             body = block.strip()
@@ -225,7 +239,7 @@ def _parse_thumbnail_prompts(raw: str) -> list[dict]:
 
 def _generate_thumbnail_prompts(script, topic, profile, client, log_fn) -> list[dict]:
     log_fn("🎨  Generating 3 thumbnail prompts...")
-    prompt = _build_metadata_thumbnail_prompt(script, topic, profile)
+    prompt = build_metadata_thumbnail_prompt(script, topic, profile)
     for attempt in (1, 2):
         r = client.messages.create(
             model=HAIKU_MODEL,
@@ -244,7 +258,7 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn, max_
     """Render thumbnails concurrently. Returns one entry per input with filename and any error, in input order."""
     thumb_dir = run_dir / "thumbnails"
     thumb_dir.mkdir(exist_ok=True)
-    anchor_parts = _load_anchor_parts(profile)
+    anchor_parts = load_anchor_parts(profile)
     model = profile.image_gen.get("pro_model") or profile.image_gen["default_model"]
 
     def _one(i: int, p: dict) -> dict:
@@ -265,7 +279,7 @@ def _render_thumbnails(prompts: list[dict], run_dir: Path, profile, log_fn, max_
             return {**p, "filename": requested_filename, "render_error": str(e)}
         if not ok:
             return {**p, "filename": requested_filename, "render_error": "generator returned False"}
-        actual = _find_image(thumb_dir, stem)
+        actual = find_image(thumb_dir, stem)
         if actual is None:
             return {**p, "filename": requested_filename, "render_error": "rendered file missing on disk"}
         return {**p, "filename": f"thumbnails/{actual.name}"}
@@ -283,7 +297,9 @@ def _read_run_inputs(run_slug: str) -> tuple[str, str, str]:
     script = script_path.read_text()
     research_path = run_dir / "research.txt"
     research = research_path.read_text() if research_path.exists() else ""
-    topic = run_slug.replace("-", " ").title()
+    # the script's TITLE: line; the slug is cut at 60 chars and has lost its punctuation
+    m = re.search(r"(?im)^\W*title\s*:\W*(.+)$", script)
+    topic = m.group(1).strip(" *") if m else run_slug.replace("-", " ").title()
     return script, research, topic
 
 
@@ -324,7 +340,11 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
     ]
     top_title = titles_with_idx[0]["text"] if titles_with_idx else topic
 
-    desc_block = _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn)
+    mp3 = run_dir / "audio" / "voiceover.mp3"
+    # ponytail: constant 192 kbps (the pipeline's mp3_44100_192), so size gives the length; parse frames if that changes
+    audio_secs = mp3.stat().st_size * 8 / 192_000 if mp3.exists() else None
+    desc_block = _generate_description_hashtags(top_title, script, keywords, profile, client, log_fn,
+                                                audio_secs=audio_secs)
     thumb_prompts = _generate_thumbnail_prompts(script, topic, profile, client, log_fn)
     rendered = _render_thumbnails(thumb_prompts, run_dir, profile, log_fn)
     thumbs_with_idx = [
@@ -354,6 +374,8 @@ def generate_metadata(run_slug: str, profile, log_fn, regenerate: bool = False) 
     chosen = thumbs_with_idx[data["chosen_thumbnail_index"]]
     if "render_error" not in chosen:
         shutil.copyfile(run_dir / chosen["filename"], run_dir / "thumbnail.png")
+    else:   # every render failed: the previous pick no longer matches metadata.json
+        (run_dir / "thumbnail.png").unlink(missing_ok=True)
 
     log_fn(f"✅  Metadata written: {run_dir / 'metadata.json'}")
     return data

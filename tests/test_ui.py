@@ -212,8 +212,8 @@ def _drain(client, timeout=4):
 
 
 def test_audio_regen_stream_ends(monkeypatch, run_dir):
-    import pipeline   # the route imports generate_voiceover from pipeline when it runs
-    monkeypatch.setattr(pipeline, "generate_voiceover", lambda *a, **k: run_dir / "audio" / "voiceover.mp3")
+    import voiceover   # the route imports generate_voiceover when it runs
+    monkeypatch.setattr(voiceover, "generate_voiceover", lambda *a, **k: run_dir / "audio" / "voiceover.mp3")
     client = ui.app.test_client()
     client.post("/regenerate_audio", json={"run_slug": "r1"})
     events = _drain(client)
@@ -226,3 +226,68 @@ def test_stream_after_a_finished_job_ends_at_once(monkeypatch, run_dir):
     client.post("/run_from_script", json={"script": "s"})
     assert _drain(client)[-1]["type"] == "done"
     assert _drain(client) == [{"type": "error", "msg": "No pipeline running"}]   # not endless pings
+
+
+def test_several_profiles_and_none_chosen_is_refused(monkeypatch, run_dir):
+    monkeypatch.setattr(ui, "list_profiles", lambda: ["example", "my-channel"])
+    monkeypatch.setattr(ui, "_load_ui_profile", _REAL_LOAD_UI_PROFILE)
+    client = ui.app.test_client()
+    for route, body in [("/clarifying_questions", {"topic": "t"}),
+                        ("/approach_pitches", {"topic": "t", "answers": "a"}),
+                        ("/revise", {"script": "s", "feedback": "f"})]:
+        r = client.post(route, json=body).get_json()
+        assert r["ok"] is False and "Select a profile" in r["error"], route
+    (run_dir / "profile.txt").unlink()                        # a run that never recorded its profile
+    assert ui._resolve_run_profile_name("r1", "") is None
+
+
+def test_metadata_uses_the_runs_profile(monkeypatch, run_dir):
+    # thumbnails for a run made with one channel were rendered in another channel's style
+    used = []
+    monkeypatch.setattr(ui, "list_profiles", lambda: ["alpha", "p"])
+    monkeypatch.setattr(ui._metadata_mod, "generate_metadata", lambda slug, profile, **k: used.append(profile))
+    r = ui.app.test_client().post("/metadata/r1/generate", json={"regenerate": True})
+    assert r.status_code == 202
+    ui._state["thread"].join(2)
+    assert used == ["<profile p>"]                             # run_dir's profile.txt says "p"
+
+
+def test_runs_are_listed_newest_first(monkeypatch, tmp_path):
+    import os
+    for name, mtime in [("aaa-newest", 2_000_000), ("zzz-oldest", 1_000_000)]:
+        (tmp_path / name).mkdir()
+        os.utime(tmp_path / name, (mtime, mtime))
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    assert ui.app.test_client().get("/runs").get_json() == ["aaa-newest", "zzz-oldest"]
+
+
+def test_planning_checks_keys_before_paying_for_questions(monkeypatch, run_dir):
+    # keys are blank under the suite: the missing ones must surface before the paid Haiku calls
+    from types import SimpleNamespace
+    asked = []
+    monkeypatch.setattr(ui, "_load_ui_profile", lambda name: (SimpleNamespace(voice={"voice_id": "v"}), None))
+    monkeypatch.setattr(ui, "generate_clarifying_questions", lambda *a: asked.append(a) or "1. Q?")
+    r = ui.app.test_client().post("/clarifying_questions", json={"topic": "t"}).get_json()
+    assert r["ok"] is False and "Missing API keys" in r["error"] and asked == []
+
+
+def test_revise_returns_the_revision_without_a_second_vet(monkeypatch, run_dir):
+    # the extra paid vidIQ vet pass could undo the feedback; the pipeline already vetted once
+    vetted = []
+    monkeypatch.setattr(ui, "VIDIQ_KEY", "key", raising=False)
+    monkeypatch.setattr(ui, "run_vet_agent", lambda *a: vetted.append(a) or "VETTED", raising=False)
+    monkeypatch.setattr(ui, "revise_script", lambda *a: "REVISED")
+    r = ui.app.test_client().post("/revise", json={"script": "s", "feedback": "f", "profile": "p"}).get_json()
+    assert r == {"ok": True, "script": "REVISED"} and vetted == []
+
+
+def test_serve_image_finds_png_and_jpg(monkeypatch, tmp_path):
+    img = tmp_path / "r1" / "images"
+    img.mkdir(parents=True)
+    (img / "001.png").write_bytes(b"\x89PNG")
+    (img / "002.jpg").write_bytes(b"\xff\xd8JPG")
+    monkeypatch.setattr(ui, "OUTPUT_ROOT", tmp_path)
+    client = ui.app.test_client()
+    assert client.get("/image/r1/001").mimetype == "image/png"
+    assert client.get("/image/r1/002").mimetype == "image/jpeg"
+    assert client.get("/image/r1/003").status_code == 404

@@ -13,7 +13,6 @@ import threading
 import zipfile
 from pathlib import Path
 
-from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application,
@@ -29,23 +28,23 @@ import metadata as _metadata_mod
 from pipeline import (
     OUTPUT_ROOT,
     ANTHROPIC_KEY,
+    check_keys,
     run_pipeline,
     resume_pipeline,
     run_from_script,
-    _topic_from_script,
-    revise_script,
+    topic_from_script,
     run_status,
     slugify,
-    generate_clarifying_questions,
-    generate_approach_pitches,
 )
-from profile import load_profile, list_profiles
+from writing import generate_approach_pitches, generate_clarifying_questions, revise_script
+from channel_profile import load_profile, list_profiles
 
-load_dotenv()
 
 BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _user_id        = os.getenv("TELEGRAM_USER_ID", "").strip()
 ALLOWED_USER_ID = int(_user_id) if _user_id.isdigit() else 0   # blank or "# comment" -> main() says "not set"
+
+_metadata_busy: set[str] = set()   # run slugs whose metadata is being generated (not tracked by _state)
 
 _state: dict = {
     "running":           False,
@@ -55,6 +54,7 @@ _state: dict = {
     "approval_result":   None,
     "revision_mode":     False,
     "script_mode":       False,   # waiting for a premade script (pasted or uploaded)
+    "script_topic":      "",      # optional run name from /script <run name>
     "clarifying_mode":   False,   # waiting for answers to clarifying questions
     "clarifying_topic":  None,    # topic being planned
     "clarifying_questions": None, # parsed list of {question, default} dicts
@@ -65,6 +65,7 @@ _state: dict = {
     "done_images":       0,
     "milestone_sent":    set(),
     "profile_name":      None,   # None = use first available
+    "meta_slug":         None,   # run whose thumbnail picker was sent last
 }
 
 
@@ -86,9 +87,9 @@ def _should_relay(msg: str) -> bool:
     m = msg.strip()
     if not m:
         return False
-    # Skip indented verbose sub-steps (Google AI request attempts, TTS chunks, etc.)
-    # but still forward failures/warnings that start with an emoji
-    if msg.startswith("  ") and not any(m.startswith(c) for c in ("❌", "⚠️")):
+    # Skip indented sub-steps (Google AI attempts, TTS chunks), warnings included: per-image
+    # retries flood the chat in an outage, and "✅ N/M images ready" reports the failures
+    if msg.startswith("  "):
         return False
     # Per-image lines are tracked via milestones — skip them to avoid flood
     if "Generating image " in msg and "/" in msg:
@@ -191,7 +192,7 @@ async def _relay_and_finish(app: Application, chat_id: int, lq: queue.Queue) -> 
                 try:
                     await app.bot.send_message(
                         chat_id=chat_id,
-                        text=f"🖼 Images: {milestone}% done ({done}/{total})",
+                        text=f"🖼 Images: {milestone}% started ({done}/{total})",
                     )
                 except Exception:
                     pass
@@ -257,12 +258,19 @@ async def _deliver_completion(app: Application, chat_id: int, result: dict) -> N
 # ── Clarifying questions + approach pitches ────────────────────────────────────
 
 def _parse_clarifying_questions(text: str) -> list[dict]:
+    """Numbered questions + Default: lines. Tolerates '1)', **bold**, any-case Default and a preamble.
+
+    templates/index.html (parseClarifyingQuestions) applies the same rules for the web UI.
+    """
     items = []
-    for block in re.split(r'\n(?=\d+\.)', text.strip()):
+    for block in re.split(r'\n(?=\s*\**\d+[.)])', text.strip()):
         lines = block.strip().split('\n')
-        question = re.sub(r'^\d+\.\s*', '', lines[0]).strip()
-        default_line = next((l for l in lines if l.strip().lower().startswith('default:')), '')
-        default = re.sub(r'(?i)^\s*default:\s*', '', default_line).strip()
+        first = re.match(r'\**\d+[.)]\**\s*(.*)', lines[0].strip())
+        if not first:
+            continue   # a preamble line, not a question
+        question = first[1].strip().strip('*').strip()
+        default = next((m[1].strip().strip('*').strip() for line in lines
+                        if (m := re.match(r'(?i)\s*\**default\**\s*:\**\s*(.*)', line))), '')
         if question:
             items.append({'question': question, 'default': default})
     return items
@@ -274,6 +282,10 @@ async def _send_clarifying_questions(update: Update, context: ContextTypes.DEFAU
         profile, _ = _resolve_profile_for_bot()
     except RuntimeError as e:
         await update.message.reply_text(f"❌ {e}")
+        return
+    missing = []   # say so now, not after the questions and pitches have been paid for
+    if not check_keys(profile, missing.append):
+        await update.message.reply_text(missing[0])
         return
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
@@ -357,11 +369,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/run <topic> — plan & start a pipeline run\n"
         "   ↳ asks clarifying questions, pitches 3 approaches, then runs\n"
         "   ↳ reply `default` to auto-fill all suggested answers\n"
-        "/script — produce from a script you already wrote\n"
+        "/script [run name] — produce from a script you already wrote\n"
         "   ↳ then paste it, or upload it as a .txt file\n"
         "/runs — list recent runs and their status\n"
         "/resume [slug] — resume an incomplete run\n"
         "/download [slug] — download run assets as zip (latest if omitted)\n"
+        "/metadata [slug] [regenerate] — titles, description, thumbnails\n"
         "/profile — view or switch the active style profile\n"
         "/status — show current run status\n"
         "/stop — stop the current run",
@@ -390,7 +403,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Otherwise show current + inline buttons to switch
-    current = _state["profile_name"] or available[0]
+    current = _state["profile_name"] or (available[0] if len(available) == 1 else "none — pick one")
     buttons = [
         [InlineKeyboardButton(
             f"{'✅ ' if p == current else ''}{p}",
@@ -407,6 +420,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 @auth
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if _metadata_busy:
+        await update.message.reply_text(f"📦 Generating metadata: {', '.join(sorted(_metadata_busy))}")
     if _state["running"]:
         slug  = _state["run_slug"] or "?"
         done  = _state["done_images"]
@@ -471,20 +486,36 @@ def _run_dirs() -> list[str]:
 
 
 def _resolve_run_slug(arg: str | None) -> str | None:
+    """A run folder directly under output/ (the newest when arg is empty); None for anything else."""
     if arg and arg != "regenerate":
-        return arg.strip()
+        arg = arg.strip()
+        # '..' or an absolute path would zip (and upload) anything on disk, .env included
+        inside = (OUTPUT_ROOT / arg).resolve().parent == OUTPUT_ROOT.resolve()
+        return arg if arg and inside else None
     dirs = _run_dirs()
     return dirs[0] if dirs else None
 
 
 def _resolve_profile_for_bot():
+    """(profile, name): the /profile choice, else the only profile. Several and none chosen: ask."""
     name = _state.get("profile_name")
     available = list_profiles()
     if not (name and name in available):
-        name = available[0] if available else None
-    if not name:
-        raise RuntimeError("No profiles available")
+        if not available:
+            raise RuntimeError("No profiles found. Create profiles/<name>/profile.yaml first.")
+        if len(available) > 1:
+            raise RuntimeError(f"Several profiles — pick one with /profile ({', '.join(available)})")
+        name = available[0]
     return load_profile(name), name
+
+
+def _profile_for_run(slug):
+    """(profile, name) a run was made with (its profile.txt), else the /profile choice."""
+    saved = OUTPUT_ROOT / slug / "profile.txt"
+    if saved.exists():
+        name = saved.read_text().strip()
+        return load_profile(name), name
+    return _resolve_profile_for_bot()
 
 
 async def _send_metadata_view(chat, data, run_slug):
@@ -526,10 +557,13 @@ async def _send_metadata_view(chat, data, run_slug):
             for fh in handles:
                 fh.close()
 
+    # Telegram caps callback_data at 64 bytes and slugs run to 60, so the slug stays here.
+    # ponytail: the newest picker wins; map ids to slugs if older pickers must stay live
+    _state["meta_slug"] = run_slug
     thumb_buttons = [
         InlineKeyboardButton(
             f"{'★' if i == chosen_th else ''}Thumb {i+1}",
-            callback_data=f"meta_thumb:{run_slug}:{i}",
+            callback_data=f"meta_thumb:{i}",
         )
         for i, t in enumerate(thumbs) if "render_error" not in t
     ]
@@ -556,16 +590,26 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Usage: /metadata [<run-slug>] [regenerate]")
         return
 
-    existing = _metadata_mod.load_metadata(slug)
+    try:   # a malformed metadata.json must not block the regenerate that repairs it
+        existing = None if regenerate else _metadata_mod.load_metadata(slug)
+    except ValueError as e:
+        await update.message.reply_text(f"❌ {e} — send /metadata {slug} regenerate to rebuild it")
+        return
     if existing and not regenerate:
         await update.message.reply_text(f"📦 Loading existing metadata for `{slug}`", parse_mode="Markdown")
         await _send_metadata_view(update.effective_chat, existing, slug)
         return
 
+    if slug in _metadata_busy:
+        await update.message.reply_text(f"⏳ Metadata for `{slug}` is already being generated.", parse_mode="Markdown")
+        return
+    _metadata_busy.add(slug)   # before any await, so a second request can't slip past the check
+
     await update.message.reply_text(f"📦 Generating metadata for `{slug}`…", parse_mode="Markdown")
     try:
-        profile, _ = _resolve_profile_for_bot()
+        profile, _ = _profile_for_run(slug)   # thumbnails in the run's own channel style
     except Exception as e:
+        _metadata_busy.discard(slug)
         await update.message.reply_text(f"❌ {e}")
         return
 
@@ -577,6 +621,8 @@ async def cmd_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             log_queue.put("__DONE__")
         except Exception as e:
             log_queue.put(f"__ERROR__:{e}")
+        finally:
+            _metadata_busy.discard(slug)
 
     threading.Thread(target=runner, daemon=True).start()
 
@@ -616,7 +662,7 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"📦 Zipping `{slug}`…", parse_mode="Markdown")
 
-    LIMIT = 49 * 1_048_576  # 49 MB — Telegram bot limit is 50 MB
+    LIMIT = 45_000_000  # Telegram caps bot uploads at 50 MB (50e6 bytes); leave room for zip overhead
 
     def _make_zip(paths: list) -> io.BytesIO:
         buf = io.BytesIO()
@@ -650,7 +696,7 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     for i, batch in enumerate(batches, 1):
         part_label = f"part {i}/{total}" if total > 1 else "complete"
         filename   = f"{slug}-part{i}.zip" if total > 1 else f"{slug}.zip"
-        buf        = _make_zip(batch)
+        buf        = await asyncio.to_thread(_make_zip, batch)
         size_mb    = buf.getbuffer().nbytes / 1_048_576
         await update.message.reply_document(
             document=buf,
@@ -668,8 +714,9 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if ae:
         _state["approval_result"] = False
         ae.set()
-    _state["running"]     = False
-    _state["script_mode"] = False
+    # disarm every text mode: otherwise the next message still triggers a paid revise or pitch call
+    _state.update(running=False, script_mode=False, revision_mode=False,
+                  clarifying_mode=False, clarifying_topic=None)
     await update.message.reply_text("🛑 Stop signal sent.")
 
 
@@ -691,11 +738,12 @@ async def cmd_script(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ A pipeline is already running. Use /stop first.")
         return
     _state["script_mode"] = True
+    _state["script_topic"] = " ".join(context.args or []).strip()   # /script <run name>, like CLI --topic
     await update.message.reply_text(
         "📄 Send the script now — paste it, or upload it as a .txt file.\n\n"
         "No research, writing, or approval step: it goes straight to TTS, image prompts, "
-        "images, and voiceover. The run is named after the script's `TITLE:` line, and a run "
-        "folder of that name is overwritten.",
+        "images, and voiceover. The run is named after the script's `TITLE:` line (or "
+        "`/script <run name>`), and a run folder of that name is overwritten.",
         parse_mode="Markdown",
     )
 
@@ -706,7 +754,8 @@ async def _run_premade_script(update, context: ContextTypes.DEFAULT_TYPE, script
         await update.message.reply_text("⚠️ That script is empty — send another, or /stop to cancel.")
         return
     _state["script_mode"] = False
-    await _start_pipeline(update, context, script=script)
+    topic = _state.pop("script_topic", "")
+    await _start_pipeline(update, context, script=script, **({"topic": topic} if topic else {}))
 
 
 @auth
@@ -717,9 +766,12 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     doc = update.message.document
+    if not (doc.file_name or "").lower().endswith(".txt"):   # an .rtf/.docx decodes too, into markup
+        await update.message.reply_text("Send the script as a plain .txt file.")
+        return
     try:
         raw = await (await doc.get_file()).download_as_bytearray()
-        script = bytes(raw).decode("utf-8")
+        script = bytes(raw).decode("utf-8-sig")   # Notepad's BOM would hide the TITLE: line
     except UnicodeDecodeError:
         await update.message.reply_text(f"❌ `{doc.file_name}` isn't UTF-8 text — send a .txt file.",
                                         parse_mode="Markdown")
@@ -743,10 +795,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         dirs = _run_dirs()
         incomplete = []
-        for slug in dirs[:10]:
+        for slug in dirs:   # filter every run, then cap the list: an older incomplete run still shows
             s = run_status(slug)
             if s["missing"]:
                 incomplete.append(f"• `{slug}` — missing: {', '.join(s['missing'])}")
+        incomplete = incomplete[:10]
         if not incomplete:
             await update.message.reply_text(
                 "No incomplete runs found.\n\nUse /resume <slug> to force-resume a specific run."
@@ -758,7 +811,11 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    await _start_pipeline(update, context, run_slug=context.args[0].strip())
+    slug = _resolve_run_slug(context.args[0])
+    if not slug:
+        await update.message.reply_text("❌ That isn't a run folder. Use /resume to list incomplete runs.")
+        return
+    await _start_pipeline(update, context, run_slug=slug)
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
@@ -776,10 +833,27 @@ async def _start_pipeline(
     loop    = asyncio.get_running_loop()
 
     if script and not topic:
-        topic = _topic_from_script(script)
+        topic = topic_from_script(script)
 
     lq = queue.Queue()
     se = threading.Event()
+
+    # Resume uses the run's saved profile; everything else the /profile choice (or the only one)
+    try:
+        if run_slug and not (script or topic):
+            profile, profile_name = _profile_for_run(run_slug)
+        else:
+            profile, profile_name = _resolve_profile_for_bot()
+    except Exception as e:   # several profiles and none chosen, or profile.txt names a renamed one
+        await context.bot.send_message(chat_id, f"❌ {e}")
+        return
+
+    # One guard for every caller (the Approach buttons bypassed the per-command checks).
+    # running is set only after the last step that can fail, with no await in between,
+    # so two taps can't both pass and a failed start can't leave the bot "running".
+    if _state["running"]:
+        await context.bot.send_message(chat_id, "⚠️ A pipeline is already running. Use /stop first.")
+        return
 
     _state.update({
         "running":         True,
@@ -789,6 +863,8 @@ async def _start_pipeline(
         "approval_result": None,
         "revision_mode":   False,
         "script_mode":     False,
+        "clarifying_mode": False,   # a started run ends any planning session left open
+        "clarifying_topic": None,
         "log_queue":       lq,
         "total_images":    0,
         "done_images":     0,
@@ -798,15 +874,7 @@ async def _start_pipeline(
     def progress_cb(msg: str):
         lq.put({"type": "log", "msg": msg})
 
-    available = list_profiles()
-    if not available:
-        await context.bot.send_message(chat_id, "❌ No profiles found. Create profiles/<name>/profile.yaml first.")
-        _state["running"] = False
-        return
-
     if script:
-        profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         label = f"▶️ Producing from script: *{topic}*\nProfile: `{profile_name}`"
         fn    = lambda: run_from_script(
             script,
@@ -816,8 +884,6 @@ async def _start_pipeline(
             stop_event=se,
         )
     elif topic:
-        profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         approval_cb = _make_approval_callback(app.bot, chat_id, loop)
         label = f"▶️ Starting pipeline: *{topic}*\nProfile: `{profile_name}`"
         fn    = lambda: run_pipeline(
@@ -829,13 +895,6 @@ async def _start_pipeline(
             approach_context=approach_context,
         )
     else:
-        # Resume: load profile from saved run folder; fall back to selected state
-        saved_profile_file = OUTPUT_ROOT / run_slug / "profile.txt"
-        if saved_profile_file.exists():
-            profile_name = saved_profile_file.read_text().strip()
-        else:
-            profile_name = _state["profile_name"] or available[0]
-        profile = load_profile(profile_name)
         label = f"▶️ Resuming: *{run_slug}*\nProfile: `{profile_name}`"
         fn    = lambda: resume_pipeline(
             run_slug,
@@ -843,8 +902,6 @@ async def _start_pipeline(
             progress_callback=progress_cb,
             stop_event=se,
         )
-
-    await context.bot.send_message(chat_id, label, parse_mode="Markdown")
 
     def worker():
         try:
@@ -865,6 +922,7 @@ async def _start_pipeline(
 
     threading.Thread(target=worker, daemon=True).start()
     asyncio.create_task(_relay_and_finish(app, chat_id, lq))
+    await context.bot.send_message(chat_id, label, parse_mode="Markdown")
 
 
 # ── Inline button callback ─────────────────────────────────────────────────────
@@ -891,6 +949,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         answers = _state.get("approach_answers") or ""
         pitches = _state.get("approach_pitches") or ""
         topic   = _state["clarifying_topic"]
+        if not topic:   # buttons from a cancelled plan or from before a bot restart
+            await query.message.reply_text("That plan expired — send /run again.")
+            return
         approach_context = f"{answers}\n\nApproach pitches:\n{pitches}\n\nUser chose Approach {choice}."
         _state["clarifying_topic"]  = None
         _state["approach_answers"]  = None
@@ -910,13 +971,22 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if data.startswith("meta_thumb:"):
-        _, slug, idx = data.split(":", 2)
+        idx, slug = data.split(":", 1)[1], _state.get("meta_slug")
+        if not slug:
+            await query.answer("That picker expired — send /metadata again", show_alert=True)
+            return
         try:
             updated = _metadata_mod.pick_thumbnail(slug, int(idx))
             await query.answer("Thumbnail set")
             await _send_metadata_view(query.message.chat, updated, slug)
         except ValueError as e:
             await query.answer(f"Error: {e}", show_alert=True)
+        return
+
+    if data in ("approve", "reject", "revise") and not (ae and not ae.is_set()):
+        # a review left over from a stopped or finished run
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text("Nothing is waiting for approval.")
         return
 
     if data == "approve":
@@ -964,12 +1034,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parts.append(f"{i}. {item['question']}\n   Answer: {item['default'] or '(no default)'}")
             answers = '\n\n'.join(parts)
         else:
-            # Pair user's numbered answers back to questions
-            raw_answers = re.split(r'\n(?=\d+[\.\)])', text)
+            # Pair answers with the number typed: "2. adults only" answers Q2, not Q1
+            by_num = {int(m[1]): m[2].strip() for m in
+                      re.finditer(r'(?ms)^\s*(\d+)\s*[.):-]\s*(.*?)(?=^\s*\d+\s*[.):-]|\Z)', text)}
+            by_num = by_num or {1: text}   # an unnumbered reply answers the first question
             parts = []
             for i, item in enumerate(parsed, 1):
-                user_ans = raw_answers[i - 1].strip() if i <= len(raw_answers) else ''
-                user_ans = re.sub(r'^\d+[\.\)]\s*', '', user_ans).strip()
+                user_ans = by_num.get(i, '')
                 parts.append(f"{i}. {item['question']}\n   Answer: {user_ans or item['default'] or '(no answer)'}")
             answers = '\n\n'.join(parts)
 
@@ -1003,13 +1074,14 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     script = script_path.read_text()
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    _available = list_profiles()
-    _profile_name = _state["profile_name"] or (_available[0] if _available else None)
-    _profile = load_profile(_profile_name) if _profile_name else None
+    try:
+        _profile, _ = _profile_for_run(slug)   # the run's own channel context
+    except Exception:
+        _profile = None                        # revise still works without it
 
     try:
-        # This blocks the event loop for ~10-20s — acceptable for a personal single-user bot
-        revised = revise_script(script, feedback, slug or "video", _profile, client)
+        # off the event loop: a 10-20 s Sonnet call would otherwise freeze /stop and the buttons
+        revised = await asyncio.to_thread(revise_script, script, feedback, topic_from_script(script), _profile, client)
     except Exception as e:
         await update.message.reply_text(f"❌ Revision error: {e}")
         _state["revision_mode"] = True
@@ -1051,7 +1123,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
 
     print(f"✅ Bot running — authorized user ID: {ALLOWED_USER_ID}")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY])   # no edited messages
 
 
 if __name__ == "__main__":

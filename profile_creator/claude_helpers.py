@@ -1,7 +1,6 @@
 """Claude conversation helpers for profile creator."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import anthropic
@@ -152,12 +151,30 @@ Never leave TBD or placeholders. voice.voice_id is always ${ELEVENLABS_VOICE_ID}
 """
 
 
+_FENCE_ALIASES = {"yaml": ("yaml", "yml"), "markdown": ("markdown", "md")}
+
+
 def extract_fenced_block(text: str, lang: str) -> str | None:
-    """Extract content of the first ```lang ... ``` block. Returns None if not found."""
-    pattern = rf"```{lang}\n(.*?)```"
-    m = re.search(pattern, text, re.DOTALL)
-    if m:
-        return m.group(1).strip()
+    """Content of the first ```lang block (```yml/```md aliases, CRLF and trailing spaces ok).
+
+    A fenced example inside the block is kept: a fence with an info string opens a nested
+    block, and only a bare ``` at depth 0 closes this one. Returns None if not found.
+    """
+    names = _FENCE_ALIASES.get(lang, (lang,))
+    body, depth = None, 0
+    for line in text.splitlines():
+        s = line.strip()
+        if body is None:
+            if s.startswith("```") and s[3:].strip().lower() in names:
+                body = []
+            continue
+        if s == "```":
+            if depth == 0:
+                return "\n".join(body).strip()
+            depth -= 1
+        elif s.startswith("```"):
+            depth += 1
+        body.append(line)
     return None
 
 

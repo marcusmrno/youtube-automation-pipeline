@@ -4,9 +4,13 @@ import time
 import types
 
 import anthropic
+import pytest
+import images
 import pipeline
-from pipeline import (_expand_short_prompts, _stream_text, _topic_from_script, build_preamble,
-                      generate_all_images, slugify, GENERIC_ANCHOR_REFS)
+import writing
+from images import build_preamble, generate_all_images, GENERIC_ANCHOR_REFS
+from pipeline import topic_from_script, slugify
+from writing import _expand_short_prompts, _stream_text
 
 
 class _Profile:
@@ -90,7 +94,7 @@ class _FakeClient:
 
 
 def test_stream_text_retry(monkeypatch):
-    monkeypatch.setattr(pipeline.time, "sleep", lambda s: None)   # don't actually back off
+    monkeypatch.setattr(writing.time, "sleep", lambda s: None)   # don't actually back off
 
     c = _FakeClient(fails=2)
     assert _stream_text(c, model="m", max_tokens=1, messages=[]) == "OK"
@@ -120,16 +124,17 @@ def test_build_preamble(tmp_path):
     # missing manifest -> generic line, never a crash
     assert GENERIC_ANCHOR_REFS in build_preamble({"art_style_block": "x"}, tmp_path)
     (tmp_path / "manifest.yaml").write_text("- label: anchor-01\n  purpose: cast sheet\n")
+    (tmp_path / "anchor-01.png").write_bytes(b"x")          # only anchors actually sent are described
     pre = build_preamble({"art_style_block": "x"}, tmp_path)
     assert "anchor-01: cast sheet" in pre and GENERIC_ANCHOR_REFS not in pre, pre
 
 
 def test_topic_from_script():
-    assert _topic_from_script("TITLE: The Real Reason\nKEYWORDS: a, b\n") == "The Real Reason"
-    assert _topic_from_script("\n\n  title: lower case works\n") == "lower case works"
-    assert _topic_from_script("No title line here\nsecond line") == "No title line here"
-    assert _topic_from_script("   \n\n") == "untitled"
-    assert slugify(_topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
+    assert topic_from_script("TITLE: The Real Reason\nKEYWORDS: a, b\n") == "The Real Reason"
+    assert topic_from_script("\n\n  title: lower case works\n") == "lower case works"
+    assert topic_from_script("No title line here\nsecond line") == "No title line here"
+    assert topic_from_script("   \n\n") == "untitled"
+    assert slugify(topic_from_script("TITLE: Why Cats Rule — Part 2")) == "why-cats-rule-part-2"
 
 
 def test_stop_halts_queued_images(monkeypatch, tmp_path):
@@ -142,8 +147,8 @@ def test_stop_halts_queued_images(monkeypatch, tmp_path):
         stop.set()         # ...then the user hits stop
         return True
 
-    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
-    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    monkeypatch.setattr(images, "load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     results = generate_all_images(
         [{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
@@ -176,8 +181,8 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
         time.sleep(0.05)
         return True
 
-    monkeypatch.setattr(pipeline, "_load_anchor_parts", lambda profile: [])
-    monkeypatch.setattr(pipeline, "generate_image_google", _fake_gen)
+    monkeypatch.setattr(images, "load_anchor_parts", lambda profile: [])
+    monkeypatch.setattr(images, "generate_image_google", _fake_gen)
     (tmp_path / "images").mkdir()
     with pytest.raises(KeyboardInterrupt):
         generate_all_images([{"num": f"{i:03d}", "prompt": "x"} for i in range(1, 21)],
@@ -186,7 +191,7 @@ def test_ctrl_c_drops_queued_images(monkeypatch, tmp_path):
 
 
 def test_tts_chunks_respect_the_limit_and_keep_every_word():
-    from pipeline import _split_into_chunks
+    from voiceover import _split_into_chunks
     for text in ("word " * 2000,                                   # no terminal punctuation
                  'He said "stop." Then more. ' * 400,              # sentences ending in a quote
                  "Short one. " * 900):
@@ -194,3 +199,42 @@ def test_tts_chunks_respect_the_limit_and_keep_every_word():
         assert max(map(len, chunks)) <= 4500, max(map(len, chunks))
         assert " ".join(chunks).split() == text.split()           # nothing dropped
     assert _split_into_chunks("   \n ") == []                       # no empty ElevenLabs request
+
+
+@pytest.mark.parametrize("topic", ["Café culture", "¿Por qué soñamos?", "— Why cats", "Why cats —",
+                                   "a" * 59 + " b", "你好世界", "???", "🔥🔥"])
+def test_every_slug_is_one_the_ui_accepts(topic):
+    # the UI silently dropped review edits (and 400'd every route) for runs it couldn't name
+    import ui
+    slug = slugify(topic)
+    assert slug and ui._safe_slug(slug), slug
+
+
+@pytest.mark.parametrize("bad", ["", ".", "..", "../x", "a/b", "/etc", "a\nb"])
+def test_ui_slug_check_still_rejects_paths(bad):
+    import ui
+    assert not ui._safe_slug(bad)
+
+
+@pytest.mark.parametrize("script,topic", [
+    ("TITLE:\nWhy Cats Rule\n", "Why Cats Rule"),                 # empty TITLE: value
+    ("```\nTITLE: Fenced Title\n```", "Fenced Title"),           # pasted from a chat
+    ("**TITLE:** Bold Title\nbody", "Bold Title"),
+    ("1. TITLE: Numbered Title", "Numbered Title"),
+    ("TITLE : Spaced Title", "Spaced Title"),
+    ("Subtitle: not a title line", "Subtitle: not a title line"),
+])
+def test_topic_from_script_finds_the_title(script, topic):
+    assert topic_from_script(script) == topic
+
+
+def test_preamble_describes_exactly_the_anchors_sent(tmp_path):
+    # a seed (anchor-00) or a failed anchor shifted every description by one
+    for label in ("anchor-00", "anchor-01", "anchor-03"):               # anchor-02 failed to generate
+        (tmp_path / f"{label}.png").write_bytes(b"x")
+    (tmp_path / "manifest.yaml").write_text(
+        "- {label: anchor-00, purpose: seed}\n- {label: anchor-01, purpose: cast sheet}\n"
+        "- {label: anchor-02, purpose: props}\n- {label: anchor-03, purpose: wide shot}\n")
+    pre = build_preamble({"art_style_block": "x", "max_anchors": 3}, tmp_path)
+    described = [line.split(":")[0].strip() for line in pre.splitlines() if line.startswith("  anchor-")]
+    assert described == ["anchor-00", "anchor-01", "anchor-03"]

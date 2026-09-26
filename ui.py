@@ -12,31 +12,31 @@ import threading
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
+from images import find_image
 from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
-                      regenerate_images, parse_image_prompts, revise_script,
-                      run_status, ANTHROPIC_KEY, VIDIQ_KEY,
-                      generate_clarifying_questions, generate_approach_pitches)
-from profile import load_profile, list_profiles
-from agents import run_vet_agent
+                      regenerate_images, run_status, ANTHROPIC_KEY)
+from writing import (generate_approach_pitches, generate_clarifying_questions, parse_image_prompts,
+                     revise_script)
+from channel_profile import load_profile, list_profiles
 import metadata as _metadata_mod
 
 _noop_log = lambda _: None
 
-_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]*$')
+_SLUG_RE = re.compile(r'[\w-]+')   # everything pipeline.slugify makes; never '.', '/' or ''  (fullmatch)
 
 def _safe_slug(run_slug: str) -> bool:
     return bool(_SLUG_RE.fullmatch(run_slug))
 
 
 def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
-    """Requested profile name, else the run's saved profile.txt, else the first available."""
+    """Requested profile name, else the run's saved profile.txt, else the only profile (never a guess)."""
     if requested:
         return requested
     saved = OUTPUT_ROOT / run_slug / "profile.txt"
     if saved.exists():
         return saved.read_text().strip()
     available = list_profiles()
-    return available[0] if available else None
+    return available[0] if len(available) == 1 else None
 
 app = Flask(__name__)
 
@@ -56,12 +56,12 @@ _state: dict = {
 
 STAGE_KEYWORDS: dict[str, list[str]] = {
     "research": ["researching", "research complete", "starting pipeline",
-                 "output directory", "style anchor", "api keys", "missing api"],
+                 "output directory", "api keys", "missing api"],
     "script":   ["writing script", "script written", "generating image prompts", "image prompts parsed",
                  "script ready", "📝", "vidiq script vet", "script vetted", "vet agent", "🔎"],
-    "images":   ["generating image", "images generated", "sending request"],
+    "images":   ["generating image", "sending request"],
     "voice":    ["generating voiceover", "voiceover generated", "voiceover failed", "🎙"],
-    "done":     ["pipeline complete", "pipeline finished", "🎬", "╔", "╚"],
+    "done":     ["pipeline complete"],
 }
 
 
@@ -286,14 +286,14 @@ def stop():
 # ── Data endpoints ────────────────────────────────────────────────────────────
 
 def _list_runs(required_file: str | None = None):
-    """Run slugs, newest name first, optionally filtered to those holding `required_file`."""
+    """Run slugs, most recently modified first (as the bot lists them), optionally filtered to those holding `required_file`."""
     if not OUTPUT_ROOT.exists():
         return jsonify([])
-    return jsonify(sorted(
-        (d.name for d in OUTPUT_ROOT.iterdir()
+    return jsonify([d.name for d in sorted(
+        (d for d in OUTPUT_ROOT.iterdir()
          if d.is_dir() and (required_file is None or (d / required_file).exists())),
-        reverse=True,
-    ))
+        key=lambda d: d.stat().st_mtime, reverse=True,
+    )])
 
 
 @app.route("/runs")
@@ -332,13 +332,10 @@ def metadata_generate(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     regenerate = bool(body.get("regenerate", False))
-    profile_name = (body.get("profile") or "").strip()
+    # the run's own profile.txt, as regen and resume use, so thumbnails match its channel
+    profile_name = _resolve_run_profile_name(run_slug, (body.get("profile") or "").strip())
     if not profile_name:
-        available = list_profiles()
-        if len(available) == 1:
-            profile_name = available[0]
-        else:
-            return jsonify({"error": "specify 'profile' in body"}), 400
+        return jsonify({"error": "specify 'profile' in body"}), 400
     try:
         profile = load_profile(profile_name)
     except Exception as e:
@@ -479,8 +476,13 @@ def get_clarifying_questions():
     if not topic:
         return jsonify({"ok": False, "error": "Topic required"})
 
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
+    missing = []   # say so now, not after the questions and pitches have been paid for
+    if not pipeline.check_keys(profile, missing.append):
+        return jsonify({"ok": False, "error": missing[0]})
     try:
-        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         questions = generate_clarifying_questions(topic, profile, client, _noop_log)
         return jsonify({"ok": True, "questions": questions})
@@ -496,8 +498,10 @@ def get_approach_pitches():
     if not topic or not answers:
         return jsonify({"ok": False, "error": "Topic and answers required"})
 
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
-        profile = load_profile((data.get("profile_name") or "").strip() or list_profiles()[0])
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         pitches = generate_approach_pitches(topic, answers, profile, client, _noop_log)
         return jsonify({"ok": True, "pitches": pitches})
@@ -509,7 +513,7 @@ def get_approach_pitches():
 
 @app.route("/regenerate_audio", methods=["POST"])
 def regenerate_audio():
-    from pipeline import generate_voiceover
+    from voiceover import generate_voiceover
 
     data     = request.get_json(force=True)
     run_slug = (data.get("run_slug") or "").strip()
@@ -525,7 +529,7 @@ def regenerate_audio():
 
     profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile_name\"."})
     try:
         profile = load_profile(profile_name)
     except Exception as e:
@@ -547,18 +551,12 @@ def revise():
     if not script or not feedback:
         return jsonify({"ok": False, "error": "Missing script or feedback"})
 
-    available = list_profiles()
-    if not profile_name:
-        profile_name = available[0] if available else None
+    profile, err = _load_ui_profile(profile_name)
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
-        profile = load_profile(profile_name) if profile_name else None
         client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         revised = revise_script(script, feedback, topic, profile, client)
-
-        if VIDIQ_KEY and revised and profile:
-            vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
-            if vetted:
-                revised = vetted
     except Exception as e:   # e.g. an Anthropic overload: the page needs JSON to re-enable Revise
         return jsonify({"ok": False, "error": str(e)})
 
@@ -585,12 +583,8 @@ def list_images(run_name: str):
 def serve_image(run_name: str, num: str):
     if not _safe_slug(run_name) or not num.isdigit():
         return "", 400
-    img_dir = OUTPUT_ROOT / run_name / "images"
-    for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg")):
-        img_path = img_dir / f"{num}{ext}"
-        if img_path.exists():
-            return send_file(img_path, mimetype=mime)
-    return "", 404
+    img_path = find_image(OUTPUT_ROOT / run_name / "images", num)   # send_file infers the mimetype
+    return send_file(img_path) if img_path else ("", 404)
 
 
 @app.route("/regenerate", methods=["POST"])
@@ -608,7 +602,7 @@ def regen():
 
     profile_name = _resolve_run_profile_name(run_slug, profile_name)
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile\"."})
 
     try:
         profile = load_profile(profile_name)

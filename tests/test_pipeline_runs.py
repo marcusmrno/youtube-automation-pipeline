@@ -5,7 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import images
 import pipeline
+import voiceover
+import writing
 
 PROFILE = SimpleNamespace(name="p", voice={"voice_id": "v"}, image_gen={}, image_style={})
 
@@ -28,11 +31,11 @@ def test_stop_halts_the_voiceover(monkeypatch, tmp_path):
         stop.set()                       # user hits Stop during chunk 1
         return b"ID3" + b"\x00" * 20
 
-    monkeypatch.setattr(pipeline, "_tts_chunk", fake_chunk)
+    monkeypatch.setattr(voiceover, "_tts_chunk", fake_chunk)
     monkeypatch.setattr(pipeline, "generate_all_images", lambda *a, **k: {})
     (tmp_path / "audio").mkdir()
     tts = "Every sentence here is billed. " * 600          # several ElevenLabs chunks
-    assert len(pipeline._split_into_chunks(tts)) > 2
+    assert len(voiceover._split_into_chunks(tts)) > 2
     r = pipeline._run_production("t", [], tts, PROFILE, tmp_path, lambda m: None, stop)
     assert r["status"] == "cancelled"
     assert len(calls) == 1
@@ -72,10 +75,10 @@ def resumable(monkeypatch, run_env):
     reply = SimpleNamespace(content=[SimpleNamespace(text="===TTS_SCRIPT===\nNEW TTS")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: calls.append("haiku tts") or reply))
     monkeypatch.setattr(pipeline.anthropic, "Anthropic", lambda **k: client)
-    monkeypatch.setattr(pipeline, "_stream_text",
+    monkeypatch.setattr(writing, "_stream_text",
                         lambda *a, **k: calls.append("sonnet prompts") or "===IMAGE_PROMPTS===\n001 | s | none | scene")
-    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "tts prompt")
-    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "prompt instructions")
+    monkeypatch.setattr(writing, "build_tts_prompt", lambda *a: "tts prompt")
+    monkeypatch.setattr(writing, "build_image_prompt_instructions", lambda *a: "prompt instructions")
     monkeypatch.setattr(pipeline, "_run_production",
                         lambda topic, prompts, tts, *a, **k: produced.update(tts=tts, prompts=prompts) or {"status": "complete"})
     run = run_env / "r1"
@@ -110,16 +113,16 @@ def test_empty_script_aborts_before_approval(monkeypatch, run_env):
 
 
 def test_untagged_model_replies_are_errors(monkeypatch):
-    reply = SimpleNamespace(content=[SimpleNamespace(text="=== TTS_SCRIPT ===\nspaced tag")])
+    reply = SimpleNamespace(content=[SimpleNamespace(text="Here is the narration, no tag at all.")])
     client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: reply))
-    monkeypatch.setattr(pipeline, "_build_tts_prompt", lambda *a: "p")
-    monkeypatch.setattr(pipeline, "_build_image_prompt_instructions", lambda *a: "p")
-    monkeypatch.setattr(pipeline, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
+    monkeypatch.setattr(writing, "build_tts_prompt", lambda *a: "p")
+    monkeypatch.setattr(writing, "build_image_prompt_instructions", lambda *a: "p")
+    monkeypatch.setattr(writing, "_stream_text", lambda *a, **k: "001 | s | none | untagged")
     profile = SimpleNamespace(characters=[], image_style={"art_style_block": "S"})
     with pytest.raises(ValueError, match="TTS_SCRIPT"):
-        pipeline._generate_tts("script", profile, client, lambda m: None)
+        writing.generate_tts("script", profile, client, lambda m: None)
     with pytest.raises(ValueError, match="IMAGE_PROMPTS"):
-        pipeline._generate_image_prompts("script", profile, client, lambda m: None)
+        writing.generate_image_prompts("script", profile, client, lambda m: None)
 
 
 def test_resume_regenerates_an_empty_tts_script(resumable):
@@ -134,8 +137,8 @@ def _gemini_returning(data, monkeypatch):
     part = SimpleNamespace(inline_data=SimpleNamespace(mime_type="image/png", data=data))
     response = SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
     client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **k: response))
-    monkeypatch.setattr(pipeline, "_get_genai_client", lambda: client)
-    monkeypatch.setattr(pipeline.time, "sleep", lambda s: None)
+    monkeypatch.setattr(images, "_get_genai_client", lambda: client)
+    monkeypatch.setattr(images.time, "sleep", lambda s: None)
 
 
 def test_undecodable_image_never_replaces_a_good_one(monkeypatch, tmp_path):
@@ -144,11 +147,11 @@ def test_undecodable_image_never_replaces_a_good_one(monkeypatch, tmp_path):
     Image.new("RGB", (4, 4)).save(good)
     before = good.read_bytes()
     _gemini_returning(b"\x89PNG-garbage", monkeypatch)
-    ok = pipeline.generate_image_google("p", good, None, lambda m: None, model="m", anchor_parts=[], preamble="")
+    ok = images.generate_image_google("p", good, None, lambda m: None, model="m", anchor_parts=[], preamble="")
     assert ok is False
     assert good.read_bytes() == before                  # a failed regen keeps the old image
     fresh = tmp_path / "002.png"
-    assert pipeline.generate_image_google("p", fresh, None, lambda m: None, model="m",
+    assert images.generate_image_google("p", fresh, None, lambda m: None, model="m",
                                           anchor_parts=[], preamble="") is False
     assert not fresh.exists()                          # nothing for resume to mistake as done
 
@@ -160,3 +163,42 @@ def test_empty_image_file_counts_as_missing(run_env):
     (run / "images" / "001.png").write_bytes(b"")      # a crash mid-write
     (run / "images" / "002.png").write_bytes(b"x")
     assert pipeline.run_status("r1")["images_on_disk"] == 1
+
+
+def test_rerunning_a_topic_keeps_the_existing_run(monkeypatch, run_env):
+    old = run_env / "vitamin-d"
+    old.mkdir()
+    (old / "script.txt").write_text("OLD FINISHED SCRIPT")
+    (old / "profile.txt").write_text("other-profile")
+    calls = []
+    monkeypatch.setattr(pipeline, "VIDIQ_KEY", "")
+    monkeypatch.setattr(pipeline, "research_topic", lambda *a: calls.append("research") or "facts")
+    r = pipeline.run_pipeline("Vitamin D?", PROFILE, approval_callback=lambda s: False)
+    assert r["status"] == "error" and calls == []                  # refused before any paid call
+    assert (old / "script.txt").read_text() == "OLD FINISHED SCRIPT"
+    assert (old / "profile.txt").read_text() == "other-profile"
+
+
+def test_a_failed_voiceover_does_not_leave_the_old_one(monkeypatch, tmp_path):
+    # a premade-script run overwrites its folder; the old audio belongs to a different script
+    (tmp_path / "audio").mkdir()
+    (tmp_path / "audio" / "voiceover.mp3").write_bytes(b"OLD VOICEOVER")
+    monkeypatch.setattr(pipeline, "generate_voiceover", lambda *a, **k: None)   # ElevenLabs failed
+    monkeypatch.setattr(pipeline, "generate_all_images", lambda *a, **k: {})
+    r = pipeline._run_production("t", [], "new narration", PROFILE, tmp_path, lambda m: None)
+    assert r["audio"] == "failed"
+    assert not (tmp_path / "audio" / "voiceover.mp3").exists()      # run_status must not call it done
+
+
+def test_regenerate_rejects_an_unknown_model_key(monkeypatch, run_env):
+    # a typo silently regenerated with the default model
+    calls = []
+    monkeypatch.setattr(pipeline, "generate_image_google", lambda *a, **k: calls.append(k) or True)
+    (run_env / "r1").mkdir()
+    (run_env / "r1" / "image_prompts.txt").write_text("001 | s | p")
+    profile = SimpleNamespace(image_gen={"default_model": "flash", "pro_model": "pro"}, image_style={})
+    monkeypatch.setattr(pipeline, "load_anchor_parts", lambda p: [])
+    assert pipeline.regenerate_images("r1", ["1"], "3-pr0", profile)["status"] == "error"
+    assert calls == []
+    pipeline.regenerate_images("r1", ["1"], "3-pro", profile)
+    assert calls[0]["model"] == "pro"

@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch
 import yaml
 
@@ -149,3 +150,134 @@ def test_run_revise_creates_v2_folder(tmp_path, monkeypatch):
     assert v2_dir.exists()
     assert (v2_dir / "profile.yaml").exists()
     assert (v2_dir / "style-sheet.md").exists()
+
+
+def _run_create_with(tmp_path, monkeypatch, inputs, yaml_text=PROFILE_YAML, seed=None, prompt_calls=None):
+    """run_create with every Claude/Gemini call faked; anchor-prompt calls land in prompt_calls."""
+    import profile_creator.new as m
+    prompt_calls = [] if prompt_calls is None else prompt_calls
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+    with patch("profile_creator.new.anthropic.Anthropic"), \
+         patch("profile_creator.new.clarification_loop", return_value=[]), \
+         patch("profile_creator.new.generate_profile_content", return_value=(yaml_text, "# Style\n")), \
+         patch("profile_creator.new.generate_anchor_prompts",
+               side_effect=lambda c, y, s, plan: prompt_calls.append(plan) or ({}, plan)), \
+         patch("profile_creator.new.run_verification_anchors"), \
+         patch("profile_creator.new.run_full_anchors", return_value={"ok": [], "failed": []}), \
+         patch("builtins.input", side_effect=inputs):
+        m.run_create(seed_image=seed)
+    return tmp_path
+
+
+def test_overwriting_a_profile_starts_from_an_empty_folder(tmp_path, monkeypatch):
+    # old-style anchors were skipped ("already exists") and used as references for the new ones
+    old = tmp_path / "my-channel" / "anchors"
+    old.mkdir(parents=True)
+    (old / "anchor-04.png").write_bytes(b"OLD STYLE")
+    _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel", "y"])
+    assert not (old / "anchor-04.png").exists()
+
+
+def test_an_invalid_generated_profile_stops_before_anchor_prompts(tmp_path, monkeypatch):
+    import pytest
+    broken = PROFILE_YAML.split("image_gen:")[0]          # Claude left out a section
+    calls = []
+    with pytest.raises(SystemExit):
+        _run_create_with(tmp_path, monkeypatch, ["concept", "---", "my-channel"], yaml_text=broken,
+                         prompt_calls=calls)
+    assert calls == []                                    # no paid anchor-prompt call for a broken profile
+
+
+def test_a_jpeg_seed_is_installed_where_it_will_be_sent(tmp_path, monkeypatch):
+    # only anchor-*.png / *.jpg are sent, so a .jpeg seed was installed and silently ignored
+    from PIL import Image
+    seed = tmp_path / "ref.jpeg"
+    Image.new("RGB", (64, 36), "red").save(seed, "JPEG")
+    root = tmp_path / "profiles"
+    root.mkdir()
+    _run_create_with(root, monkeypatch, ["concept", "---", "my-channel"], seed=str(seed))
+    anchors = root / "my-channel" / "anchors"
+    assert (anchors / "anchor-00.png").exists() and not list(anchors.glob("anchor-00.jp*"))
+    manifest = yaml.safe_load((anchors / "manifest.yaml").read_text())
+    assert manifest[0]["label"] == "anchor-00"                        # described as the first reference
+
+
+def test_character_free_profiles_get_no_invented_character():
+    # those anchors ride along with every image, pushing a figure into a character-free channel
+    from profile_creator.anchors import build_anchor_plan
+    no_cast = yaml.safe_load(PROFILE_YAML)
+    no_cast.pop("characters")
+    purposes = [s["purpose"].lower() for s in build_anchor_plan(no_cast)]
+    assert not any("one character" in p or "portrait" in p for p in purposes), purposes
+    with_cast = build_anchor_plan(yaml.safe_load(PROFILE_YAML))
+    assert any("portrait" in s["purpose"].lower() for s in with_cast)      # unchanged with a roster
+
+
+def test_a_punctuation_only_name_is_asked_again(tmp_path, monkeypatch):
+    # '!!!' sanitised to '', and profiles/'' is profiles/ itself: "already exists — overwrite?"
+    other = tmp_path / "other-profile"
+    other.mkdir()
+    (other / "profile.yaml").write_text("keep me")
+    _run_create_with(tmp_path, monkeypatch, ["concept", "---", "!!!", "my-channel"])
+    assert (other / "profile.yaml").read_text() == "keep me"
+    assert (tmp_path / "my-channel" / "profile.yaml").exists()
+    assert not (tmp_path / "profile.yaml").exists()
+
+
+def test_revising_twice_makes_v3_and_keeps_v2(tmp_path, monkeypatch):
+    import profile_creator.revise as m
+    for name in ("my-channel", "my-channel-v2"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "profile.yaml").write_text(PROFILE_YAML)
+    monkeypatch.setattr(m, "PROFILES_ROOT", tmp_path)
+    asked = []
+    with patch("profile_creator.revise.anthropic.Anthropic"), \
+         patch("profile_creator.revise.clarification_loop", return_value=[{"content": "REGENERATE_ANCHORS: false"}]), \
+         patch("profile_creator.revise.generate_profile_content", return_value=(PROFILE_YAML, "# Style\n")), \
+         patch("builtins.input", side_effect=lambda prompt="": asked.append(prompt) or "darker"):
+        m.run_revise("my-channel")
+    assert (tmp_path / "my-channel-v3" / "profile.yaml").exists()
+    assert not any("Overwrite" in p for p in asked)                    # v2 is never offered for overwrite
+
+
+@pytest.mark.parametrize("text,lang,expected", [
+    ("```markdown\n# Style\n```text\nLABEL\n```\n## Palette\nnavy\n```", "markdown",
+     "# Style\n```text\nLABEL\n```\n## Palette\nnavy"),                        # inner example fence
+    ("```yml\nkey: value\n```", "yaml", "key: value"),
+    ("```yaml\r\nkey: value\r\n```\r\n", "yaml", "key: value"),                  # CRLF
+    ("```md\n# Title\n```", "markdown", "# Title"),
+    ("```yaml \nkey: value\n```", "yaml", "key: value"),                         # trailing space
+])
+def test_fenced_blocks_in_common_variants(text, lang, expected):
+    # a miss raised after the paid 8192-token generation call; an inner fence truncated the style sheet
+    assert extract_fenced_block(text, lang) == expected
+
+
+@pytest.mark.parametrize("argv", [["--revise", "my-channel", "--seed", "ref.png"],   # silently ignored before
+                                  ["--seed", "does-not-exist.png"]])                # found out after the brain dump
+def test_seed_mistakes_are_caught_before_any_work(monkeypatch, tmp_path, argv):
+    import sys
+    import create_profile
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ref.png").write_bytes(b"x")
+    monkeypatch.setattr(sys, "argv", ["create_profile.py", *argv])
+    with pytest.raises(SystemExit) as exc:
+        create_profile.main()
+    assert exc.value.code == 2                                     # an argparse usage error
+
+
+def test_ctrl_d_ends_the_creator_with_a_message(monkeypatch):
+    import runpy
+    import sys
+    from pathlib import Path
+    import channel_profile
+    monkeypatch.setattr(sys, "argv", ["create_profile.py"])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test")
+    monkeypatch.setattr(channel_profile, "list_profiles", lambda root=None: [])
+    def eof(prompt=""):
+        raise EOFError
+    monkeypatch.setattr("builtins.input", eof)
+    with pytest.raises(SystemExit) as exc:                         # not an EOFError traceback
+        runpy.run_path(str(Path(channel_profile.__file__).parent / "create_profile.py"), run_name="__main__")
+    assert "Aborted" in str(exc.value.code)

@@ -6,20 +6,20 @@ import anthropic
 import yaml
 from pathlib import Path
 
-from pipeline import (
-    generate_image_google, _load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
+from images import (
+    generate_image_google, load_anchors_from_dir, build_preamble, DEFAULT_MAX_ANCHORS,
 )
 from .claude_helpers import MODEL
 
 
 def _roster(profile_yaml: dict) -> list[dict]:
-    """Characters are optional — mirror profile.load_profile's tolerance for a missing block."""
+    """Characters are optional — mirror channel_profile.load_profile's tolerance for a missing block."""
     return (profile_yaml.get("characters") or {}).get("roster") or []
 
 
 def _generate_anchor(prompt: str, output_path: Path, profile_yaml: dict, anchors_dir: Path) -> bool:
     image_style = profile_yaml["image_style"]
-    anchor_parts = _load_anchors_from_dir(anchors_dir, image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
+    anchor_parts = load_anchors_from_dir(anchors_dir, image_style.get("max_anchors", DEFAULT_MAX_ANCHORS))
     return generate_image_google(
         prompt, output_path, profile=None, log_fn=print,
         model=profile_yaml["image_gen"]["default_model"],
@@ -140,6 +140,9 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
 
     # ── Tier: full ────────────────────────────────────────────────────────────
 
+    # Character-free profiles must not get an invented figure: these anchors go with every image
+    subject = "one character" if characters else "the channel's main subject (no characters)"
+
     # Character interaction (only if 2+ characters)
     if len(characters) >= 2:
         n = len(plan) + 1
@@ -172,7 +175,9 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
     plan.append({
         "label": f"anchor-{n:02d}",
         "purpose": (
-            f"One character pointing at or presenting a diagram, chart, or annotation with "
+            (f"One character pointing at or presenting a diagram, chart, or annotation with "
+             if characters else
+             f"A diagram, chart, or annotation about the channel's subject, no characters, with ") +
             f"handwritten-style text labels clearly visible. Locks in how text, labels, "
             f"and annotations should look in the art style. Use a neutral background."
         ),
@@ -184,37 +189,38 @@ def build_anchor_plan(profile_yaml: dict) -> list[dict]:
     plan.append({
         "label": f"anchor-{n:02d}",
         "purpose": (
-            f"Wide establishing shot — one character shown small within a larger detailed "
+            f"Wide establishing shot — {subject} shown small within a larger detailed "
             f"environment relevant to the channel niche. Tests whether the art style holds "
             f"when characters are not the primary focus. Neutral background."
         ),
         "tier": "full",
     })
 
-    # Close-up — character face/upper body
-    n = len(plan) + 1
-    plan.append({
-        "label": f"anchor-{n:02d}",
-        "purpose": (
-            f"Close-up portrait — one character from the waist up, facing slightly toward "
-            f"camera. Tests character detail consistency at close range. Plain background."
-        ),
-        "tier": "full",
-    })
+    # Close-up — character face/upper body (nothing to portray without a roster)
+    if characters:
+        n = len(plan) + 1
+        plan.append({
+            "label": f"anchor-{n:02d}",
+            "purpose": (
+                f"Close-up portrait — one character from the waist up, facing slightly toward "
+                f"camera. Tests character detail consistency at close range. Plain background."
+            ),
+            "tier": "full",
+        })
 
     # Background/landscape environments — lock in how different settings look in the art style
     background_slots = [
         (
-            "Indoor scene — one character in a fully dressed interior environment relevant to the channel "
+            f"Indoor scene — {subject} in a fully dressed interior environment relevant to the channel "
             "(desk, shelves, walls, floor all visible). Locks in how indoor backgrounds render in the art style."
         ),
         (
-            "Outdoor scene — one character in a detailed exterior environment relevant to the channel "
+            f"Outdoor scene — {subject} in a detailed exterior environment relevant to the channel "
             "(ground, horizon line, sky, and background objects all visible). Locks in how outdoor "
             "settings look in the art style."
         ),
         (
-            "Abstract or diagrammatic background — one character in front of a flat graphic background "
+            f"Abstract or diagrammatic background — {subject} in front of a flat graphic background "
             "(grid, chart, map, or pattern). Locks in how non-realistic backgrounds work with the characters."
         ),
     ]
@@ -234,8 +240,8 @@ def generate_anchor_prompts(
     profile_yaml: dict,
     style_sheet: str,
     plan: list[dict],
-) -> dict[str, str]:
-    """Ask Claude to write one targeted prompt per anchor slot. Returns {label: prompt}.
+) -> tuple[dict[str, str], list[dict]]:
+    """Ask Claude to write one targeted prompt per anchor slot. Returns ({label: prompt}, trimmed plan).
 
     Respects image_style.max_anchors — verification slots fill the budget first,
     then full-tier slots fill the remainder in order.

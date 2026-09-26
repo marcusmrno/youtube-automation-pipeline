@@ -15,7 +15,7 @@ from .claude_helpers import (
 )
 from .anchors import build_anchor_plan, generate_anchor_prompts, run_verification_anchors, run_full_anchors, write_manifest
 from pipeline import ANTHROPIC_KEY
-from profile import PROFILES_ROOT
+from channel_profile import PROFILES_ROOT, load_profile
 
 STYLE_SENSITIVE_KEYS = {"art_style_block", "style_constraints"}
 
@@ -52,13 +52,11 @@ def run_revise(profile_name: str) -> None:
     old_style_text = (profile_dir / "style-sheet.md").read_text() if (profile_dir / "style-sheet.md").exists() else ""
     old_yaml       = yaml.safe_load(old_yaml_text)
 
+    # the next free version: revising twice makes -v3, never overwrites (or merges into) -v2
     v2_name = next_version_name(profile_name)
+    while (PROFILES_ROOT / v2_name).exists():
+        v2_name = next_version_name(v2_name)
     v2_dir  = PROFILES_ROOT / v2_name
-
-    if v2_dir.exists():
-        overwrite = input(f"Profile '{v2_name}' already exists. Overwrite? [y/N]: ").strip().lower()
-        if overwrite != "y":
-            sys.exit(0)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
@@ -106,6 +104,10 @@ def run_revise(profile_name: str) -> None:
     (v2_dir / "style-sheet.md").write_text(new_style_text)
     print(f"  Written: {v2_dir / 'profile.yaml'}")
     print(f"  Written: {v2_dir / 'style-sheet.md'}")
+    try:   # the pipeline must be able to load it — check before paying for anchors
+        load_profile(v2_name, PROFILES_ROOT)
+    except ValueError as e:
+        sys.exit(f"x {e}. Fix {v2_dir / 'profile.yaml'} by hand, or revise again.")
 
     anchors_dir = v2_dir / "anchors"
 

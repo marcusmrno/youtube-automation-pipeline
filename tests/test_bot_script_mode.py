@@ -58,7 +58,7 @@ def started(monkeypatch):
 # ── /script arms, and only when idle ─────────────────────────────────────────
 def test_script_arms_when_idle():
     u = _update()
-    run(bot.cmd_script(u, None))
+    run(bot.cmd_script(u, types.SimpleNamespace(args=[])))
     assert bot._state["script_mode"] is True
     assert "Send the script" in u.message.replies[0]
 
@@ -66,7 +66,7 @@ def test_script_arms_when_idle():
 def test_script_refuses_while_running():
     bot._state["running"] = True
     u = _update()
-    run(bot.cmd_script(u, None))
+    run(bot.cmd_script(u, types.SimpleNamespace(args=[])))
     assert bot._state["script_mode"] is False, "must not arm while a run is in flight"
     assert "already running" in u.message.replies[0]
 
@@ -120,6 +120,7 @@ def test_run_disarms_script_mode(monkeypatch):
     bot._state["script_mode"] = True
     monkeypatch.setattr(bot, "generate_clarifying_questions", lambda *a: "1. Angle?\nDefault: history")
     monkeypatch.setattr(bot, "_resolve_profile_for_bot", lambda: (None, "p"))
+    monkeypatch.setattr(bot, "check_keys", lambda profile, log_fn: True)   # this test is about modes, not keys
     context = types.SimpleNamespace(bot=types.SimpleNamespace(
         send_message=lambda *a, **k: asyncio.sleep(0)))
     run(bot._send_clarifying_questions(_update(), context, topic="cats"))
@@ -152,3 +153,10 @@ def test_start_pipeline_script_branch(monkeypatch):
     assert topic_arg == "Why Cats Rule", topic_arg          # from the TITLE: line
     assert kwargs == ["progress_callback", "stop_event"], kwargs
     assert bot._state["run_slug"] == "why-cats-rule", bot._state["run_slug"]
+
+
+def test_script_can_name_its_run(started):
+    # CLI --topic and the UI's Run Name can; without it a second cut overwrote the first
+    run(bot.cmd_script(_update(), types.SimpleNamespace(args=["Why", "Cats", "Rule", "v2"])))
+    run(bot.on_text(_update(text=SCRIPT), None))
+    assert started == [{"script": SCRIPT, "topic": "Why Cats Rule v2"}], started
