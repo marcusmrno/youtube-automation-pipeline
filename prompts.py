@@ -7,15 +7,20 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from profile import Profile
+    from channel_profile import Profile
 
 
-def _extract(tag: str, text: str) -> str:
-    m = re.search(rf"==={tag}===(.*?)(?====|\Z)", text, re.DOTALL)
-    return m.group(1).strip() if m else ""
+def extract(tag: str, text: str) -> str:
+    """The last ===TAG=== block, up to the next ===TAG=== (spacing, case and **bold** tolerated).
+
+    Only a real tag ends a block, so a '=====' divider or '=== Part 2 ===' inside it survives;
+    taking the last match skips a preamble that merely mentions the tag.
+    """
+    blocks = re.findall(rf"===\s*{tag}\s*===\**(.*?)(?=\**===\s*[A-Z0-9_]+\s*===|\Z)", text, re.S | re.I)
+    return blocks[-1].strip() if blocks else ""
 
 
-def _build_research_prompt(topic: str) -> str:
+def build_research_prompt(topic: str) -> str:
     return f"""
 You are a research assistant preparing verified facts for a YouTube educational video script.
 
@@ -43,7 +48,7 @@ Return your response in this exact format:
 """
 
 
-def _build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:
+def build_clarifying_questions_prompt(topic: str, profile: "Profile") -> str:
     c = profile.channel
     template = f"""
 You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
@@ -70,7 +75,7 @@ Return only the numbered questions and defaults, no preamble or closing text."""
     return template
 
 
-def _build_approach_pitch_prompt(topic: str, answers: str, profile: "Profile") -> str:
+def build_approach_pitch_prompt(topic: str, answers: str, profile: "Profile") -> str:
     c = profile.channel
     template = f"""
 You are a content strategist for a {c["niche"]} educational YouTube channel targeting {c["audience"]}.
@@ -103,7 +108,7 @@ Format as:
     return template
 
 
-def _word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
+def word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
     """wpm-derived word counts for a profile's script config.
 
     Returns (target_words, min_words, max_words, hook_words, cta_words, section_min, section_max).
@@ -120,10 +125,11 @@ def _word_budget(s: dict) -> tuple[int, int, int, int, int, int, int]:
     )
 
 
-def _build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
+def build_script_prompt(topic: str, research: str, profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    target_words, min_words, max_words, hook_words, cta_words, section_min, section_max = word_budget(s)
+    hook_end = f"{s['hook_duration_s'] // 60}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 1:15, not 0:75
 
     approach_section = ""
     if approach_context.strip():
@@ -147,7 +153,7 @@ You are a script writer for a faceless educational YouTube channel.
 - Titles: {c["title_format"]}
 
 ## Script Structure
-- Hook (0:00-0:{s["hook_duration_s"]:02d}): Provocative opening statement or surprising fact. No intro, no "welcome back".
+- Hook (0:00-{hook_end}): Provocative opening statement or surprising fact. No intro, no "welcome back".
 - {s["section_count"]} content sections with clear [MM:SS-MM:SS] timestamps
 - Each section {s["section_duration_s"]} seconds
 - CTA close (last {s["cta_duration_s"]} seconds): Subscribe prompt only — no teasing or referencing a next video
@@ -159,7 +165,7 @@ The voiceover is delivered at ~{s["wpm"]} words per minute.
 - {s["max_mins"]}-minute maximum = ~{max_words} words of narration
 - Each {s["section_duration_s"]} second section needs {section_min}-{section_max} words of narration
 - Hook ({s["hook_duration_s"]}s) = ~{hook_words} words. CTA close ({s["cta_duration_s"]}s) = ~{cta_words} words.
-After writing, count your narration words. If under {round(target_words * 0.9)}, expand sections before returning.
+After writing, count your narration words. If under {round(min_words * 1.1)}, expand sections before returning.
 
 ---
 TOPIC: {topic}
@@ -185,7 +191,8 @@ Return your response in this exact format — no other text:
     return template
 
 
-def _build_tts_prompt(script: str, profile: "Profile") -> str:
+def build_tts_prompt(script: str, profile: "Profile") -> str:
+    target_words = word_budget(profile.script)[0]
     template = f"""
 You are preparing a TTS narration for ElevenLabs {profile.voice.get("model", "eleven_v3")} from a finished YouTube video script.
 
@@ -207,7 +214,7 @@ SCRIPT:
 - Exclamation marks add energy; question marks invite the listener to lean in.
 
 ## Audio tags — place immediately before the segment they modify, or after a natural pause mid-sentence
-Target density: 1–2 tags per 200 words (~10–16 tags for a full 12-minute script). Too few is flat; too many is performed.
+Target density: 1–2 tags per 200 words (~{target_words // 200}–{target_words // 100} tags for a full {profile.script["target_mins"]}-minute script). Too few is flat; too many is performed.
 Do not stack two tags back-to-back with no words between them.
 
 Laughter (graduated — pick the right intensity):
@@ -276,7 +283,7 @@ Return only this, no other text:
     return template
 
 
-def _build_image_prompt_instructions(profile: "Profile") -> str:
+def build_image_prompt_instructions(profile: "Profile") -> str:
     s = profile.script
 
     style       = profile.image_style["art_style_block"].strip()
@@ -319,7 +326,7 @@ viewpoints and scales, not the same layout relabelled."""
     template = f"""
 You are an image prompt writer for a YouTube video pipeline targeting Google Gemini image generation.
 
-Below is a segment of the script — timestamped sections of narration. Your job is to write image prompts covering that narration — each a direct, literal translation of EXACTLY what the narrator says at that moment.
+Below is the full script — timestamped sections of narration. Your job is to write image prompts covering that narration — each a direct, literal translation of EXACTLY what the narrator says at that moment.
 
 ---
 
@@ -335,7 +342,7 @@ For each narration beat, ask: what is the single most concrete, specific thing b
 - Never show a "mood" or "vibe" — show the exact fact being stated
 - Never write a scene that could fit 3 different moments in the script
 - Style prefix at the start of a prompt is forbidden (pipeline prepends it automatically)
-- **Every word of narration must be covered by an image. Zero gaps.** Timestamps must span the full audio with no uncovered narration.
+- **Every word of narration must be covered by an image. Zero gaps.**
 
 **Transition sentences are not skippable.** Short pivot phrases like "Now the opposite kind.", "The team continues.", "So back to that opening promise.", "Remember the fat-soluble ones" are their own image beats. Never merge them silently into the next content beat.
 
@@ -362,7 +369,7 @@ out. It is shown here so your scene descriptions stay compatible with it.
 
 ## Format
 
-Target density: **one image every 3–4 seconds**. A 14-minute video should produce ~210–280 prompts. If you are writing fewer than 15 prompts per minute of narration, you are combining too many sentences — stop and split them.
+Target density: **one image every 3–4 seconds**. A {s["target_mins"]}-minute video should produce ~{s["target_mins"] * 15}–{s["target_mins"] * 20} prompts. If you are writing fewer than 15 prompts per minute of narration, you are combining too many sentences — stop and split them.
 
 Every sentence gets its own image. Every distinct idea, fact, or statement is a separate visual frame — do not combine two sentences into one image. If a sentence contains two distinct claims, split it into two images. A sentence with a list (e.g. "It does A, B, and C") must be split into one image per item if each item is meaningfully different.
 
@@ -408,10 +415,11 @@ Return only:
     return template
 
 
-def _build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
+def build_agent_script_prompt(profile: "Profile", approach_context: str = "") -> str:
     s = profile.script
     c = profile.channel
-    target_words, min_words, _, hook_words, cta_words, section_min, section_max = _word_budget(s)
+    target_words, min_words, _, hook_words, cta_words, section_min, section_max = word_budget(s)
+    hook_end = f"{s['hook_duration_s'] // 60:02d}:{s['hook_duration_s'] % 60:02d}"   # 75 s -> 01:15
 
 
     approach_section = ""
@@ -453,10 +461,10 @@ Use the winning title + vidIQ keyword insights to write a complete script matchi
 TITLE: [winning title]
 KEYWORDS: [3-5 top keywords from vidIQ]
 
-[00:00-00:{s["hook_duration_s"]:02d}] HOOK
+[00:00-{hook_end}] HOOK
 [provocative opening statement or surprising fact — no intro, no "welcome back", no "in this video"]
 
-[00:{s["hook_duration_s"]:02d}-02:00] SECTION 1 — [section title]
+[{hook_end}-MM:SS] SECTION 1 — [section title]
 [narration prose]
 
 ... {s["section_count"]} sections total ...
@@ -492,9 +500,9 @@ Return the finished script in this exact format — nothing after it:
 """
 
 
-def _build_vet_prompt(profile: "Profile") -> str:
+def build_vet_prompt(profile: "Profile") -> str:
     s = profile.script
-    target_words, min_words, *_ = _word_budget(s)
+    _, min_words, max_words, *_ = word_budget(s)
 
     return f"""
 You are vetting a YouTube video script for accuracy, SEO strength, and hook power.
@@ -510,7 +518,7 @@ STEP 2 — Review the script against the data:
 - MISSING ANGLES: if the script misses the strongest outlier hook angle, note it
 - KEYWORD GAPS: if the top keywords are absent from the first 60 seconds, flag them
 - TITLE STRENGTH: if the vidIQ title score is below 70, propose a stronger alternative
-- WORD COUNT: narration must be {round(min_words * 1.1)}-{target_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
+- WORD COUNT: narration must be {round(min_words * 1.1)}-{max_words} words (voice runs at ~{s["wpm"]} wpm) — if short, expand thin sections
 - IDEA REPETITION: flag any core idea explained more than once. Each mechanism or concept must appear only once — callbacks are only allowed if they add new information. Remove or rewrite any section that re-explains something already stated.
 
 STEP 3 — Rewrite the script with all fixes applied:
@@ -525,7 +533,7 @@ Return the vetted script in this exact format — nothing after it:
 """
 
 
-def _build_agent_system_prompt(topic: str, profile: "Profile") -> str:
+def build_agent_system_prompt(topic: str, profile: "Profile") -> str:
     c = profile.channel
     char_block = profile.characters_block()
     style      = profile.image_style["art_style_block"].strip()
@@ -550,7 +558,7 @@ TOPIC: {topic}
 """
 
 
-def _build_metadata_titles_prompt(
+def build_metadata_titles_prompt(
     topic: str,
     script: str,
     research: str,
@@ -594,10 +602,14 @@ Return ONLY this format:
     return template
 
 
-def _build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile) -> str:
+def build_metadata_desc_hashtags_prompt(top_title, script, keywords, profile, audio_secs=None) -> str:
     c = profile.channel
     kw_line = ", ".join(k.get("keyword", "") for k in keywords if k.get("keyword"))
     kw_section = f"\nTop keywords to weave in naturally: {kw_line}\n" if kw_line else ""
+    # the script's timestamps are wpm estimates; chapters must fit the audio that was actually made
+    length = f"{int(audio_secs) // 60}:{int(audio_secs) % 60:02d}" if audio_secs else ""
+    audio_rule = (f"\n- The finished voiceover is {length} long and the script's timestamps are estimates: "
+                  f"scale chapter times to fit, and start none after {length}.") if length else ""
 
     template = f"""
 You are a YouTube metadata writer for a {c["niche"]} channel.
@@ -613,7 +625,7 @@ Write a YouTube description AND a hashtag set.
 DESCRIPTION rules:
 - Start with a 1-2 sentence hook that previews the video without spoiling the payoff.
 - Add a blank line.
-- Then chapter timestamps derived from the script. Format each as "MM:SS Section title" on its own line. If the script has explicit timestamps or [SECTION] markers, use those; otherwise pick natural beats.
+- Then chapter timestamps derived from the script. Format each as "MM:SS Section title" on its own line. If the script has explicit timestamps or [SECTION] markers, use those; otherwise pick natural beats.{audio_rule}
 - Close with one line inviting the viewer to subscribe (tone: {c["tone"]}).
 - Plain text only — no markdown, no emoji.
 
@@ -634,7 +646,7 @@ Return ONLY this format:
     return template
 
 
-def _build_metadata_thumbnail_prompt(script, topic, profile) -> str:
+def build_metadata_thumbnail_prompt(script, topic, profile) -> str:
     c = profile.channel
     chars = profile.characters_block()
     style = profile.image_style["art_style_block"]

@@ -12,14 +12,14 @@ from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 from dotenv import load_dotenv
 
 from prompts import (
-    _build_agent_system_prompt,
-    _build_agent_script_prompt,
-    _build_vet_prompt,
-    _extract,
+    build_agent_system_prompt,
+    build_agent_script_prompt,
+    build_vet_prompt,
+    extract,
 )
 
 if TYPE_CHECKING:
-    from profile import Profile
+    from channel_profile import Profile
 
 load_dotenv()
 
@@ -48,6 +48,11 @@ async def run_vidiq_agent(
             }
         },
         permission_mode="bypassPermissions",
+        # The agent reads third-party YouTube text: give it only the vidIQ tools —
+        # no built-ins (Bash, Write, WebFetch), no other MCP servers, no user hooks/CLAUDE.md.
+        tools=[],
+        strict_mcp_config=True,
+        setting_sources=[],
         max_turns=max_turns,
         model=model,
     )
@@ -59,10 +64,11 @@ async def run_vidiq_agent(
             for block in message.content:
                 if isinstance(block, TextBlock) and block.text.strip():
                     log_fn(f"  {block.text[:120].strip()}")
-                    full_text += block.text
+                    full_text += block.text + "\n"
         elif isinstance(message, ResultMessage):
-            if message.result:
-                full_text += message.result
+            # result repeats the last assistant text; appending it would duplicate the final block
+            if message.result and not full_text:
+                full_text = message.result
     return full_text
 
 
@@ -73,18 +79,18 @@ def split_agent_output(raw: str) -> tuple[str, str]:
     findings (keywords, outliers, title scores). Empty if it went straight
     to the script.
     """
-    return _extract("SCRIPT", raw), raw.split("===SCRIPT===")[0].strip()
+    return extract("SCRIPT", raw), raw.split("===SCRIPT===")[0].strip()
 
 
 def run_script_agent(topic: str, profile: "Profile", log_fn, approach_context: str = "") -> tuple[str, str]:
-    system_prompt = _build_agent_system_prompt(topic, profile)
-    user_prompt   = f"Topic: {topic}\n\n{_build_agent_script_prompt(profile, approach_context)}"
+    system_prompt = build_agent_system_prompt(topic, profile)
+    user_prompt   = f"Topic: {topic}\n\n{build_agent_script_prompt(profile, approach_context)}"
     raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=30, log_fn=log_fn, model=SCRIPT_MODEL))
     return split_agent_output(raw)
 
 
 def run_vet_agent(topic: str, script: str, profile: "Profile", log_fn) -> str:
-    system_prompt = _build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
-    user_prompt   = f"Topic: {topic}\n\n{_build_vet_prompt(profile)}"
+    system_prompt = build_agent_system_prompt(topic, profile) + f"\n\nCURRENT SCRIPT TO VET:\n{script}"
+    user_prompt   = f"Topic: {topic}\n\n{build_vet_prompt(profile)}"
     raw = asyncio.run(run_vidiq_agent(system_prompt, user_prompt, max_turns=20, log_fn=log_fn, model=VET_MODEL))
-    return _extract("SCRIPT", raw)
+    return extract("SCRIPT", raw)

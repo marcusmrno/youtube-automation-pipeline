@@ -6,31 +6,12 @@ Usage:
 """
 from __future__ import annotations
 
-import os
-import re
 import sys
 import argparse
+from pathlib import Path
 
-from dotenv import load_dotenv
-
-from profile import PROFILES_ROOT
-
-load_dotenv()
-
-ANTHROPIC_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-GOOGLE_KEY    = (os.getenv("GOOGLE_API_KEY") or "").strip()
-
-
-def check_env() -> None:
-    missing = []
-    if not ANTHROPIC_KEY:
-        missing.append("ANTHROPIC_API_KEY")
-    if not GOOGLE_KEY:
-        missing.append("GOOGLE_API_KEY")
-    if missing:
-        print(f"✗ Missing required env vars: {', '.join(missing)}")
-        print("  Check your .env file.")
-        sys.exit(1)
+from pipeline import require_keys
+from channel_profile import PROFILES_ROOT
 
 
 def main() -> None:
@@ -40,16 +21,20 @@ def main() -> None:
     parser.add_argument("--seed", metavar="IMAGE_PATH",
                         help="Path to a seed image that anchors the visual style for all generated anchors")
     args = parser.parse_args()
+    # catch seed mistakes now, not after the brain dump has been pasted
+    if args.seed and args.revise:
+        parser.error("--seed only applies to new profiles")
+    if args.seed and not Path(args.seed).exists():
+        parser.error(f"seed image not found: {args.seed}")
 
-    check_env()
+    require_keys("ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
 
     if args.revise:
         from profile_creator.revise import run_revise
-        revise_name = re.sub(r"[^\w-]", "-", args.revise.lower()).strip("-")
-        run_revise(revise_name)
+        run_revise(args.revise)   # run_revise sanitises the name itself
     else:
         # Interactive: ask create-new or revise existing
-        from profile import list_profiles
+        from channel_profile import list_profiles
         existing = list_profiles(PROFILES_ROOT)
 
         if existing:
@@ -65,6 +50,8 @@ def main() -> None:
                 except (ValueError, IndexError):
                     print("Invalid choice.")
                     sys.exit(1)
+                if args.seed:
+                    print("--seed only applies to new profiles — ignoring it for this revision.")
                 from profile_creator.revise import run_revise
                 run_revise(name)
                 return
@@ -74,4 +61,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (EOFError, KeyboardInterrupt):   # Ctrl-D / Ctrl-C mid-conversation: no traceback
+        sys.exit("\nAborted.")

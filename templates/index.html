@@ -1009,16 +1009,6 @@ html, body {
   flex-direction: column;
   gap: 10px;
 }
-.lightbox-prompt-label {
-  font-family: var(--display);
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--dim);
-  margin-bottom: 6px;
-  display: block;
-}
 .lightbox-prompt-text {
   font-family: var(--mono);
   font-size: 0.68rem;
@@ -1044,16 +1034,6 @@ html, body {
 }
 .lightbox-script-section::-webkit-scrollbar { width: 4px; }
 .lightbox-script-section::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
-.lightbox-script-title {
-  font-family: var(--display);
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--blue);
-  margin-bottom: 5px;
-  display: block;
-}
 
 .lightbox-prompt-details {
   border-top: 1px solid var(--border);
@@ -1452,6 +1432,9 @@ details[open] .lightbox-prompt-summary { margin-bottom: 6px; }
 </div>
 
 <script>
+// Model output, file names and error text go into innerHTML templates below — escape them first.
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
 // ── Mode toggle ───────────────────────────────────────────────────────────
 
 let inputMode = 'topic';
@@ -1497,7 +1480,7 @@ async function fillPicker(url, id, placeholder) {
 }
 
 async function refreshResumePicker() {
-  await fillPicker('/runs_with_prompts', 'resumePicker', '— select a stopped run —');
+  await fillPicker('/runs_with_scripts', 'resumePicker', '— select a stopped run —');
   if (!document.getElementById('resumePicker').value) loadResumeStatus('');
 }
 
@@ -1766,18 +1749,20 @@ async function runPipeline() {
 
   // Open SSE stream
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(currentStage, '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 function openStream(onMessage) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource('/stream');
   eventSource.onmessage = (e) => onMessage(JSON.parse(e.data));
+  // EventSource reconnects by itself and the server keeps the job's queue, so only give up once
+  // the browser does; closing on the first error would lose the approval prompt.
+  eventSource.onerror = () => {
+    if (running && eventSource && eventSource.readyState === EventSource.CLOSED) {
+      addLogLine(currentStage, '⚠️  Stream closed');
+      setRunFinished(false);
+    }
+  };
   return eventSource;
 }
 
@@ -1791,6 +1776,7 @@ function handleEvent(event) {
   }
 
   else if (event.type === 'review') {
+    _awaitingApproval = true;
     _activeReviewSlug = event.run_slug || null;
     showReviewPanel(event.script);
     addLogLine(currentStage, '📋 Script ready for review');
@@ -1798,19 +1784,21 @@ function handleEvent(event) {
 
   else if (event.type === 'metadata_done') {
     // Refresh the metadata results panel as soon as the JSON is on disk.
-    if (typeof loadMetadata === 'function') loadMetadata();
+    loadMetadata();
   }
 
   else if (event.type === 'done') {
+    _awaitingApproval = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
+    const ok = !event.status || event.status === 'complete';   // error / rejected / cancelled aren't Done
     if (inputMode === 'metadata') {
       // Don't touch pipeline stage chips for a metadata run.
       if (currentStage) closeLogSection(currentStage);
-      setRunFinished(true);
-      if (typeof loadMetadata === 'function') loadMetadata();
+      setRunFinished(ok);
+      loadMetadata();
     } else {
-      completeAllStages();
-      setRunFinished(true);
+      if (ok) completeAllStages();
+      setRunFinished(ok);
       refreshRuns();
       refreshScripts();
     }
@@ -1823,10 +1811,15 @@ function handleEvent(event) {
 }
 
 async function startMetadataRun(slug, regenerate) {
+  // The server runs one job at a time; don't wipe a live run's log for a request it will refuse.
+  if (running) {
+    document.getElementById('metadata-status').textContent = 'Wait for the current job to finish';
+    return;
+  }
   // Mirror the main pipeline UI prep so progress streams into the log area.
+  // Stop stays disabled: metadata generation can't be interrupted, so don't claim it was.
   running = true;
   document.getElementById('runBtn').disabled = true;
-  document.getElementById('stopBtn').disabled = false;
   setGlobalStatus('running', regenerate ? 'Regenerating metadata…' : 'Generating metadata…');
   resetStages();
   clearLogSections();
@@ -1834,12 +1827,11 @@ async function startMetadataRun(slug, regenerate) {
   // Force-open a Metadata log section now so the user sees activity immediately.
   activateStage('metadata');
 
-  const profile = document.getElementById('profileSelect')
-    ? document.getElementById('profileSelect').value : '';
+  // no profile sent: the server uses the one the run was made with (its profile.txt)
   const res = await fetch(`/metadata/${encodeURIComponent(slug)}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ regenerate, profile }),
+    body: JSON.stringify({ regenerate }),
   });
 
   if (res.status === 409) {
@@ -1857,16 +1849,11 @@ async function startMetadataRun(slug, regenerate) {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine('metadata', '⚠️  Stream disconnected');
-      setRunFinished(false);
-    }
-  };
 }
 
 async function stopPipeline() {
-  await fetch('/stop', { method: 'POST' });
+  _awaitingApproval = false;
+  await fetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine(currentStage, '⏹  Pipeline stopped by user');
   setRunFinished(false);
@@ -1909,12 +1896,26 @@ function hideReviewPanel() {
 async function approveScript() {
   const script = document.getElementById('reviewScript').value;
   hideReviewPanel();
-  await fetch('/approve', {
+  if (!_awaitingApproval) {
+    // Opened via "Load into Review": no run is waiting, so approving means saving the edits.
+    if (!_activeReviewSlug) return;
+    const res = await fetch(`/save_script/${encodeURIComponent(_activeReviewSlug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: script }),
+    });
+    const data = await res.json();
+    addLogLine(null, data.ok ? '💾 Script saved' : `❌ ${data.error}`);
+    return;
+  }
+  _awaitingApproval = false;
+  const res = await fetch('/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, run_slug: _activeReviewSlug }),
   });
-  addLogLine('script', '✅ Script approved — starting production…');
+  const data = await res.json();
+  addLogLine('script', data.ok ? '✅ Script approved — starting production…' : `❌ ${data.error}`);
 }
 
 async function reviseScript() {
@@ -1929,12 +1930,17 @@ async function reviseScript() {
   btn.disabled = true;
   btn.textContent = '↻ Revising…';
 
-  const res  = await fetch('/revise', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script, feedback, topic, profile }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/revise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script, feedback, topic, profile }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave Revise stuck disabled
+  }
 
   btn.disabled = false;
   btn.textContent = '↻ Revise';
@@ -1949,7 +1955,10 @@ async function reviseScript() {
 
 async function rejectScript() {
   hideReviewPanel();
-  await fetch('/reject', { method: 'POST' });
+  if (!_awaitingApproval) return;   // nothing is waiting on this script, so there is nothing to stop
+  _awaitingApproval = false;
+  await fetch('/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (eventSource) { eventSource.close(); eventSource = null; }
   addLogLine('script', '🚫 Script rejected — pipeline stopped');
   setRunFinished(false);
 }
@@ -1961,18 +1970,21 @@ let _planningAnswers = '';
 let _selectedApproach = '';
 let _approachPitchesText = '';
 let _activeReviewSlug = null;
+let _awaitingApproval = false;   // true only while a /run waits at the approval gate
 
 let _parsedQuestions = [];
 
+// Same rules as bot._parse_clarifying_questions: '1)', **bold**, any-case Default:, preamble skipped.
 function parseClarifyingQuestions(text) {
   const items = [];
-  const blocks = text.trim().split(/\n(?=\d+\.)/);
-  for (const block of blocks) {
+  const strip = s => s.trim().replace(/^\*+|\*+$/g, '').trim();
+  for (const block of text.trim().split(/\n(?=\s*\**\d+[.)])/)) {
     const lines = block.trim().split('\n');
-    const questionLine = lines[0].replace(/^\d+\.\s*/, '').trim();
-    const defaultLine = lines.find(l => l.trim().startsWith('Default:'));
-    const defaultText = defaultLine ? defaultLine.replace(/^\s*Default:\s*/i, '').trim() : '';
-    if (questionLine) items.push({ question: questionLine, default: defaultText });
+    const first = lines[0].trim().match(/^\**\d+[.)]\**\s*(.*)/);
+    if (!first) continue;   // a preamble line, not a question
+    const question = strip(first[1]);
+    const def = lines.map(l => l.match(/^\s*\**default\**\s*:\**\s*(.*)/i)).find(Boolean);
+    if (question) items.push({ question, default: def ? strip(def[1]) : '' });
   }
   return items;
 }
@@ -1985,9 +1997,9 @@ function renderClarifyingQuestions(items) {
     wrap.style.cssText = 'margin-bottom:16px;';
     wrap.innerHTML = `
       <label style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);display:block;margin-bottom:4px;">
-        ${i + 1}. ${item.question}
+        ${i + 1}. ${esc(item.question)}
       </label>
-      ${item.default ? `<div style="font-family:var(--mono);font-size:0.65rem;color:var(--dim);margin-bottom:5px;padding:5px 8px;border-left:2px solid var(--border-2);line-height:1.5;">Default: ${item.default}</div>` : ''}
+      ${item.default ? `<div style="font-family:var(--mono);font-size:0.65rem;color:var(--dim);margin-bottom:5px;padding:5px 8px;border-left:2px solid var(--border-2);line-height:1.5;">Default: ${esc(item.default)}</div>` : ''}
       <textarea
         class="review-script"
         id="cq-answer-${i}"
@@ -2022,10 +2034,10 @@ async function showClarifyingQuestions(topic) {
       renderClarifyingQuestions(_parsedQuestions);
       document.getElementById('useDefaultsBtn').disabled = false;
     } else {
-      qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${data.error}</div>`;
+      qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${esc(data.error)}</div>`;
     }
   } catch (e) {
-    qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${e.message}</div>`;
+    qContent.innerHTML = `<div style="color:var(--red);font-size:0.75rem;">Error: ${esc(e.message)}</div>`;
   }
 }
 
@@ -2140,13 +2152,6 @@ async function continuePipelineExecution() {
   }
 
   openStream(handleEvent);
-  eventSource.onerror = () => {
-    if (running) {
-      addLogLine(null, '❌ Connection lost');
-      setRunFinished(false);
-    }
-    eventSource.close();
-  };
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
@@ -2211,7 +2216,7 @@ async function loadRunFiles(run) {
   const res = await fetch(`/run_files/${encodeURIComponent(run)}`);
   const files = await res.json();
   if (!files.length) { list.innerHTML = '<span class="no-files">(empty)</span>'; return; }
-  list.innerHTML = files.map(f => `<div class="file-entry">${f}</div>`).join('');
+  list.innerHTML = files.map(f => `<div class="file-entry">${esc(f)}</div>`).join('');
 }
 
 // ── Image Gallery ─────────────────────────────────────────────────────────
@@ -2251,7 +2256,7 @@ function parseScriptSections(text) {
 
 function findScriptSection(imageNum) {
   // Images are per-beat, not per-section. Match on the source field from
-  // image_prompts.txt: a "MM:SS-MM:SS" range, or (older runs) a narration sentence.
+  // image_prompts.txt: the narration sentence, or (older runs) a "MM:SS-MM:SS" range.
   const secs = galleryScriptSections;
   if (!secs.length) return null;
   const source = (galleryPrompts[imageNum] || {}).source || '';
@@ -2262,7 +2267,7 @@ function findScriptSection(imageNum) {
     return secs.find(s => t >= s.start && t < s.end) || secs[secs.length - 1];
   }
 
-  // ponytail: legacy fallback — source was the narration sentence itself
+  // current format: the source is the narration sentence itself
   const needle = source.slice(0, 40).toLowerCase();
   if (!needle) return null;
   return secs.find(s => s.raw.join(' ').toLowerCase().includes(needle)) || null;
@@ -2513,12 +2518,17 @@ async function regenAudio() {
   btn.textContent = '⏳ Generating…';
   status.textContent = '';
 
-  const res  = await fetch('/regenerate_audio', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ run_slug: run }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/regenerate_audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_slug: run }),
+    });
+    data = await res.json();
+  } catch (e) {
+    data = { ok: false, error: e.message };   // never leave the button stuck on "Generating…"
+  }
   if (!data.ok) {
     status.textContent = `❌ ${data.error}`;
     btn.disabled = false;
@@ -2535,7 +2545,8 @@ async function regenAudio() {
       eventSource.close(); eventSource = null;
       btn.disabled = false;
       btn.textContent = '↻ Regenerate Audio';
-      status.textContent = '✅ Done — reload Voice tab to listen';
+      status.textContent = event.status === 'complete'
+        ? '✅ Done — reload Voice tab to listen' : '❌ Voiceover failed — see the log';
       refreshVoicePicker();
       // If this run is already loaded in the player, hot-swap the src
       const picker = document.getElementById('voicePicker');
@@ -2551,9 +2562,9 @@ async function loadProfiles() {
     const res = await fetch('/profiles');
     const profiles = await res.json();
     const sel = document.getElementById('profileSelect');
-    sel.innerHTML = profiles.map(p =>
-      `<option value="${p.name}">${p.display}</option>`
-    ).join('');
+    // With several profiles make the user pick: a preselected first one ran silently in its style
+    sel.innerHTML = (profiles.length > 1 ? '<option value="">— select profile —</option>' : '') +
+      profiles.map(p => `<option value="${esc(p.name)}">${esc(p.display)}</option>`).join('');
   } catch (e) {
     console.error('Failed to load profiles:', e);
   }
@@ -2581,11 +2592,9 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('lightboxOverlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeLightbox();
 });
-</script>
 
-<script>
 // ── Metadata mode ──────────────────────────────────────────────────────────
-// Hoisted to module scope so setMode() and runPipeline() can call into it.
+// Page-level functions: setMode() and runPipeline() call into them.
 
 function getMetadataSlug() {
   const picker = document.getElementById('metadataRunPicker');

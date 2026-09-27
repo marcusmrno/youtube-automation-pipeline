@@ -1,7 +1,7 @@
 """
 YouTube Pipeline — Flask UI
 Run: python ui.py
-Opens at http://0.0.0.0:7860
+Opens at http://localhost:7860 (bound to 127.0.0.1 only)
 """
 
 import anthropic
@@ -12,33 +12,41 @@ import threading
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 import pipeline
+from images import find_image
 from pipeline import (OUTPUT_ROOT, run_pipeline, resume_pipeline, run_from_script,
-                      regenerate_images, parse_image_prompts, revise_script,
-                      run_status, ANTHROPIC_KEY, VIDIQ_KEY,
-                      generate_clarifying_questions, generate_approach_pitches)
-from profile import load_profile, list_profiles
-from agents import run_vet_agent
+                      regenerate_images, run_status, ANTHROPIC_KEY)
+from writing import (generate_approach_pitches, generate_clarifying_questions, parse_image_prompts,
+                     revise_script)
+from channel_profile import load_profile, list_profiles
 import metadata as _metadata_mod
 
 _noop_log = lambda _: None
 
-_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]*$')
+_SLUG_RE = re.compile(r'[\w-]+')   # everything pipeline.slugify makes; never '.', '/' or ''  (fullmatch)
 
 def _safe_slug(run_slug: str) -> bool:
     return bool(_SLUG_RE.fullmatch(run_slug))
 
 
 def _resolve_run_profile_name(run_slug: str, requested: str) -> str | None:
-    """Requested profile name, else the run's saved profile.txt, else the first available."""
+    """Requested profile name, else the run's saved profile.txt, else the only profile (never a guess)."""
     if requested:
         return requested
     saved = OUTPUT_ROOT / run_slug / "profile.txt"
     if saved.exists():
         return saved.read_text().strip()
     available = list_profiles()
-    return available[0] if available else None
+    return available[0] if len(available) == 1 else None
 
 app = Flask(__name__)
+
+
+@app.before_request
+def _require_json_posts():
+    # A text/plain POST needs no CORS preflight, so any web page could start paid jobs here.
+    if request.method == "POST" and not request.is_json:
+        return jsonify({"ok": False, "error": "JSON body required"}), 415
+
 
 _state: dict = {
     "log_queue":      None,
@@ -48,12 +56,12 @@ _state: dict = {
 
 STAGE_KEYWORDS: dict[str, list[str]] = {
     "research": ["researching", "research complete", "starting pipeline",
-                 "output directory", "style anchor", "api keys", "missing api"],
-    "script":   ["writing script", "script written", "image prompts parsed",
+                 "output directory", "api keys", "missing api"],
+    "script":   ["writing script", "script written", "generating image prompts", "image prompts parsed",
                  "script ready", "📝", "vidiq script vet", "script vetted", "vet agent", "🔎"],
-    "images":   ["generating image", "images generated", "sending request"],
+    "images":   ["generating image", "sending request"],
     "voice":    ["generating voiceover", "voiceover generated", "voiceover failed", "🎙"],
-    "done":     ["pipeline complete", "pipeline finished", "🎬", "╔", "╚"],
+    "done":     ["pipeline complete"],
 }
 
 
@@ -77,32 +85,47 @@ def _load_ui_profile(profile_name: str):
         profile_name = available[0]
     try:
         return load_profile(profile_name), None
-    except ValueError as e:
+    except Exception as e:   # ValueError for a bad name, KeyError/TypeError for a malformed profile.yaml
         return None, str(e)
 
 
-def _start_run(call):
-    """Wire up the log queue + stop event, then run `call(progress_cb, stop_event)` on a thread."""
-    lq = queue.Queue()
-    se = threading.Event()
+def _start_job(work, stage=None, done=None, approval_queue=None, stoppable=True) -> str | None:
+    """Run work(progress_cb, stop_event, emit) as the UI's one job. Returns an error if one is running.
 
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
+    Every job shares the /stream queue, the stop event and the approval queue, so a
+    second job would orphan the first: it could never be approved or stopped again.
+    """
+    running = _state.get("thread")
+    if running is not None and running.is_alive():
+        return "Another job is still running — wait for it to finish or press Stop."
+    lq, se = queue.Queue(), threading.Event()
 
     def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
+        lq.put({"type": "log", "stage": stage or detect_stage(msg), "msg": msg})
 
     def worker():
+        status = "error"
         try:
-            call(progress_cb, se)
+            result = work(progress_cb, se, lq.put)
+            # pipeline runs return {"status": ...}; generate_voiceover returns None on failure
+            status = result.get("status", "complete") if isinstance(result, dict) else \
+                ("complete" if result is not None else "error")
         except Exception as e:
-            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
+            lq.put({"type": "log", "stage": stage, "msg": f"❌  Error: {e}"})
         finally:
-            lq.put({"type": "done"})
+            _state["approval_queue"] = None   # a finished run can't be approved or rejected
+            lq.put({**(done or {"type": "done"}), "status": status})
 
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    thread = threading.Thread(target=worker, daemon=True)
+    _state.update(log_queue=lq, stop_event=se if stoppable else None,
+                  approval_queue=approval_queue, thread=thread)
+    thread.start()
+    return None
+
+
+def _start_run(work, **kw):
+    err = _start_job(work, **kw)
+    return jsonify({"ok": False, "error": err} if err else {"ok": True})
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -138,33 +161,16 @@ def run():
     if err:
         return jsonify({"ok": False, "error": err})
 
-    lq = queue.Queue()
     aq = queue.Queue()
-    se = threading.Event()
 
-    _state["log_queue"]      = lq
-    _state["approval_queue"] = aq
-    _state["stop_event"]     = se
+    def work(progress_cb, se, emit):
+        def approval_cb(script_text: str) -> bool:
+            emit({"type": "review", "script": script_text, "run_slug": pipeline.slugify(topic)})
+            return aq.get()
+        return run_pipeline(topic, profile, progress_callback=progress_cb, stop_event=se,
+                            approval_callback=approval_cb, approach_context=approach_context)
 
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": detect_stage(msg), "msg": msg})
-
-    def approval_cb(script_text: str) -> bool:
-        lq.put({"type": "review", "script": script_text, "run_slug": pipeline.slugify(topic)})
-        return aq.get()
-
-    def worker():
-        try:
-            run_pipeline(topic, profile, progress_callback=progress_cb,
-                         stop_event=se, approval_callback=approval_cb,
-                         approach_context=approach_context)
-        except Exception as e:
-            lq.put({"type": "log", "stage": None, "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "done"})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(work, approval_queue=aq)
 
 
 @app.route("/stream")
@@ -181,7 +187,10 @@ def stream():
                 yield f"data: {json.dumps({'type': 'ping'})}\n\n"
                 continue
             yield f"data: {json.dumps(event)}\n\n"
-            if event.get("type") in ("done", "regen_done"):
+            if event.get("type") in ("done", "regen_done", "audio_done"):
+                # the job is over: later connects get "No pipeline running" instead of endless pings
+                if _state.get("log_queue") is lq:
+                    _state["log_queue"] = None
                 break
 
     return Response(
@@ -209,8 +218,9 @@ def approve():
 @app.route("/reject", methods=["POST"])
 def reject():
     aq = _state.get("approval_queue")
-    if aq:
-        aq.put(False)
+    if not aq:   # e.g. a script opened from the Scripts tab: don't stop an unrelated job
+        return jsonify({"ok": False, "error": "No pipeline waiting for approval"})
+    aq.put(False)
     se = _state.get("stop_event")
     if se:
         se.set()
@@ -232,10 +242,10 @@ def resume():
     if profile_name:
         try:
             profile = load_profile(profile_name)
-        except ValueError as e:
+        except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
-    return _start_run(lambda cb, se: resume_pipeline(
+    return _start_run(lambda cb, se, emit: resume_pipeline(
         run_slug, profile, progress_callback=cb, stop_event=se))
 
 
@@ -253,7 +263,7 @@ def run_from_script_route():
     if err:
         return jsonify({"ok": False, "error": err})
 
-    return _start_run(lambda cb, se: run_from_script(
+    return _start_run(lambda cb, se, emit: run_from_script(
         script, profile, topic, progress_callback=cb, stop_event=se))
 
 
@@ -276,14 +286,14 @@ def stop():
 # ── Data endpoints ────────────────────────────────────────────────────────────
 
 def _list_runs(required_file: str | None = None):
-    """Run slugs, newest name first, optionally filtered to those holding `required_file`."""
+    """Run slugs, most recently modified first (as the bot lists them), optionally filtered to those holding `required_file`."""
     if not OUTPUT_ROOT.exists():
         return jsonify([])
-    return jsonify(sorted(
-        (d.name for d in OUTPUT_ROOT.iterdir()
+    return jsonify([d.name for d in sorted(
+        (d for d in OUTPUT_ROOT.iterdir()
          if d.is_dir() and (required_file is None or (d / required_file).exists())),
-        reverse=True,
-    ))
+        key=lambda d: d.stat().st_mtime, reverse=True,
+    )])
 
 
 @app.route("/runs")
@@ -322,13 +332,10 @@ def metadata_generate(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     regenerate = bool(body.get("regenerate", False))
-    profile_name = (body.get("profile") or "").strip()
+    # the run's own profile.txt, as regen and resume use, so thumbnails match its channel
+    profile_name = _resolve_run_profile_name(run_slug, (body.get("profile") or "").strip())
     if not profile_name:
-        available = list_profiles()
-        if len(available) == 1:
-            profile_name = available[0]
-        else:
-            return jsonify({"error": "specify 'profile' in body"}), 400
+        return jsonify({"error": "specify 'profile' in body"}), 400
     try:
         profile = load_profile(profile_name)
     except Exception as e:
@@ -342,28 +349,16 @@ def metadata_generate(run_slug):
         if existing is not None:
             return jsonify({"error": "metadata already exists; pass regenerate=true to overwrite"}), 409
 
-    # Stream progress on the same /stream SSE endpoint the main pipeline uses.
-    # Structured events so the existing client log routing handles them.
-    lq = queue.Queue()
-    _state["log_queue"] = lq
-    _state["approval_queue"] = None
-    _state["stop_event"] = threading.Event()
+    # Progress streams on the same /stream SSE endpoint the main pipeline uses.
+    def work(progress_cb, se, emit):
+        _metadata_mod.generate_metadata(run_slug, profile, log_fn=progress_cb, regenerate=regenerate)
+        progress_cb("✅  Metadata generation complete")
+        emit({"type": "metadata_done", "run_slug": run_slug})
+        return {"status": "complete"}
 
-    def runner():
-        try:
-            _metadata_mod.generate_metadata(
-                run_slug, profile,
-                log_fn=lambda m: lq.put({"type": "log", "stage": "metadata", "msg": m}),
-                regenerate=regenerate,
-            )
-            lq.put({"type": "log", "stage": "metadata", "msg": "✅  Metadata generation complete"})
-            lq.put({"type": "metadata_done", "run_slug": run_slug})
-        except Exception as e:
-            lq.put({"type": "log", "stage": "metadata", "msg": f"❌  Metadata generation failed: {e}"})
-        finally:
-            lq.put({"type": "done"})
-
-    threading.Thread(target=runner, daemon=True).start()
+    err = _start_job(work, stage="metadata", stoppable=False)   # generate_metadata can't be interrupted
+    if err:
+        return jsonify({"error": err}), 423   # 409 already means "metadata exists" to the page
     return jsonify({"status": "started"}), 202
 
 
@@ -373,7 +368,7 @@ def metadata_pick_thumb(run_slug):
         return jsonify({"error": "invalid run slug"}), 400
     body = request.get_json(force=True, silent=True) or {}
     index = body.get("index")
-    if not isinstance(index, int):
+    if type(index) is not int:   # bool is an int subclass
         return jsonify({"error": "body must include integer 'index'"}), 400
     try:
         return jsonify(_metadata_mod.pick_thumbnail(run_slug, index))
@@ -478,15 +473,17 @@ def save_script(run_name: str):
 def get_clarifying_questions():
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
-    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
-
     if not topic:
         return jsonify({"ok": False, "error": "Topic required"})
 
-    profile = load_profile(profile_name)
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
+    missing = []   # say so now, not after the questions and pitches have been paid for
+    if not pipeline.check_keys(profile, missing.append):
+        return jsonify({"ok": False, "error": missing[0]})
     try:
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         questions = generate_clarifying_questions(topic, profile, client, _noop_log)
         return jsonify({"ok": True, "questions": questions})
     except Exception as e:
@@ -498,15 +495,14 @@ def get_approach_pitches():
     data = request.get_json(force=True)
     topic = (data.get("topic") or "").strip()
     answers = (data.get("answers") or "").strip()
-    profile_name = (data.get("profile_name") or "").strip() or list_profiles()[0]
-
     if not topic or not answers:
         return jsonify({"ok": False, "error": "Topic and answers required"})
 
-    profile = load_profile(profile_name)
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-
+    profile, err = _load_ui_profile((data.get("profile_name") or "").strip())
+    if err:
+        return jsonify({"ok": False, "error": err})
     try:
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         pitches = generate_approach_pitches(topic, answers, profile, client, _noop_log)
         return jsonify({"ok": True, "pitches": pitches})
     except Exception as e:
@@ -517,7 +513,7 @@ def get_approach_pitches():
 
 @app.route("/regenerate_audio", methods=["POST"])
 def regenerate_audio():
-    from pipeline import generate_voiceover
+    from voiceover import generate_voiceover
 
     data     = request.get_json(force=True)
     run_slug = (data.get("run_slug") or "").strip()
@@ -531,30 +527,16 @@ def regenerate_audio():
     if not tts_path.exists():
         return jsonify({"ok": False, "error": "tts_script.txt not found for this run"})
 
-    lq = queue.Queue()
-    se = threading.Event()
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
-
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": "voice", "msg": msg})
-
     profile_name = _resolve_run_profile_name(run_slug, (data.get("profile_name") or "").strip())
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
-    profile = load_profile(profile_name)
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile_name\"."})
+    try:
+        profile = load_profile(profile_name)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
-    def worker():
-        try:
-            generate_voiceover(tts_path.read_text(), run_dir, profile, progress_cb)
-        except Exception as e:
-            lq.put({"type": "log", "stage": "voice", "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "audio_done", "run_slug": run_slug})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(lambda cb, se, emit: generate_voiceover(tts_path.read_text(), run_dir, profile, cb),
+                      stage="voice", done={"type": "audio_done", "run_slug": run_slug})
 
 
 # ── Script revision ───────────────────────────────────────────────────────────
@@ -569,18 +551,14 @@ def revise():
     if not script or not feedback:
         return jsonify({"ok": False, "error": "Missing script or feedback"})
 
-    available = list_profiles()
-    if not profile_name:
-        profile_name = available[0] if available else None
-    profile = load_profile(profile_name) if profile_name else None
-
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    revised = revise_script(script, feedback, topic, profile, client)
-
-    if VIDIQ_KEY and revised and profile:
-        vetted = run_vet_agent(topic or "video", revised, profile, _noop_log)
-        if vetted:
-            revised = vetted
+    profile, err = _load_ui_profile(profile_name)
+    if err:
+        return jsonify({"ok": False, "error": err})
+    try:
+        client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        revised = revise_script(script, feedback, topic, profile, client)
+    except Exception as e:   # e.g. an Anthropic overload: the page needs JSON to re-enable Revise
+        return jsonify({"ok": False, "error": str(e)})
 
     return jsonify({"ok": True, "script": revised})
 
@@ -594,10 +572,10 @@ def list_images(run_name: str):
     img_dir = OUTPUT_ROOT / run_name / "images"
     if not img_dir.exists():
         return jsonify([])
-    imgs = sorted(
+    imgs = sorted({
         p.stem for p in img_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg")
-    )
+    })
     return jsonify(imgs)
 
 
@@ -605,12 +583,8 @@ def list_images(run_name: str):
 def serve_image(run_name: str, num: str):
     if not _safe_slug(run_name) or not num.isdigit():
         return "", 400
-    img_dir = OUTPUT_ROOT / run_name / "images"
-    for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg")):
-        img_path = img_dir / f"{num}{ext}"
-        if img_path.exists():
-            return send_file(img_path, mimetype=mime)
-    return "", 404
+    img_path = find_image(OUTPUT_ROOT / run_name / "images", num)   # send_file infers the mimetype
+    return send_file(img_path) if img_path else ("", 404)
 
 
 @app.route("/regenerate", methods=["POST"])
@@ -628,35 +602,19 @@ def regen():
 
     profile_name = _resolve_run_profile_name(run_slug, profile_name)
     if not profile_name:
-        return jsonify({"ok": False, "error": "No profiles found."})
+        return jsonify({"ok": False, "error": "This run has no profile.txt — pass \"profile\"."})
 
     try:
         profile = load_profile(profile_name)
-    except ValueError as e:
+    except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
-    lq = queue.Queue()
-    se = threading.Event()
-    _state["log_queue"]      = lq
-    _state["stop_event"]     = se
-    _state["approval_queue"] = None
-
-    def progress_cb(msg: str):
-        lq.put({"type": "log", "stage": "images", "msg": msg})
-
-    def worker():
-        try:
-            regenerate_images(run_slug, image_nums, model_key, profile, progress_callback=progress_cb)
-        except Exception as e:
-            lq.put({"type": "log", "stage": "images", "msg": f"❌  Error: {e}"})
-        finally:
-            lq.put({"type": "regen_done", "run_slug": run_slug, "nums": image_nums})
-
-    threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"ok": True})
+    return _start_run(lambda cb, se, emit: regenerate_images(run_slug, image_nums, model_key, profile,
+                                                            progress_callback=cb),
+                      stage="images", done={"type": "regen_done", "run_slug": run_slug, "nums": image_nums})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=7860, debug=False, threaded=True)

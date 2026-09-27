@@ -89,7 +89,8 @@ def test_build_video_tags_caps_at_500_chars():
     import metadata
     keywords = [{"keyword": f"keyword number {i}"} for i in range(50)]
     tags = metadata._build_video_tags("topic", keywords)
-    assert len(", ".join(tags)) <= 500
+    # YouTube counts one comma between tags and quotes around any tag containing a space
+    assert sum(len(t) + 2 * (" " in t) for t in tags) + len(tags) - 1 <= 500
     assert len(tags) < 51  # got truncated, not all 51 candidates fit
 
 
@@ -342,7 +343,7 @@ def test_render_thumbnails_all_succeed(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [
@@ -369,7 +370,7 @@ def test_render_thumbnails_middle_fails(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [{"prompt": "p1", "hook_text": "A"},
@@ -399,7 +400,7 @@ def test_render_thumbnails_exception_raised(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(metadata, "generate_image_google", fake_gen)
-    monkeypatch.setattr(metadata, "_load_anchor_parts", lambda p: [])
+    monkeypatch.setattr(metadata, "load_anchor_parts", lambda p: [])
 
     out = metadata._render_thumbnails(
         [{"prompt": "p1", "hook_text": "A"},
@@ -462,3 +463,81 @@ def test_pick_thumbnail_skips_errored_slot(tmp_path, monkeypatch):
     with pytest.raises(ValueError) as exc:
         metadata.pick_thumbnail("abc", 1)
     assert "render_error" in str(exc.value) or "not available" in str(exc.value).lower()
+
+
+@pytest.mark.parametrize("payload,expected", [
+    ('===KEYWORDS===\n["cat purring", "why cats purr"]', [{"keyword": "cat purring"}, {"keyword": "why cats purr"}]),
+    ('===KEYWORDS===\n```json\n[{"keyword": "cat purring"}]\n```', [{"keyword": "cat purring"}]),
+    ('===KEYWORDS===\n{"keyword": "not a list"}', []),
+])
+def test_vidiq_keywords_tolerate_the_agents_json_shape(monkeypatch, payload, expected):
+    # a string list crashed _build_video_tags after the paid session; a ```json fence gave []
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    keywords = metadata._vidiq_keywords("cats", lambda _: None)
+    assert keywords == expected
+    metadata._build_video_tags("cats", keywords)   # must not raise
+
+
+def test_score_titles_tolerates_odd_scores_and_fences(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    payload = ('===SCORES===\n```json\n[{"title": "A", "score": "85/100", "breakdown": {}},'
+               ' {"title": "B", "score": 71, "breakdown": {}}]\n```')
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    assert [t["score"] for t in metadata._score_titles(["A", "B"], lambda _: None)] == [None, 71]
+
+
+def test_parse_titles_strips_markdown_labels_and_accepts_bullets():
+    import metadata
+    raw = ("===TITLES===\n1. **Why Cats Purr**\n2. Title: Cats Rule\n3) “Smart Quotes”\n"
+           "- Bullet Title\n4: Colon Numbered\n===END===")
+    assert metadata._parse_titles(raw) == ["Why Cats Purr", "Cats Rule", "Smart Quotes",
+                                           "Bullet Title", "Colon Numbered"]
+
+
+def test_no_titles_means_no_scoring_session(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **k: pytest.fail("paid session for 0 titles"))
+    assert metadata._score_titles([], lambda _: None) == []
+
+
+def test_scores_match_titles_despite_punctuation_changes(monkeypatch):
+    import metadata
+    monkeypatch.setattr(metadata, "VIDIQ_KEY", "fake-key")
+    payload = '===SCORES===\n[{"title": "Why Your Cat’s Purr Heals.", "score": 77, "breakdown": {}}]'
+    monkeypatch.setattr(metadata, "_call_vidiq_agent", lambda *a, **kw: payload)
+    assert metadata._score_titles(["Why Your Cat's Purr Heals"], lambda _: None)[0]["score"] == 77
+
+
+@pytest.mark.parametrize("first_line", ["HOOK: BIG 1", "**HOOK:** BIG 1", "Hook - BIG 1"])
+def test_thumbnail_hook_line_variants(first_line):
+    import metadata
+    raw = "".join(f"===THUMBNAIL_{n}===\n{first_line}\nscene {n}\n" for n in (1, 2, 3)) + "===END==="
+    thumbs = metadata._parse_thumbnail_prompts(raw)
+    assert [t["hook_text"] for t in thumbs] == ["BIG 1"] * 3
+    assert [t["prompt"] for t in thumbs] == ["scene 1", "scene 2", "scene 3"]   # hook not sent to Gemini
+
+
+def test_overlong_titles_are_dropped():
+    import metadata
+    raw = "===TITLES===\n1. " + "x" * 101 + "\n2. Short enough\n===END==="
+    assert metadata._parse_titles(raw) == ["Short enough"]   # YouTube rejects titles over 100 chars
+
+
+def test_overlong_description_is_flagged():
+    import metadata
+    logs = []
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _FakeResponse("===DESCRIPTION===\n" + "word " * 1100 + "\n===HASHTAGS===\n#a #b\n")
+
+    metadata._generate_description_hashtags(
+        "t", "s", [], profile=MagicMock(channel={"niche": "n", "audience": "a", "tone": "t"}),
+        client=FakeClient, log_fn=logs.append)
+    assert any("5000" in m for m in logs)                    # YouTube's description limit
