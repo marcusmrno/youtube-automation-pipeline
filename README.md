@@ -6,6 +6,8 @@
 
 An asset pipeline for a faceless educational YouTube channel. Input a topic — the system researches it, writes a structured script, generates ~150 style-consistent images, and records a voiceover, leaving a complete asset set to drop into an editor. Every stage is automated, resumable, and runs on a multi-model AI stack.
 
+https://github.com/user-attachments/assets/dae0a1a7-0977-4655-9fb9-d1b2fd3c7d9c
+
 **Scope:** the pipeline produces images, audio, script, and SEO metadata — it does not render a video file. Final assembly happens in a video editor. `apply_flicker.py` can add a flicker overlay track to a Palmier project once the clips are placed.
 
 ![Sample run — all 28 frames from a single pipeline run](assets/sample-run.gif)
