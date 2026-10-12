@@ -301,11 +301,6 @@ def runs():
     return _list_runs()
 
 
-@app.route("/runs_with_prompts")
-def runs_with_prompts():
-    return _list_runs("image_prompts.txt")
-
-
 @app.route("/run_status/<path:run_slug>")
 def run_status_route(run_slug):
     if not _safe_slug(run_slug):

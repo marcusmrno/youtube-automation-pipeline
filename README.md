@@ -8,7 +8,7 @@ An asset pipeline for a faceless educational YouTube channel. Input a topic — 
 
 https://github.com/user-attachments/assets/dae0a1a7-0977-4655-9fb9-d1b2fd3c7d9c
 
-**Scope:** the pipeline produces images, audio, script, and SEO metadata — it does not render a video file. Final assembly happens in a video editor. `apply_flicker.py` can add a flicker overlay track to a Palmier project once the clips are placed.
+**Scope:** the pipeline produces images, audio, script, and SEO metadata — it does not render a video file. Final assembly happens in a video editor.
 
 ![Sample run — all 28 frames from a single pipeline run](assets/sample-run.gif)
 
@@ -21,6 +21,31 @@ The same run, cut together with its generated narration — first 30 seconds, so
 https://github.com/user-attachments/assets/a6910944-f411-41ac-9444-8ed1ffc1ff8b
 
 ---
+
+## How it works
+
+```mermaid
+flowchart TD
+    UI["Web UI<br/>Flask + SSE"] --> PLAN
+    BOT["Telegram bot"] --> PLAN
+    CLI["CLI"] --> RES
+    PLAN["Plan<br/>clarifying questions + 3 pitched angles · Haiku"] --> RES
+    RES["Research<br/>vidIQ agent, or Haiku"] --> SCRIPT
+    SCRIPT["Script<br/>Opus agent + vidIQ, or Sonnet"] --> VET
+    VET["Vet<br/>Haiku agent + vidIQ"] --> GATE
+    GATE{"Human approval<br/>before any image or audio spend"}
+    GATE -->|approve| TTS["TTS narration<br/>Haiku + ElevenLabs v3 tags"]
+    GATE -->|approve| PROMPTS["Image prompts<br/>Sonnet, ~150 scenes"]
+    GATE -->|revise| SCRIPT
+    TTS --> VO["Voiceover<br/>ElevenLabs"]
+    PROMPTS --> IMG["Images<br/>Gemini + profile style anchors"]
+    VO --> OUT[("output/run-name/<br/>script · audio · images · metadata")]
+    IMG --> OUT
+```
+
+Each stage writes its result to the run folder, so a stopped run resumes from the first missing file.
+Voiceover and images generate in parallel. Everything stylistic — tone, characters, art style,
+voice — comes from a YAML **channel profile**, not from the code.
 
 ## Tech Stack
 
@@ -36,50 +61,24 @@ https://github.com/user-attachments/assets/a6910944-f411-41ac-9444-8ed1ffc1ff8b
 
 ---
 
-## What it does
+## Design highlights
 
-```
-topic → clarifying questions → approach selection → research → script
-      → [approval gate] → TTS narration → image prompts → images + voiceover
-      → (optional) flicker pass, metadata + thumbnails
-```
-
-| Stage | Detail |
-|-------|--------|
-| **Script planning** | Claude generates targeted clarifying questions with evidence-backed defaults, then pitches 3 distinct video angles — creator picks one before anything is written (web UI and bot; the CLI starts at research) |
-| **Research** | vidIQ agent pulls keyword data, outlier analysis, and title scoring to ground the script in what actually performs (without `VIDIQ_API_KEY`, Claude Haiku researches the topic instead) |
-| **Script** | Claude writes a full structured script (the profile's target length; 12 min in the example) shaped by the chosen approach, with timestamps and section markers — Opus via the vidIQ agent when `VIDIQ_API_KEY` is set, Sonnet otherwise |
-| **Vet** | With `VIDIQ_API_KEY`, a second agent pass (Haiku + vidIQ) fact-checks, closes SEO gaps, and enforces word count targets |
-| **Approval gate** | Pipeline pauses for human review before any paid generation — the script can be edited (web UI), revised with feedback (web UI and bot), approved or rejected (all three; the CLI asks y/N) |
-| **TTS narration** | Claude Haiku strips stage directions and adds ElevenLabs v3 audio tags (emotion, pacing, texture) to the clean narration |
-| **Image prompts** | Sonnet is asked for one prompt per ~3–4 seconds of narration (real runs land around 130–150 for 12 minutes). It writes only the scene (`NNN \| source sentence \| character \| scene`); the pipeline stitches in the profile's character descriptions and art-style block, and stores the expanded form as `NNN \| source \| prompt` |
-| **Images** | Gemini generates each image against a character style sheet and persistent anchor references for visual consistency |
-| **Voiceover** | ElevenLabs generates chunked audio in parallel with image generation |
-| **Flicker pass (optional, manual)** | If the profile enables `image_gen.flicker`, each image gets stretched b/c variants generated alongside it; `apply_flicker.py` then layers alternating b/c segments over the placed clips in the live Palmier project for a hand-drawn flicker effect |
-| **Metadata & thumbnails (optional, manual)** | `python pipeline.py metadata <slug>` (or the UI/bot equivalent) generates titles, description, hashtags, and thumbnail options after a run completes |
+- **Checkpoint-based resumability** — the pipeline reads the run folder to see what's missing and generates only that; re-running a finished topic is refused instead of overwriting it
+- **Human approval gate** — research and scriptwriting are cheap; images and audio aren't, so production waits for an approved script
+- **Per-task model routing** — Opus for the agentic script pass, Sonnet for long-form writing and image prompts, Haiku for everything short
+- **Three front ends, one core** — the web UI, Telegram bot and CLI call the same `run_pipeline` / `resume_pipeline` / `run_from_script` functions
+- **Profile-driven style** — a profile's character sheet and anchor images go into every image call, which is what keeps ~150 images in one consistent style
 
 ---
 
-## Architecture highlights
-
-- **Checkpoint-based resumability** — every stage writes its output to disk; the pipeline detects what's missing and resumes from that point without re-running earlier work. Starting a topic whose run folder already has a script is refused — resume it instead
-- **Multi-model routing** — Opus for the vidIQ script agent, Sonnet for long-form writing and image prompts, Haiku for research, planning, TTS narration, vetting and metadata; model selection is per-task not global
-- **Real-time SSE streaming** — the web UI receives live log events from the pipeline thread via Server-Sent Events, with per-stage progress tracking
-- **Approach context propagation** — the angle chosen during planning is injected into the script prompt, so the final script reflects the creator's intent end-to-end
-- **Three front ends, one core** — the web UI, Telegram bot and CLI share the same pipeline: topic runs, premade-script runs, resume, stop and metadata work in all three. Planning (questions + pitches) and revise are web UI and bot only; image/audio regeneration and direct script editing are web UI only; `/download` and `/status` are bot only
-- **Channel profiles** — a YAML-driven profile system defines channel identity, character descriptions, voice settings, and image style rules; multiple profiles can be maintained and switched per run
-
----
-
-## Setup
+## Quickstart
 
 Requires Python 3.11+.
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
-
-Copy `.env.example` to `.env`:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -93,273 +92,40 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_USER_ID=
 ```
 
-Keep comments on their own line — python-dotenv reads `KEY=   # note` as the value `# note`.
+Then pick a front end:
 
-A profile's `voice.voice_id` can also reference an arbitrary env var with `${VAR_NAME}` syntax, resolved at load time — not limited to the fixed list above.
+```bash
+python ui.py                              # web UI at http://localhost:7860
+python bot.py                             # Telegram bot
+python pipeline.py "why humans sleep"     # CLI
+```
+
+`profiles/example` is a complete, annotated profile to start from, or run `python create_profile.py`
+to have Claude build one (including anchor images) from a description of your channel.
+
+**[USAGE.md](USAGE.md)** has the full reference: every UI mode, bot command and CLI flag, the
+profile schema, the profile creator and the output folder layout.
 
 ---
 
-## Running the pipeline
-
-### Web UI
-
-```bash
-python ui.py
-# Opens at http://localhost:7860
-```
-
-**Starting a run:**
-1. Pick a channel profile (required when there are several), enter your topic and click **Run Pipeline**
-2. Answer 4-5 clarifying questions (each has a suggested default — click **↓ Use All Defaults** to fill them all at once)
-3. Pick one of 3 pitched approaches
-4. Pipeline runs, then pauses at the script approval gate before any paid generation
-5. Edit, revise with feedback, or approve — production starts on approval
-
-**Starting from a script you already wrote:**
-- Switch the input card to **Script**, paste it, and click **Produce From Script** — no research, writing, or approval gate, straight to TTS, image prompts, images, and voiceover
-- The run is named after the script's `TITLE:` line unless you fill in **Run Name**; a run folder of that name is overwritten
-
-**Image gallery:**
-- Browse all generated images at consistent size with scroll
-- Lightbox shows the matching script section for each image's source sentence; image prompt available as a collapsible dropdown
-- Mark images for regeneration while browsing, then regen all flagged at once
-
-**Metadata:**
-- The **Metadata** mode (or `POST /metadata/<slug>/generate` with a JSON body) generates titles, description, hashtags, and thumbnails; pick the chosen thumbnail from the UI
-
-### Telegram bot
-
-```bash
-./run_bot.sh
-```
-
-| Command | Description |
-|---------|-------------|
-| `/run <topic>` | Starts the planning flow — clarifying questions → approach pitches → pipeline |
-| `/script [run name]` | Produce from a script you already wrote — then paste it, or upload it as a `.txt`; the run name overrides its `TITLE:` line |
-| `/resume [slug]` | Resume an incomplete run |
-| `/runs` | List recent runs with status |
-| `/status` | Show status of the current/last run |
-| `/download [slug]` | Download run assets as a zip (split into parts under Telegram's 50 MB limit) |
-| `/metadata [slug] [regenerate]` | Generate or show SEO metadata + thumbnails |
-| `/profile` | List/switch channel profiles (pick one before /run or /script when several exist) |
-| `/stop` | Cancel the current run |
-| `/help` | Show command help (alias of `/start`) |
-
-**Bot planning flow:**
-1. `/run why do we dream` → bot sends clarifying questions with suggested defaults
-2. Reply with numbered answers, or send `default` to use all suggestions
-3. Bot pitches 3 approaches as inline buttons — tap to select
-4. Script is sent for review before production begins
-
-### CLI
-
-```bash
-python pipeline.py "why humans sleep"
-python pipeline.py run "script writing tips"      # a topic starting with a command word needs "run"
-```
-
-The CLI skips the clarifying questions and approach pitches. At the approval gate it prints the
-script and asks y/N — edit `script.txt` before answering to change it.
-
-Already have a script? Skip research, writing, and the approval gate — go straight to
-TTS, image prompts, images, and voiceover. The run folder is named after the script's
-`TITLE:` line unless `--topic` says otherwise.
-
-```bash
-python pipeline.py script my-script.txt           # --profile optional when only one profile exists
-python pipeline.py script - --profile <name>      # read the script from stdin
-python pipeline.py resume <run-slug>              # finish a stopped run (uses its profile.txt)
-```
-
-Both exit 0 only when the run completes (1 on an error, a rejected script or a cancel).
-
-### Metadata & Thumbnail
-
-After a run completes, generate SEO metadata and thumbnails:
-
-```bash
-python pipeline.py metadata <run-slug>               # generate 5 titles, description, hashtags, 3 thumbnails
-python pipeline.py metadata <run-slug> --regenerate  # overwrite existing metadata.json
-python pipeline.py metadata <run-slug> --pick-thumb N    # 1-based; pick which thumbnail is "chosen"
-python pipeline.py metadata <run-slug> --show         # print current metadata.json
-```
-
-Also available as `/metadata` in the Telegram bot, and as the **Metadata** mode in the web UI. All three use the profile the run was made with (its `profile.txt`); `--profile` overrides it on the CLI.
-
-### Flicker effect
-
-There are two independent flicker mechanisms:
-
-- **Built into the pipeline** — if a profile sets `image_gen.flicker.enabled: true`, `pipeline.py` generates horizontally/vertically stretched `NNNb.png`/`NNNc.png` variants alongside every image.
-- **`apply_flicker.py`** — a standalone script, unrelated to `pipeline.py`'s internal logic, that adds a flicker overlay track to whatever is *already open* in a live Palmier project by reusing `NNN`/`NNNb`/`NNNc` media already imported there:
-
-```bash
-python apply_flicker.py --interval 6           # add alternating b/c flicker layer
-python apply_flicker.py --interval 6 --dry-run # preview without writing
-python apply_flicker.py --undo                 # remove the flicker layer (uses .flicker_snapshot.json)
-```
-
-One layer at a time: apply refuses while a previous layer is recorded, and `--undo` only removes the recorded track if it still holds nothing but `NNNb`/`NNNc` clips.
-
----
-
-## Output structure
+## Project structure
 
 ```
-output/why-humans-sleep/
-├── profile.txt            # name of the profile used for this run
-├── research.txt           # verified facts and hook angles (or the agent's vidIQ findings)
-├── script.txt             # full script with timestamps and narration
-├── tts_script.txt         # clean narration with ElevenLabs audio tags
-├── image_prompts.txt      # NNN | [source narration sentence] | [full prompt] per image
-├── metadata.json          # titles, description, hashtags, thumbnail choice (after `metadata` step)
-├── thumbnail.png          # copy of the chosen thumbnail
-├── images/
-│   ├── 001.png
-│   ├── flicker/           # NNNb.png / NNNc.png stretch variants — only if profile.image_gen.flicker is enabled
-│   └── ...
-├── audio/
-│   └── voiceover.mp3
-└── thumbnails/
-    ├── thumb-01.png        # rendered thumbnail candidates (after `metadata` step)
-    ├── thumb-02.png
-    └── thumb-03.png
+├── pipeline.py           # orchestration: run / resume / status / regenerate, CLI
+├── writing.py            # Claude text calls: research, planning, script, revise, TTS, image prompts
+├── prompts.py            # prompt builders — pure functions, no API calls
+├── agents.py             # Claude Agent SDK runners on vidIQ's MCP server (script + vet)
+├── images.py             # Gemini image generation with anchor references
+├── voiceover.py          # ElevenLabs voiceover: chunking, MP3 splicing
+├── metadata.py           # titles, description, hashtags, thumbnails
+├── channel_profile.py    # Profile dataclass + YAML loader
+├── ui.py                 # Flask web UI + SSE endpoints
+├── templates/index.html  # web UI front end (vanilla JS)
+├── bot.py                # Telegram bot
+├── create_profile.py     # profile creator CLI → profile_creator/
+├── profiles/example/     # annotated example profile
+└── tests/                # pytest suite, runs in CI on Python 3.11 and 3.12
 ```
-
----
-
-## Channel profiles
-
-A profile is the complete identity spec for a channel — it drives the script tone, character descriptions, image style rules, voice settings, and the anchor reference images used for visual consistency across every video.
-
-```
-profiles/my-channel/
-├── profile.yaml          # channel identity, characters, script settings, voice, image style
-├── style-sheet.md        # human-readable style reference; the profile creator writes anchor prompts from it (the pipeline reads profile.yaml)
-└── anchors/
-    ├── manifest.yaml     # what each anchor slot is — read back to describe the references
-    ├── anchor-01.png     # first reference slot (layout depends on the roster size)
-    ├── anchor-02.png
-    └── ...               # additional style anchors (props, text labels, environments)
-```
-
-The anchor layout is not fixed: `build_anchor_plan` derives it from the roster, so a two-character
-profile starts with a cast sheet while a character-free one starts with an example scene.
-`manifest.yaml` records what each slot actually is. Without it the pipeline falls back to a generic
-"match these references" line rather than guessing.
-
-### What's inside profile.yaml
-
-```yaml
-channel:
-  name: "Deep Field"
-  niche: "astronomy and space science"
-  audience: "curious adults who want the real physics"
-  tone: "precise, unhurried, quietly astonished"
-  reference_channel: "PBS Space Time"
-  title_format: "What [Object] Actually [Does] — And Why It Matters"
-
-script:
-  target_mins: 12
-  wpm: 150
-  hook_duration_s: 30
-  section_count: 6
-  section_duration_s: "90-120"
-
-characters:
-  roster:
-    - name: "The Surveyor"
-      description: "Small figure in a rounded retro spacesuit, blank visor..."
-  behavior: |
-    The Surveyor observes and measures — it never emotes.
-
-image_style:
-  art_style_block: |
-    Two-color risograph screenprint. Exactly two inks: fluorescent orange...
-  style_constraints: >
-    Two inks only. Visible halftone dots. No black, no gradients, no photorealism.
-  scene_rules: |
-    ## Composition
-    - Every scene states its scale explicitly...
-```
-
-Every field flows directly into LLM prompts — the script writer, TTS enhancer, and image prompt builder all read from the active profile. The pipeline itself holds no style of its own:
-
-- `art_style_block` is appended to every image prompt
-- `style_constraints` is sent *ahead* of every image prompt and every anchor generation, as hard rules (falls back to `art_style_block` if omitted)
-- `scene_rules` is injected as the composition guide for the image prompt writer
-- `characters` is fully optional — omit the block for a style with no recurring characters, and every character-specific instruction drops out of the prompts automatically
-
----
-
-## Profile creator
-
-The profile creator is a Claude-powered interactive CLI that takes your channel concept and produces a complete, ready-to-use profile — including all anchor images — from a free-form brain dump.
-
-```bash
-python create_profile.py
-```
-
-### How it works
-
-**1. Brain dump**
-Paste a free-form description of your channel concept — niche, vibe, characters, visual style, reference channels. No specific format required.
-
-**2. Clarification loop**
-Claude asks follow-up questions to pin down anything ambiguous — character appearance details, art style specifics, audience tone. You answer conversationally until it has enough to work with.
-
-**3. Profile generation**
-Claude produces a `profile.yaml` (checked to load before any anchor is generated) and a `style-sheet.md` with detailed visual rules for the anchor prompts.
-
-**4. Anchor image generation (tiered)**
-The creator builds a structured anchor plan from your profile, then generates images in two passes:
-
-- **Verification tier** — character reference sheets (full body, multiple angles) generated first and shown to you before proceeding. These establish the "ground truth" appearance for every character.
-- **Full tier** — a prop sheet, a text-and-labels scene, a wide shot, a close-up (with characters), and indoor, outdoor and abstract background anchors, generated after you approve the characters.
-
-All anchors are generated with Gemini and saved to `anchors/`. The image pipeline sends them in label order, up to `image_style.max_anchors` (`anchor-00`, the seed, first if you gave one), and describes each from `manifest.yaml`, so the model has consistent visual context for every image in a run.
-
-**Seed image** — if you already have a visual reference, pass it as a seed:
-```bash
-python create_profile.py --seed path/to/reference.png
-```
-It's installed as `anchor-00` and sent before all other anchors, giving the model a concrete style target to match.
-
----
-
-### Revising a profile
-
-```bash
-python create_profile.py --revise my-channel
-# or interactively: python create_profile.py → choose [r]evise
-```
-
-Revision creates a versioned copy (`my-channel-v2`, then `-v3`, …) rather than overwriting the original or an earlier revision, so you can always roll back.
-
-The revise flow:
-1. Describe what you want to change
-2. Claude asks clarifying questions if needed
-3. Updated `profile.yaml` and `style-sheet.md` are written to the versioned folder
-4. **Smart anchor detection** — Claude says whether anchors need regenerating (a `REGENERATE_ANCHORS` line). If it doesn't say, anchors are regenerated when characters or core style fields changed, and otherwise you're asked whether to regenerate or copy the originals.
-
-Versioning follows `my-channel` → `my-channel-v2` → `my-channel-v3` automatically.
-
----
-
-## Image generation models
-
-Model IDs are not hardcoded — they come from the active profile's `image_gen` block. The
-regenerate selector in the UI picks between the two slots by alias:
-
-| Alias | Profile field | Notes |
-|-------|---------------|-------|
-| `nano-banana-2` | `image_gen.default_model` | Default — fast and cost-effective for full runs |
-| `3-pro` | `image_gen.pro_model` | Highest quality — used for thumbnails and for manual regeneration with `3-pro` (anchors use `default_model`) |
-
-`profiles/example` ships with `gemini-3.1-flash-image` and `gemini-3-pro-image` in those slots.
-
----
 
 ## Tests
 
@@ -367,35 +133,6 @@ regenerate selector in the UI picks between the two slots by alias:
 pip install pytest
 python -m pytest tests -q
 ```
-
----
-
-## Project structure
-
-```
-youtube-pipeline/
-├── pipeline.py           # run orchestration: run / resume / status / regenerate, run folders, key checks, CLI
-├── writing.py            # Claude text calls (research, planning, script, revise, TTS, image prompts)
-├── images.py             # Gemini image generation, anchor references, image files on disk
-├── voiceover.py          # ElevenLabs voiceover: chunking, MP3 splicing
-├── prompts.py            # LLM prompt builders — pure functions, no API calls
-├── agents.py             # Claude Agent SDK runners connected to vidIQ's MCP server (script + vet)
-├── metadata.py           # titles/description/hashtags/thumbnail generation, metadata.json
-├── channel_profile.py    # Profile dataclass + YAML loader (not profile.py: that shadows the stdlib)
-├── apply_flicker.py      # standalone CLI — adds/undoes a flicker overlay in a live Palmier project
-├── ui.py                 # Flask web UI + SSE streaming endpoints (gallery, metadata)
-├── bot.py                # Telegram bot interface
-├── create_profile.py     # interactive profile creator CLI
-├── preview_prompts.py    # script → tts_script.txt + image_prompts.txt, no images generated
-├── profile_creator/      # profile creation subpackage
-├── profiles/example/     # fully annotated profile schema — copy to get started
-├── templates/index.html  # web UI (vanilla JS, SSE, gallery, lightbox)
-├── tests/                # pytest suite (pipeline, UI, bot, CLI, metadata, profiles, profile creator, apply_flicker)
-├── docs/                 # design docs for past features (gitignored)
-└── output/               # generated assets per run (gitignored)
-```
-
----
 
 ## License
 

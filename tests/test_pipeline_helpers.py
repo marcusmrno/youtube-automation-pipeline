@@ -19,7 +19,7 @@ class _Profile:
         {"name": "White Cat", "description": "Small white fluffy cat, collar"},
     ]
     image_style = {"art_style_block": "flat 2D illustration, marker texture"}
-    image_gen = {"flicker": {"enabled": False}}
+    image_gen = {}
 
 
 P = _Profile()
