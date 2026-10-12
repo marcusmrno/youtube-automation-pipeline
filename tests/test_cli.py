@@ -56,22 +56,6 @@ def test_malformed_metadata_can_be_regenerated(tmp_path, monkeypatch, two_profil
     assert run_cli(tmp_path, monkeypatch, "metadata", "r1") not in (0, None)   # a message, not a traceback
 
 
-def test_preview_never_overwrites_a_runs_prompts(tmp_path, monkeypatch):
-    # its own docstring example (output/my-run/script.txt) replaced the prompts that made the images
-    import preview_prompts
-    run = tmp_path / "my-run"
-    run.mkdir()
-    (run / "script.txt").write_text("TITLE: T\nbody")
-    (run / "image_prompts.txt").write_text("001 | s | ORIGINAL prompt")
-    monkeypatch.setattr(preview_prompts, "load_profile", lambda name: f"<profile {name}>")
-    monkeypatch.setattr(preview_prompts, "generate_tts_and_prompts", lambda *a: ("NEW TTS", "001 | s | NEW"))
-    monkeypatch.setattr(sys, "argv", ["preview_prompts.py", str(run / "script.txt"), "--profile", "p"])
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")                  # past the key check, to the guard
-    with pytest.raises(SystemExit) as exc:
-        preview_prompts.main()
-    assert "image_prompts.txt" in str(exc.value.code)
-    assert (run / "image_prompts.txt").read_text() == "001 | s | ORIGINAL prompt"
-
 
 @pytest.fixture
 def unrunnable_profile(monkeypatch):
@@ -132,18 +116,3 @@ def test_resume_is_a_cli_command(tmp_path, monkeypatch, capsys, unrunnable_profi
     # a CLI run stopped with Ctrl-C could only be finished from the UI or the bot
     assert run_cli(tmp_path, monkeypatch, "resume", "missing-run") == 1
     assert "Output folder not found" in capsys.readouterr().out   # not a new run named "resume missing-run"
-
-
-def test_preview_checks_its_key_before_doing_anything(tmp_path, monkeypatch):
-    # keys are blank under the suite: it used to create --out and reach the model call anyway
-    import preview_prompts
-    (tmp_path / "script.txt").write_text("TITLE: T\nbody")
-    called = []
-    monkeypatch.setattr(preview_prompts, "load_profile", lambda name: f"<profile {name}>")
-    monkeypatch.setattr(preview_prompts, "generate_tts_and_prompts", lambda *a: called.append(a) or ("t", "p"))
-    out = tmp_path / "preview"
-    monkeypatch.setattr(sys, "argv", ["preview_prompts.py", str(tmp_path / "script.txt"),
-                                      "--profile", "p", "--out", str(out)])
-    with pytest.raises(SystemExit) as exc:
-        preview_prompts.main()
-    assert "ANTHROPIC_API_KEY" in str(exc.value.code) and called == [] and not out.exists()

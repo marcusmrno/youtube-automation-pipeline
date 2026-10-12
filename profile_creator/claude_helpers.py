@@ -84,9 +84,6 @@ voice:
 image_gen:
   default_model: "gemini-3.1-flash-image"
   pro_model: "gemini-3-pro-image"
-  flicker:
-    enabled: false    # set true to generate b/c flicker frames per image (0.4% stretch)
-    magnitude: 0.004
 ```
 
 ## The two most important fields

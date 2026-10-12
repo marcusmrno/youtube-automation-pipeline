@@ -44,34 +44,6 @@ def standardize_image(path: Path, size: tuple[int, int] = (1920, 1080)) -> None:
     ImageOps.fit(Image.open(path).convert("RGB"), size, Image.LANCZOS).save(path)
 
 
-def _stretch_horizontal(img: Image.Image, pct: float) -> Image.Image:
-    w, h = img.size
-    new_w = int(w * (1 + pct))
-    stretched = img.resize((new_w, h), Image.LANCZOS)
-    left = (new_w - w) // 2
-    return stretched.crop((left, 0, left + w, h))
-
-
-def _stretch_vertical(img: Image.Image, pct: float) -> Image.Image:
-    w, h = img.size
-    new_h = int(h * (1 + pct))
-    stretched = img.resize((w, new_h), Image.LANCZOS)
-    top = (new_h - h) // 2
-    return stretched.crop((0, top, w, top + h))
-
-
-def generate_flicker_frames(source_path: Path, out_dir: Path, num: str, magnitude: float, log_fn) -> None:
-    """Generate b (horiz stretch) and c (vert stretch) flicker frames in out_dir/flicker/."""
-    flicker_dir = out_dir / "flicker"
-    flicker_dir.mkdir(exist_ok=True)
-    img = Image.open(source_path).convert("RGB")
-    b_path = flicker_dir / f"{num}b.png"
-    c_path = flicker_dir / f"{num}c.png"
-    _stretch_horizontal(img, magnitude).save(b_path)
-    _stretch_vertical(img, magnitude).save(c_path)
-    log_fn(f"  🎞️  Flicker frames saved: flicker/{b_path.name}, flicker/{c_path.name}")
-
-
 def find_image(img_dir: Path, num: str) -> Path | None:
     for ext in (".png", ".jpg", ".jpeg"):
         p = img_dir / f"{num}{ext}"
@@ -206,12 +178,7 @@ def generate_all_images(prompts: list[dict], out_dir: Path,
         if not ok:
             log_fn(f"  ❌ Image {num} failed after 3 attempts — flagged")
             return num, None
-        found = find_image(out_dir / "images", num) or img_path
-        flicker_cfg = profile.image_gen.get("flicker", {})
-        if flicker_cfg.get("enabled"):
-            magnitude = flicker_cfg.get("magnitude", 0.004)
-            generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
-        return num, found
+        return num, find_image(out_dir / "images", num) or img_path
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {}

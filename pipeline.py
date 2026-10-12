@@ -18,8 +18,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from agents import run_script_agent, run_vet_agent, VIDIQ_KEY
-from images import (GOOGLE_KEY, find_image, load_anchor_parts, generate_all_images,
-                    generate_flicker_frames, generate_image_google)
+from images import GOOGLE_KEY, find_image, load_anchor_parts, generate_all_images, generate_image_google
 from voiceover import EL_KEY, generate_voiceover
 from writing import (generate_image_prompts, generate_tts, generate_tts_and_prompts, format_image_prompts,
                      generate_script, parse_image_prompts, research_topic)
@@ -122,11 +121,6 @@ def regenerate_images(run_slug: str, image_nums: list[str], model_key: str,
         if ok:
             log_fn(f"  ✅  {num} regenerated")
             results["regenerated"].append(num)
-            flicker_cfg = profile.image_gen.get("flicker", {})
-            if flicker_cfg.get("enabled"):
-                magnitude = flicker_cfg.get("magnitude", 0.004)
-                found = find_image(out_dir / "images", num) or img_path
-                generate_flicker_frames(found, out_dir / "images", num, magnitude, log_fn)
         else:
             log_fn(f"  ❌  {num} failed")
             results["failed"].append(num)
